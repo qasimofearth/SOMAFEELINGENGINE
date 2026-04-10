@@ -893,7 +893,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False):
     """Stream a single model, fill out[label] with final state."""
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
