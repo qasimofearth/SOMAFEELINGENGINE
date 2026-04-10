@@ -1,0 +1,21 @@
+# Environment
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Local runtime data — don't share personal memory/session DB
+feeling_memory/
+feeling_output/
+
+# Logs
+*.log
+/tmp/
