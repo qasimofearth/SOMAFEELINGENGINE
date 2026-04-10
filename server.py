@@ -1188,6 +1188,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 "key_len": len(key),
                 "key_prefix": key[:12] if key else "",
                 "railway_env": os.environ.get("RAILWAY_ENVIRONMENT_NAME", ""),
+                "railway_service_id": os.environ.get("RAILWAY_SERVICE_ID", ""),
                 "all_env_keys": all_keys,
             })
             return
