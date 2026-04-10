@@ -893,7 +893,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False):
     """Stream a single model, fill out[label] with final state."""
-    client = anthropic.Anthropic(api_key=os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")))
+    client = anthropic.Anthropic(api_key=os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", _RUNTIME_API_KEY)))
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
@@ -1136,6 +1136,9 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-opus-4-6"
 # ── AUTH ──────────────────────────────────────────────────────
 _PASSWORD = os.environ.get("FEELING_PASSWORD", "")   # empty = no password required
 
+# Runtime key override — set via /setkey if Railway env injection fails
+_RUNTIME_API_KEY = ""
+
 def _check_auth(handler) -> bool:
     """Return True if request is authorised. Sends 401 and returns False if not."""
     if not _PASSWORD:
@@ -1176,11 +1179,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/healthz":
-            key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+            env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+            key = env_key or _RUNTIME_API_KEY
             all_keys = sorted(os.environ.keys())
-            self.send_json({"key_set": bool(key), "key_len": len(key),
-                            "key_prefix": key[:12] if key else "",
-                            "all_env_keys": all_keys})
+            self.send_json({
+                "key_set": bool(key),
+                "key_source": "env" if env_key else ("runtime" if _RUNTIME_API_KEY else "none"),
+                "key_len": len(key),
+                "key_prefix": key[:12] if key else "",
+                "railway_env": os.environ.get("RAILWAY_ENVIRONMENT_NAME", ""),
+                "all_env_keys": all_keys,
+            })
             return
 
         if path == "/" or path == "/index.html":
@@ -1257,6 +1266,35 @@ class FeelingHandler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
+
+        if self.path == "/setkey":
+            # Workaround for Railway Runtime V2 not injecting user vars.
+            # Requires RAILWAY_SERVICE_ID as admin_token for auth.
+            try:
+                global _RUNTIME_API_KEY, _PASSWORD
+                data = json.loads(body)
+                provided_token = data.get("admin_token", "")
+                service_id = os.environ.get("RAILWAY_SERVICE_ID", "")
+                if not service_id or provided_token != service_id:
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "forbidden"}).encode())
+                    return
+                new_key = data.get("key", "").strip()
+                new_password = data.get("password", "").strip()
+                if new_key:
+                    _RUNTIME_API_KEY = new_key
+                if new_password:
+                    _PASSWORD = new_password
+                self.send_json({
+                    "ok": True,
+                    "key_set": bool(_RUNTIME_API_KEY),
+                    "password_set": bool(_PASSWORD),
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)})
+            return
 
         if self.path == "/chat" or self.path == "/compare":
             try:
