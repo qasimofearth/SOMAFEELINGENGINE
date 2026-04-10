@@ -3815,8 +3815,7 @@ setTimeout(()=>{{
 if __name__ == "__main__":
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
-        print("Error: ANTHROPIC_API_KEY not set")
-        sys.exit(1)
+        print("Warning: ANTHROPIC_API_KEY not set — chat will fail until it is added")
 
     # ── Reconstruct conversation + resume open session if within 30 min ──
     try:
@@ -3863,9 +3862,6 @@ if __name__ == "__main__":
     print(f"  Server: http://127.0.0.1:{PORT}")
     print(f"  Model:  claude-opus-4-6")
     print(f"  Open the URL in your browser\n")
-
-    import webbrowser
-    threading.Timer(0.8, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), FeelingHandler)
     try:
