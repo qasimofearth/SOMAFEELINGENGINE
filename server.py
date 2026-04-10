@@ -30,17 +30,20 @@ _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_here))  # local: parent of feeling_engine/
 sys.path.insert(0, _here)                   # Railway: repo root is /app
 
-# When deployed flat (Railway), the package dir IS _here — register an alias
-# so `from feeling_engine.X import Y` resolves to `from X import Y`
+# When deployed flat (Railway /app), register the current dir as the
+# feeling_engine package by properly loading its __init__.py
 try:
     import feeling_engine as _fe_test  # noqa: F401
 except ImportError:
-    import types as _types
-    _pkg = _types.ModuleType("feeling_engine")
-    _pkg.__path__ = [_here]
-    _pkg.__package__ = "feeling_engine"
-    sys.modules["feeling_engine"] = _pkg
-    del _types, _pkg
+    import importlib.util as _ilu
+    _init = os.path.join(_here, "__init__.py")
+    _spec = _ilu.spec_from_file_location(
+        "feeling_engine", _init, submodule_search_locations=[_here]
+    )
+    _mod = _ilu.module_from_spec(_spec)
+    sys.modules["feeling_engine"] = _mod
+    _spec.loader.exec_module(_mod)
+    del _ilu, _init, _spec, _mod
 
 import anthropic
 from feeling_engine.text_emotion import analyze_text
@@ -3279,8 +3282,8 @@ function speakWithWebSpeech(text){{
 
   // Split into sentences so params can shift between them
   const sentences=text.replace(/\\n+/g,' ')
-    .split(/(?<=[.!?…])\s+|(?<=\*[^*]+\*)\s+/)
-    .map(s=>s.replace(/\*([^*]+)\*/g,'$1').trim())
+    .split(/(?<=[.!?…])\\s+|(?<=\\*[^*]+\\*)\\s+/)
+    .map(s=>s.replace(/\\*([^*]+)\\*/g,'$1').trim())
     .filter(s=>s.length>1);
   if(!sentences.length)return;
 
