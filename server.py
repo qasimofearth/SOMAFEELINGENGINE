@@ -893,7 +893,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False):
     """Stream a single model, fill out[label] with final state."""
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    client = anthropic.Anthropic(api_key=os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")))
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
@@ -1176,7 +1176,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/healthz":
-            key = os.environ.get("ANTHROPIC_API_KEY", "")
+            key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
             env_keys = [k for k in os.environ if "ANTHROP" in k.upper() or "API" in k.upper()]
             self.send_json({"key_set": bool(key), "key_len": len(key),
                             "key_prefix": key[:12] if key else "",
@@ -3821,7 +3821,7 @@ setTimeout(()=>{{
 # ── MAIN ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
     if not key:
         print("Warning: ANTHROPIC_API_KEY not set — chat will fail until it is added")
 
