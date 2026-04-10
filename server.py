@@ -1177,10 +1177,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
 
         if path == "/healthz":
             key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
-            env_keys = [k for k in os.environ if "ANTHROP" in k.upper() or "API" in k.upper()]
+            all_keys = sorted(os.environ.keys())
             self.send_json({"key_set": bool(key), "key_len": len(key),
                             "key_prefix": key[:12] if key else "",
-                            "related_env_keys": env_keys})
+                            "all_env_keys": all_keys})
             return
 
         if path == "/" or path == "/index.html":
