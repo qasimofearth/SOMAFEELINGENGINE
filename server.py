@@ -26,7 +26,21 @@ import queue
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_here))  # local: parent of feeling_engine/
+sys.path.insert(0, _here)                   # Railway: repo root is /app
+
+# When deployed flat (Railway), the package dir IS _here — register an alias
+# so `from feeling_engine.X import Y` resolves to `from X import Y`
+try:
+    import feeling_engine as _fe_test  # noqa: F401
+except ImportError:
+    import types as _types
+    _pkg = _types.ModuleType("feeling_engine")
+    _pkg.__path__ = [_here]
+    _pkg.__package__ = "feeling_engine"
+    sys.modules["feeling_engine"] = _pkg
+    del _types, _pkg
 
 import anthropic
 from feeling_engine.text_emotion import analyze_text
