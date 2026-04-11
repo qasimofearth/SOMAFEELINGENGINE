@@ -1437,7 +1437,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             })
             payload = json.dumps({
                 "text": text,
-                "model_id": "eleven_turbo_v2_5",
+                "model_id": "eleven_flash_v2_5",
                 "voice_settings": voice_settings,
             }).encode()
             req = urllib.request.Request(
@@ -2661,7 +2661,7 @@ function apply(state){{
 const es=new EventSource('/events');
 const sb=document.getElementById('status-bar');
 es.addEventListener('ping',()=>{{sb.textContent='connected · wilson-cowan online · 90.3B neurons';}});
-es.addEventListener('stream_start',()=>{{streaming=true;sb.textContent='claude processing...';curAiMsg=addMsg('ai','');}});
+es.addEventListener('stream_start',()=>{{streaming=true;sb.textContent='claude processing...';curAiMsg=addMsg('ai','');ttsElUsedThisResponse=false;ttsBuffer='';}});
 es.addEventListener('text_chunk',e=>{{
   const d=JSON.parse(e.data);
   if(curAiMsg)curAiMsg.textContent+=d.text;
@@ -3256,6 +3256,7 @@ let ttsBuffer='';           // accumulates text chunks during streaming
 let ttsAudioQueue=[];       // queued decoded audio items to play
 let ttsQueueRunning=false;  // true while queue is playing
 let ttsFetchCount=0;        // in-flight ElevenLabs fetches
+let ttsElUsedThisResponse=false; // ElevenLabs used for first sentence only
 
 // Pick best available Web Speech voice on load
 let webSpeechVoice=null;
@@ -3518,6 +3519,14 @@ function _playTTSQueue(){{
 
 async function _fetchAndQueueSentence(sentence){{
   if(!sentence.trim()||!voiceEnabled){{ttsFetchCount--;_onQueueEmpty();return;}}
+  // ElevenLabs for first sentence only — Web Speech for the rest (saves tokens)
+  if(ttsElUsedThisResponse){{
+    ttsAudioQueue.push({{type:'ws',text:sentence}});
+    ttsFetchCount--;
+    if(!ttsQueueRunning)_playTTSQueue();
+    return;
+  }}
+  ttsElUsedThisResponse=true;
   try{{
     const res=await fetch('/tts',{{
       method:'POST',
