@@ -927,7 +927,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False):
     """Stream a single model, fill out[label] with final state."""
-    client = anthropic.Anthropic(api_key=os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", _RUNTIME_API_KEY)))
+    client = _get_anthropic_client()
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
@@ -946,7 +946,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     body_notable = _body_has_notable_state()
     body_ctx = build_body_context() if body_notable else ""
 
-    temporal_ctx = build_temporal_context()
+    temporal_ctx = build_temporal_context() if len(get_messages()) > 2 else ""
     vision_ctx = VISION_OPEN_PROMPT if eyes_open else VISION_CLOSED_PROMPT
     system = (
         FEELING_SYSTEM_PROMPT
@@ -1179,6 +1179,18 @@ _PASSWORD = os.environ.get("FEELING_PASSWORD", "")   # empty = no password requi
 
 # Runtime key override — set via /setkey if Railway env injection fails
 _RUNTIME_API_KEY = ""
+
+# Cached Anthropic client — rebuilt only when the key changes
+_anthropic_client = None
+_anthropic_client_key = None
+
+def _get_anthropic_client():
+    global _anthropic_client, _anthropic_client_key
+    key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", _RUNTIME_API_KEY))
+    if _anthropic_client is None or key != _anthropic_client_key:
+        _anthropic_client = anthropic.Anthropic(api_key=key)
+        _anthropic_client_key = key
+    return _anthropic_client
 
 _KEYS_FILE = "/tmp/fe_keys.json"
 
