@@ -21,7 +21,11 @@ from dataclasses import dataclass, asdict, field
 from collections import Counter
 
 
-MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "feeling_memory")
+# Use Railway persistent volume at /data if available, else local fallback
+if os.path.isdir("/data"):
+    MEMORY_DIR = "/data/feeling_memory"
+else:
+    MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "feeling_memory")
 
 
 def _ensure_dir():

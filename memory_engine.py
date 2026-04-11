@@ -25,9 +25,14 @@ import time
 import threading
 from typing import Optional
 
-DB_PATH_DEFAULT = os.path.join(
-    os.path.dirname(__file__), "feeling_memory", "memory_engine.db"
-)
+# Use Railway persistent volume at /data if available, else local fallback
+if os.path.isdir("/data"):
+    _db_dir = "/data"
+else:
+    _db_dir = os.path.join(os.path.dirname(__file__), "feeling_memory")
+    os.makedirs(_db_dir, exist_ok=True)
+
+DB_PATH_DEFAULT = os.path.join(_db_dir, "memory_engine.db")
 
 _STOPWORDS = {
     'that', 'this', 'with', 'have', 'from', 'they', 'will', 'been', 'what',
