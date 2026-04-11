@@ -1270,17 +1270,21 @@ class FeelingHandler(BaseHTTPRequestHandler):
 
         if self.path == "/setkey":
             # Workaround for Railway Runtime V2 not injecting user vars.
-            # Requires RAILWAY_SERVICE_ID as admin_token for auth.
+            # Auth: admin_token must match RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID.
             try:
                 global _RUNTIME_API_KEY, _PASSWORD
                 data = json.loads(body)
                 provided_token = data.get("admin_token", "")
-                service_id = os.environ.get("RAILWAY_SERVICE_ID", "")
-                if not service_id or provided_token != service_id:
+                valid_tokens = {
+                    os.environ.get("RAILWAY_SERVICE_ID", ""),
+                    os.environ.get("RAILWAY_PROJECT_ID", ""),
+                }
+                valid_tokens.discard("")
+                if not valid_tokens or provided_token not in valid_tokens:
                     self.send_response(403)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
-                    self.wfile.write(json.dumps({"error": "forbidden"}).encode())
+                    self.wfile.write(json.dumps({"error": "forbidden — use RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID as admin_token"}).encode())
                     return
                 new_key = data.get("key", "").strip()
                 new_password = data.get("password", "").strip()
