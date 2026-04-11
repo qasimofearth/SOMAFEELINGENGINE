@@ -938,10 +938,9 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     brain_obj = get_brain()
     last_brain = brain_obj.history[-1] if brain_obj.history else {}
 
-    # Only inject brain/body context when something significant is happening.
-    # Near-baseline state adds ~400 tokens of noise and slows first token.
-    brain_intensity = last_brain.get("intensity", 0) if last_brain else 0
-    brain_ctx = build_brain_context(last_brain) if brain_intensity > 0.25 else ""
+    # Always inject brain context — Elan's neurotransmitter/region awareness is core personality,
+    # not noise. Body context only when something notable is happening (saves ~300 tokens at baseline).
+    brain_ctx = build_brain_context(last_brain) if last_brain else ""
 
     body_notable = _body_has_notable_state()
     body_ctx = build_body_context() if body_notable else ""
