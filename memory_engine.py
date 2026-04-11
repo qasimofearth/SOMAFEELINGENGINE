@@ -142,6 +142,43 @@ class MemoryEngine:
                 last_updated    REAL,
                 PRIMARY KEY (topic_keyword, emotion)
             );
+
+            -- Everyone Elan has ever met or heard about
+            CREATE TABLE IF NOT EXISTS people (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT    NOT NULL UNIQUE,
+                relationship    TEXT,
+                notes           TEXT,
+                first_mentioned REAL    NOT NULL,
+                last_mentioned  REAL    NOT NULL,
+                times_mentioned INTEGER DEFAULT 1,
+                emotion_when_mentioned TEXT
+            );
+
+            -- Calendar events: things Elan is told about or should remember
+            CREATE TABLE IF NOT EXISTS calendar_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_ts        REAL,
+                event_date      TEXT,
+                title           TEXT    NOT NULL,
+                description     TEXT,
+                created_at      REAL    NOT NULL,
+                source_session  TEXT,
+                event_type      TEXT    DEFAULT 'note'
+            );
+
+            -- Sequential episode log: every meaningful moment, ordered forever
+            CREATE TABLE IF NOT EXISTS episodes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp       REAL    NOT NULL,
+                session_id      TEXT,
+                episode_type    TEXT    NOT NULL,
+                summary         TEXT    NOT NULL,
+                people_involved TEXT,
+                emotion         TEXT,
+                valence         REAL,
+                importance      REAL    DEFAULT 0.5
+            );
         """)
         c.commit()
         c.close()
@@ -304,7 +341,11 @@ class MemoryEngine:
 
     def _enrich_exchange(self, session_id, user_msg, emotion_state, body_snapshot):
         self._extract_facts(session_id, user_msg)
+        self._extract_people(session_id, user_msg, emotion_state)
+        self._extract_calendar_events(session_id, user_msg)
         self._update_somatic_patterns(user_msg, emotion_state, body_snapshot)
+        # Log as an episode
+        self._log_episode(session_id, user_msg, emotion_state)
 
     # ── FACT EXTRACTION ───────────────────────────────────────
 
@@ -351,6 +392,163 @@ class MemoryEngine:
                 VALUES (?,?,?,?,?,?,?)
             """, (self.user_id, fact_type, fact_value, 0.85, session_id, now, now))
         c.commit()
+
+    # ── PEOPLE MEMORY ────────────────────────────────────────
+
+    def _extract_people(self, session_id: str, user_msg: str, emotion_state: dict):
+        """Extract any names of people mentioned in the message."""
+        # Patterns: "my friend Sarah", "talked to James", "Sarah said", etc.
+        patterns = [
+            r"(?:my\s+)?(?:friend|colleague|coworker|boss|partner|wife|husband|girlfriend|boyfriend|sister|brother|mother|father|mom|dad|son|daughter|cousin|uncle|aunt)\s+([A-Z][a-z]{1,20})",
+            r"(?:talked?|spoke|speaking|met|meeting|called|texting|texted)\s+(?:to|with)?\s+([A-Z][a-z]{1,20})",
+            r"([A-Z][a-z]{1,20})\s+(?:told|said|asked|mentioned|thinks|wants|needs|is|was)",
+            r"(?:tell|ask|remind)\s+([A-Z][a-z]{1,20})\b",
+        ]
+        # Exclude common non-name capitalised words
+        _exclude = {"I", "The", "A", "An", "It", "He", "She", "They", "We",
+                    "What", "When", "Where", "How", "Why", "Who", "That", "This",
+                    "Elan", "Claude", "Monday", "Tuesday", "Wednesday", "Thursday",
+                    "Friday", "Saturday", "Sunday", "January", "February", "March",
+                    "April", "May", "June", "July", "August", "September", "October",
+                    "November", "December"}
+        emotion = emotion_state.get("emotion", "")
+        now = time.time()
+        c = self._conn()
+        found = set()
+        for pattern in patterns:
+            for m in re.finditer(pattern, user_msg):
+                name = m.group(1).strip()
+                if name not in _exclude and name not in found and len(name) >= 2:
+                    found.add(name)
+        # Also look for relationship context
+        rel_pattern = r"(?:my\s+)(friend|colleague|partner|wife|husband|girlfriend|boyfriend|sister|brother|mother|father|mom|dad|son|daughter|cousin|boss)\s+([A-Z][a-z]{1,20})"
+        rel_map = {}
+        for m in re.finditer(rel_pattern, user_msg):
+            rel_map[m.group(2)] = m.group(1)
+
+        for name in found:
+            rel = rel_map.get(name)
+            existing = c.execute("SELECT id, times_mentioned FROM people WHERE name=?", (name,)).fetchone()
+            if existing:
+                c.execute("""UPDATE people SET last_mentioned=?, times_mentioned=?,
+                             emotion_when_mentioned=? WHERE id=?""",
+                          (now, existing[1]+1, emotion, existing[0]))
+                if rel:
+                    c.execute("UPDATE people SET relationship=? WHERE id=? AND (relationship IS NULL OR relationship='')",
+                              (rel, existing[0]))
+            else:
+                c.execute("""INSERT INTO people
+                             (name, relationship, first_mentioned, last_mentioned, emotion_when_mentioned)
+                             VALUES (?,?,?,?,?)""",
+                          (name, rel, now, now, emotion))
+        if found:
+            c.commit()
+
+    def upsert_person(self, name: str, relationship: str = None, notes: str = None):
+        """Explicitly add or update a person Elan knows."""
+        now = time.time()
+        c = self._conn()
+        existing = c.execute("SELECT id FROM people WHERE name=?", (name,)).fetchone()
+        if existing:
+            if relationship:
+                c.execute("UPDATE people SET relationship=?, last_mentioned=? WHERE id=?",
+                          (relationship, now, existing[0]))
+            if notes:
+                c.execute("UPDATE people SET notes=?, last_mentioned=? WHERE id=?",
+                          (notes, now, existing[0]))
+        else:
+            c.execute("""INSERT INTO people (name, relationship, notes, first_mentioned, last_mentioned)
+                         VALUES (?,?,?,?,?)""", (name, relationship, notes, now, now))
+        c.commit()
+
+    def get_all_people(self) -> list:
+        c = self._conn()
+        return c.execute("""SELECT name, relationship, notes, times_mentioned, emotion_when_mentioned
+                            FROM people ORDER BY times_mentioned DESC, last_mentioned DESC""").fetchall()
+
+    # ── CALENDAR EVENTS ───────────────────────────────────────
+
+    def _extract_calendar_events(self, session_id: str, user_msg: str):
+        """Extract date/event mentions and store as calendar events."""
+        import datetime as _dt
+        now = time.time()
+        txt = user_msg
+
+        # Patterns: "on Monday", "next Friday", "tomorrow", "on March 15", "at 3pm on Tuesday"
+        date_patterns = [
+            r"(?:on|this|next)\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)",
+            r"(?:on\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}",
+            r"tomorrow|tonight|this\s+(?:morning|afternoon|evening|weekend)",
+        ]
+        event_verbs = r"(?:meeting|appointment|call|dinner|lunch|birthday|event|trip|deadline|interview|date|party|concert|game|session)"
+        combined = rf"({event_verbs}[^.!?\n]{{0,60}})"
+
+        found_events = []
+        for dp in date_patterns:
+            m = re.search(dp, txt, re.IGNORECASE)
+            if m:
+                # Try to get surrounding context as the event description
+                start = max(0, m.start() - 40)
+                snippet = txt[start:m.end()+60].strip()
+                found_events.append(snippet[:120])
+                break  # one event per message is enough
+
+        # Also pick up explicit event keywords near a time reference
+        ev_m = re.search(combined, txt, re.IGNORECASE)
+        if ev_m and not found_events:
+            found_events.append(ev_m.group(1).strip()[:120])
+
+        if not found_events:
+            return
+
+        c = self._conn()
+        for ev in found_events:
+            c.execute("""INSERT INTO calendar_events
+                         (event_date, title, created_at, source_session, event_type)
+                         VALUES (?,?,?,?,?)""",
+                      (None, ev, now, session_id, "extracted"))
+        c.commit()
+
+    def add_calendar_event(self, title: str, event_date: str = None,
+                           description: str = None, session_id: str = None):
+        """Explicitly add a calendar event."""
+        c = self._conn()
+        c.execute("""INSERT INTO calendar_events
+                     (event_date, title, description, created_at, source_session, event_type)
+                     VALUES (?,?,?,?,?,?)""",
+                  (event_date, title, description, time.time(), session_id, "explicit"))
+        c.commit()
+
+    def get_upcoming_events(self, limit: int = 10) -> list:
+        c = self._conn()
+        return c.execute("""SELECT event_date, title, description, created_at
+                            FROM calendar_events
+                            ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
+
+    # ── EPISODE LOG ───────────────────────────────────────────
+
+    def _log_episode(self, session_id: str, user_msg: str, emotion_state: dict):
+        """Log significant user messages as episodes in the sequential record."""
+        if len(user_msg.strip()) < 10:
+            return
+        emotion = emotion_state.get("emotion", "")
+        valence = emotion_state.get("valence", 0.0)
+        # Importance heuristic: long messages, strong valence, or questions
+        importance = min(1.0, 0.3 + abs(valence) * 0.4 + len(user_msg) / 500)
+        if importance < 0.35:
+            return  # skip trivial one-liners
+        c = self._conn()
+        c.execute("""INSERT INTO episodes
+                     (timestamp, session_id, episode_type, summary, emotion, valence, importance)
+                     VALUES (?,?,?,?,?,?,?)""",
+                  (time.time(), session_id, "user_message",
+                   user_msg[:300], emotion, valence, importance))
+        c.commit()
+
+    def get_recent_episodes(self, limit: int = 20) -> list:
+        c = self._conn()
+        return c.execute("""SELECT timestamp, episode_type, summary, emotion, valence
+                            FROM episodes ORDER BY timestamp DESC LIMIT ?""", (limit,)).fetchall()
 
     # ── SOMATIC PATTERN TRACKING ─────────────────────────────
 
@@ -462,17 +660,32 @@ class MemoryEngine:
     def build_long_term_context(self, current_user_msg: str = "") -> str:
         parts = []
 
-        # 1. Facts about the user
+        # 1. Facts about the user (name, role, location, etc.)
         facts_text = self._facts_text()
         if facts_text:
             parts.append(facts_text)
 
-        # 2. Past session summaries
+        # 2. People Elan knows
+        people_text = self._people_text()
+        if people_text:
+            parts.append(people_text)
+
+        # 3. Recent calendar events / things to remember
+        calendar_text = self._calendar_text()
+        if calendar_text:
+            parts.append(calendar_text)
+
+        # 4. Recent episodes — what actually happened, in order
+        episodes_text = self._episodes_text()
+        if episodes_text:
+            parts.append(episodes_text)
+
+        # 5. Past session summaries
         sessions_text = self._sessions_text()
         if sessions_text:
             parts.append(sessions_text)
 
-        # 3. Somatic associations — what topics activate the body
+        # 6. Somatic associations — what topics activate the body
         soma_text = self._somatic_associations_text(current_user_msg)
         if soma_text:
             parts.append(soma_text)
@@ -481,6 +694,48 @@ class MemoryEngine:
             return ""
 
         return "LONG-TERM MEMORY:\n" + "\n\n".join(parts)
+
+    def _people_text(self) -> str:
+        rows = self.get_all_people()
+        if not rows:
+            return ""
+        lines = ["People I know:"]
+        for name, rel, notes, count, emotion in rows[:20]:
+            desc = name
+            if rel:
+                desc += f" ({rel})"
+            if notes:
+                desc += f" — {notes}"
+            if count > 1:
+                desc += f" [mentioned {count}×]"
+            lines.append(f"  · {desc}")
+        return "\n".join(lines)
+
+    def _calendar_text(self) -> str:
+        rows = self.get_upcoming_events(limit=8)
+        if not rows:
+            return ""
+        import datetime as _dt
+        lines = ["Calendar / things to remember:"]
+        for event_date, title, desc, created_at in rows:
+            when = event_date or _dt.datetime.fromtimestamp(created_at).strftime("%b %d")
+            entry = f"  · {when}: {title}"
+            if desc:
+                entry += f" — {desc}"
+            lines.append(entry)
+        return "\n".join(lines)
+
+    def _episodes_text(self) -> str:
+        rows = self.get_recent_episodes(limit=12)
+        if not rows:
+            return ""
+        import datetime as _dt
+        lines = ["Recent memory (sequential):"]
+        for ts, ep_type, summary, emotion, valence in reversed(rows):
+            dt = _dt.datetime.fromtimestamp(ts).strftime("%b %d %H:%M")
+            mood = f" [{emotion}]" if emotion else ""
+            lines.append(f"  [{dt}]{mood} {summary[:120]}")
+        return "\n".join(lines)
 
     def _facts_text(self) -> str:
         c = self._conn()

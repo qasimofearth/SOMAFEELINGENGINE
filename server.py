@@ -1398,6 +1398,28 @@ class FeelingHandler(BaseHTTPRequestHandler):
                     self.send_json({"status": "empty"})
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)})
+        elif self.path == "/remember":
+            # Explicitly store a person or calendar event into persistent memory
+            try:
+                data = json.loads(body)
+                eng = get_memory_engine()
+                if data.get("person"):
+                    eng.upsert_person(
+                        name=data["person"],
+                        relationship=data.get("relationship"),
+                        notes=data.get("notes"),
+                    )
+                if data.get("event"):
+                    eng.add_calendar_event(
+                        title=data["event"],
+                        event_date=data.get("date"),
+                        description=data.get("description"),
+                    )
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"error": str(e)})
+            return
+
         elif self.path == "/vision_tick":
             # Continuous passive vision — updates body state from webcam metrics
             try:
