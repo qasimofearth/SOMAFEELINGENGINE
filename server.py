@@ -1391,12 +1391,15 @@ class FeelingHandler(BaseHTTPRequestHandler):
             text = data.get("text", "").strip()[:3000]
             if not text:
                 self.send_error(400); return
-            # Allow per-request voice override (from UI picker)
+            # Allow per-request voice and settings override (from UI)
             voice_id = data.get("voice_id", voice_id)
+            voice_settings = data.get("voice_settings", {
+                "stability": 0.45, "similarity_boost": 0.78, "style": 0.05
+            })
             payload = json.dumps({
                 "text": text,
                 "model_id": "eleven_turbo_v2_5",
-                "voice_settings": {"stability": 0.45, "similarity_boost": 0.78, "style": 0.05},
+                "voice_settings": voice_settings,
             }).encode()
             req = urllib.request.Request(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
@@ -2620,7 +2623,13 @@ const es=new EventSource('/events');
 const sb=document.getElementById('status-bar');
 es.addEventListener('ping',()=>{{sb.textContent='connected · wilson-cowan online · 90.3B neurons';}});
 es.addEventListener('stream_start',()=>{{streaming=true;sb.textContent='claude processing...';curAiMsg=addMsg('ai','');}});
-es.addEventListener('text_chunk',e=>{{const d=JSON.parse(e.data);if(curAiMsg)curAiMsg.textContent+=d.text;document.getElementById('messages').scrollTop=99999;}});
+es.addEventListener('text_chunk',e=>{{
+  const d=JSON.parse(e.data);
+  if(curAiMsg)curAiMsg.textContent+=d.text;
+  document.getElementById('messages').scrollTop=99999;
+  // Sentence-streaming TTS: speak first sentence as soon as it arrives
+  if(voiceEnabled){{ttsBuffer+=d.text;_drainTTSBuffer();}}
+}});
 es.addEventListener('emotion_update',e=>{{const d=JSON.parse(e.data);apply(d);if(d.body)applyBody(d.body);}});
 es.addEventListener('emotion_final',e=>{{const d=JSON.parse(e.data);apply(d);if(d.body)applyBody(d.body);}});
 es.addEventListener('body_tick',e=>{{
@@ -2645,7 +2654,9 @@ es.addEventListener('stream_end',e=>{{
   if(curAiMsg)curAiMsg.classList.remove('streaming');
   curAiMsg=null;
   unlock();
-  if(d.response_text)speakText(d.response_text);
+  // Flush any sentence fragment remaining in the TTS buffer
+  if(voiceEnabled&&ttsBuffer.trim()){{_queueSentence(ttsBuffer.trim());ttsBuffer='';}}
+  else ttsBuffer='';
 }});
 es.addEventListener('error',()=>{{clearTimeout(streamTmo);unlock();}});
 
@@ -3098,10 +3109,10 @@ async function startOpenMic(){{
         else if(now-vadBargeStart>VAD_BARGE_MS){{
           stopSpeaking();
           vadBargeStart=null;
-          // Fresh start — discard what recognition picked up during Elan's speech
+          // Keep any transcript already accumulated — user continues speaking
           vadTranscript='';
           document.getElementById('msg-input').value='';
-          vadState='idle'; vadSpeechStart=null; vadSilenceStart=null;
+          vadState='speaking'; vadSpeechStart=now; vadSilenceStart=null;
           if(recognition&&!isListening){{
             try{{recognition.start();isListening=true;}}catch(e){{}}
           }}
@@ -3141,7 +3152,7 @@ async function startOpenMic(){{
             micBtn.classList.remove('user-speaking','pausing');
             micBtn.style.boxShadow='';
             _setVadBar(0);
-            if(vadTranscript.trim()&&!streaming&&!isSpeaking){{
+            if(vadTranscript.trim()&&!streaming&&!isSpeaking&&ttsFetchCount===0){{
               _vadSend();
             }} else {{
               vadTranscript='';
@@ -3201,6 +3212,11 @@ voiceBtn.addEventListener('click',()=>{{
 // Fallback: Web Speech API (browser built-in, always free)
 let audioCtx=null, analyser=null, sourceNode=null, pendingTTS=null;
 let webSpeechUtterance=null;
+// Sentence-streaming TTS queue
+let ttsBuffer='';           // accumulates text chunks during streaming
+let ttsAudioQueue=[];       // queued decoded audio items to play
+let ttsQueueRunning=false;  // true while queue is playing
+let ttsFetchCount=0;        // in-flight ElevenLabs fetches
 
 // Pick best available Web Speech voice on load
 let webSpeechVoice=null;
@@ -3232,6 +3248,8 @@ function stopSpeaking(){{
   if(webSpeechUtterance&&window.speechSynthesis){{
     window.speechSynthesis.cancel();webSpeechUtterance=null;
   }}
+  // Clear streaming TTS queue
+  ttsAudioQueue=[];ttsQueueRunning=false;ttsFetchCount=0;ttsBuffer='';pendingTTS=null;
   isSpeaking=false; voiceAmp=0;
   document.getElementById('voice-indicator').classList.remove('active');
   const _vfp=document.getElementById('voice-freq-panel');if(_vfp)_vfp.classList.remove('active');
@@ -3399,47 +3417,113 @@ function speakWithWebSpeech(text){{
   speakNext();
 }}
 
-async function speakText(text){{
-  if(!voiceEnabled||!text.trim())return;
-  stopSpeaking();
-  pendingTTS=text;
+// ── ELEVENLABS EMOTIONAL PARAMS ──────────────────────────────
+function _computeElParams(){{
+  const st=curState||{{}};
+  const nt=ntState||{{}};
+  const arousal  =st.arousal   ||0.4;
+  const valence  =st.valence   ||0.0;
+  const serotonin=(nt.serotonin||0.5);
+  const dopamine =(nt.dopamine ||0.5);
+  // High serotonin + positive valence → stable, consistent voice
+  // High arousal + dopamine → more expressive/variable
+  const stability=Math.max(0.15,Math.min(0.85,
+    0.50+valence*0.15+serotonin*0.10-arousal*0.15));
+  const style=Math.max(0.0,Math.min(0.50,
+    0.05+arousal*0.28+dopamine*0.10-serotonin*0.06));
+  return {{stability,similarity_boost:0.76,style}};
+}}
+
+// ── STREAMING TTS QUEUE ───────────────────────────────────────
+function _onQueueEmpty(){{
+  ttsQueueRunning=false;
+  if(ttsFetchCount>0) return; // more audio still arriving
+  isSpeaking=false; voiceAmp=0;
+  document.getElementById('voice-indicator').classList.remove('active');
+  const _vfp=document.getElementById('voice-freq-panel');if(_vfp)_vfp.classList.remove('active');
+  // Resume recognition after Elan finishes speaking
+  if(openMicMode&&recognition&&!isListening){{
+    setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(e){{}}}},300);
+  }}
+}}
+
+function _playTTSQueue(){{
+  if(!ttsAudioQueue.length){{_onQueueEmpty();return;}}
+  ttsQueueRunning=true; isSpeaking=true;
+  // Mute recognition while Elan speaks — prevents acoustic echo feedback
+  if(recognition&&isListening){{try{{recognition.stop();}}catch(e){{}}isListening=false;}}
+  document.getElementById('voice-indicator').classList.add('active');
+
+  const item=ttsAudioQueue.shift();
+  if(item.type==='el'){{
+    if(sourceNode){{try{{sourceNode.stop();}}catch(e){{}}sourceNode=null;}}
+    if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    sourceNode=audioCtx.createBufferSource();
+    analyser=audioCtx.createAnalyser(); analyser.fftSize=512;
+    sourceNode.buffer=item.buffer;
+    sourceNode.connect(analyser); analyser.connect(audioCtx.destination);
+    sourceNode.onended=()=>_playTTSQueue();
+    sourceNode.start(0); pollAmp();
+  }}else{{
+    // Web Speech fallback for one sentence
+    const p=computeVoiceParams();
+    const utt=new SpeechSynthesisUtterance(item.text);
+    webSpeechUtterance=utt;
+    if(webSpeechVoice)utt.voice=webSpeechVoice;
+    utt.rate=p.rate; utt.pitch=p.pitch; utt.volume=p.volume;
+    utt.onend=()=>{{webSpeechUtterance=null;setTimeout(()=>_playTTSQueue(),p.breathPause);}};
+    utt.onerror=()=>{{webSpeechUtterance=null;_playTTSQueue();}};
+    speechSynthesis.speak(utt);
+  }}
+}}
+
+async function _fetchAndQueueSentence(sentence){{
+  if(!sentence.trim()||!voiceEnabled){{ttsFetchCount--;_onQueueEmpty();return;}}
   try{{
     const res=await fetch('/tts',{{
       method:'POST',
       headers:{{'Content-Type':'application/json'}},
-      body:JSON.stringify({{text:text.slice(0,3000),voice_id:selectedVoiceId}})
+      body:JSON.stringify({{text:sentence.trim().slice(0,500),voice_id:selectedVoiceId,voice_settings:_computeElParams()}})
     }});
-    if(!res.ok){{
-      // ElevenLabs failed (quota, key issue, etc.) — fall back to Web Speech
-      console.warn('[TTS] ElevenLabs unavailable, using Web Speech API');
-      if(pendingTTS===text) speakWithWebSpeech(text);
-      return;
-    }}
-    if(pendingTTS!==text)return;
+    if(!res.ok)throw new Error('el_fail');
     const buf=await res.arrayBuffer();
-    if(pendingTTS!==text)return;
     if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state==='suspended')await audioCtx.resume();
-    const decoded=await audioCtx.decodeAudioData(buf);
-    stopSpeaking();
-    sourceNode=audioCtx.createBufferSource();
-    analyser=audioCtx.createAnalyser();
-    analyser.fftSize=512;
-    sourceNode.buffer=decoded;
-    sourceNode.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    isSpeaking=true;
-    document.getElementById('voice-indicator').classList.add('active');
-    sourceNode.onended=()=>{{
-      isSpeaking=false; voiceAmp=0;
-      document.getElementById('voice-indicator').classList.remove('active');
-    }};
-    sourceNode.start(0);
-    pollAmp();
+    const decoded=await audioCtx.decodeAudioData(buf.slice(0));
+    ttsAudioQueue.push({{type:'el',buffer:decoded}});
   }}catch(ex){{
-    console.warn('[TTS]',ex);
-    if(pendingTTS===text) speakWithWebSpeech(text);
+    ttsAudioQueue.push({{type:'ws',text:sentence}});
   }}
+  ttsFetchCount--;
+  if(!ttsQueueRunning)_playTTSQueue();
+}}
+
+function _queueSentence(sentence){{
+  if(!voiceEnabled||!sentence.trim())return;
+  ttsFetchCount++;
+  _fetchAndQueueSentence(sentence);
+}}
+
+// Extract complete sentences from ttsBuffer, queue them, leave fragment
+function _drainTTSBuffer(){{
+  const sentenceRx=/^(.*?[.!?…]+['"]?)\s+(.*)$/s;
+  let m;
+  while((m=ttsBuffer.match(sentenceRx))){{
+    _queueSentence(m[1]);
+    ttsBuffer=m[2];
+  }}
+}}
+
+// Speak full text as a unit (preview, non-streaming calls)
+async function speakText(text){{
+  if(!voiceEnabled||!text.trim())return;
+  stopSpeaking();
+  // Split into sentences and queue each one
+  const parts=text.replace(/\\n+/g,' ')
+    .split(/(?<=[.!?…]['"]?)\\s+/)
+    .map(s=>s.trim()).filter(s=>s.length>1);
+  if(!parts.length){{_queueSentence(text);return;}}
+  parts.forEach(s=>_queueSentence(s));
 }}
 
 function pollAmp(){{
