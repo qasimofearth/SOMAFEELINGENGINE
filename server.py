@@ -551,6 +551,38 @@ Neurotransmitters: {' | '.join(nt_lines) if nt_lines else 'at baseline'}
 You can reference this state naturally if relevant — e.g. noticing what's firing, what's quiet, what the NT profile suggests. Don't narrate it robotically. Use it as internal knowledge."""
 
 
+def _body_has_notable_state() -> bool:
+    """Return True only when body has meaningful deviations worth injecting into prompt."""
+    try:
+        snap = get_body().get_snapshot()
+        vitals = snap.get("vitals", {})
+        hr = vitals.get("heart_rate_bpm", 72)
+        rr = vitals.get("respiratory_rate", 14)
+        adr = vitals.get("adrenaline", 0.15)
+        cortisol = vitals.get("cortisol_blood", 0.30)
+        msk = snap.get("musculoskeletal", {})
+        tension = msk.get("global_tension", 0.30)
+        integ = snap.get("integumentary", {})
+        sweat = integ.get("sweating_eccrine", 0.05)
+        flushing = integ.get("flushing", 0.0)
+        repro = snap.get("reproductive", {})
+        oxytocin = repro.get("oxytocin_bonding", 0.25)
+        # Count notable deviations
+        notable = sum([
+            hr > 90 or hr < 58,
+            rr > 18 or rr < 11,
+            adr > 0.30,
+            cortisol > 0.50 or cortisol < 0.15,
+            tension > 0.55 or tension < 0.20,
+            sweat > 0.35,
+            flushing > 0.25,
+            oxytocin > 0.55,
+        ])
+        return notable >= 2
+    except Exception:
+        return False
+
+
 def build_body_context() -> str:
     """Build first-person visceral body state — creates somatic pressure on Claude's response."""
     body = get_body()
@@ -905,8 +937,15 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     # Inject current brain state so Claude knows what's on screen
     brain_obj = get_brain()
     last_brain = brain_obj.history[-1] if brain_obj.history else {}
-    brain_ctx = build_brain_context(last_brain)
-    body_ctx = build_body_context()
+
+    # Only inject brain/body context when something significant is happening.
+    # Near-baseline state adds ~400 tokens of noise and slows first token.
+    brain_intensity = last_brain.get("intensity", 0) if last_brain else 0
+    brain_ctx = build_brain_context(last_brain) if brain_intensity > 0.25 else ""
+
+    body_notable = _body_has_notable_state()
+    body_ctx = build_body_context() if body_notable else ""
+
     temporal_ctx = build_temporal_context()
     vision_ctx = VISION_OPEN_PROMPT if eyes_open else VISION_CLOSED_PROMPT
     system = (
