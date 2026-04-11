@@ -1139,6 +1139,29 @@ _PASSWORD = os.environ.get("FEELING_PASSWORD", "")   # empty = no password requi
 # Runtime key override — set via /setkey if Railway env injection fails
 _RUNTIME_API_KEY = ""
 
+_KEYS_FILE = "/tmp/fe_keys.json"
+
+def _load_persisted_keys():
+    global _RUNTIME_API_KEY, _PASSWORD
+    try:
+        with open(_KEYS_FILE) as f:
+            d = json.load(f)
+        if d.get("key") and not _RUNTIME_API_KEY:
+            _RUNTIME_API_KEY = d["key"]
+        if d.get("password") and not _PASSWORD:
+            _PASSWORD = d["password"]
+    except Exception:
+        pass
+
+def _persist_keys():
+    try:
+        with open(_KEYS_FILE, "w") as f:
+            json.dump({"key": _RUNTIME_API_KEY, "password": _PASSWORD}, f)
+    except Exception:
+        pass
+
+_load_persisted_keys()
+
 def _check_auth(handler) -> bool:
     """Return True if request is authorised. Sends 401 and returns False if not."""
     if not _PASSWORD:
@@ -1292,6 +1315,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
                     _RUNTIME_API_KEY = new_key
                 if new_password:
                     _PASSWORD = new_password
+                _persist_keys()
                 self.send_json({
                     "ok": True,
                     "key_set": bool(_RUNTIME_API_KEY),
