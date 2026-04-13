@@ -1526,6 +1526,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_json({"voices": [], "error": str(ex)})
 
     def do_POST(self):
+        global _RUNTIME_API_KEY, _PASSWORD  # must be at top of function
         # /login is the one POST that doesn't require prior auth
         if self.path == "/login":
             length = int(self.headers.get("Content-Length", 0))
@@ -1559,7 +1560,6 @@ class FeelingHandler(BaseHTTPRequestHandler):
             # Workaround for Railway Runtime V2 not injecting user vars.
             # Auth: admin_token must match RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID.
             try:
-                global _RUNTIME_API_KEY, _PASSWORD  # noqa: PLW0603
                 data = json.loads(body)
                 provided_token = data.get("admin_token", "")
                 valid_tokens = {
