@@ -1396,6 +1396,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
         key = env_key or _RUNTIME_API_KEY
         self.send_json({
             "status": "ok",
+            "version": "v2-healthz-public",
             "key_set": bool(key),
             "key_source": "env" if env_key else ("runtime" if _RUNTIME_API_KEY else "none"),
             "key_len": len(key),
