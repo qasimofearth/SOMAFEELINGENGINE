@@ -3385,7 +3385,7 @@ function computeVoiceParams(){{
   // Core drivers: arousal, adrenaline, dopamine push rate up
   // Serotonin, GABA, oxytocin, high vagal tone pull rate down
   // Cortisol adds a tense urgency; HR modulates slightly
-  let rate = 0.78
+  let rate = 1.05
     + arousal    * 0.38
     + adrenaline * 0.35
     + dopamine   * 0.12
@@ -3397,7 +3397,7 @@ function computeVoiceParams(){{
     - (vagal-0.65) * 0.18
     + (hrBpm-72)/72 * 0.08;
   rate *= eegRate;
-  rate = _clampV(rate, 0.62, 1.72);
+  rate = _clampV(rate, 0.90, 1.90);
 
   // ── PITCH — driven by solfeggio frequency (the real mapping) ─
   // 174 Hz (UT) → 0.72  (deep, grounding)
