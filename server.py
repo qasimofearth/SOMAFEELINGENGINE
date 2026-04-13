@@ -4376,53 +4376,61 @@ if __name__ == "__main__":
     if not key:
         print("Warning: ANTHROPIC_API_KEY not set — chat will fail until it is added")
 
-    # ── Reconstruct conversation + resume open session if within 30 min ──
-    try:
-        engine = get_memory_engine()
-        last_sid = engine.load_last_session_id()
-        if last_sid:
-            recovered = engine.load_recent_exchanges(session_id=last_sid, limit=40)
-            if recovered:
-                with conv_lock:
-                    conversation.clear()
-                    conversation.extend(recovered)
-                turns = len(recovered) // 2
-                print(f"  [MEMORY] Restored {turns}-turn conversation from session {last_sid[:28]}...")
-
-            # If the session is still open and recent, resume it instead of creating a new one
-            import sqlite3 as _sq
-            _c = _sq.connect(engine._db_path)
-            _row = _c.execute(
-                "SELECT started_at, ended_at FROM sessions WHERE session_id=?", (last_sid,)
-            ).fetchone()
-            _c.close()
-            if _row and _row[1] is None and (time.time() - _row[0]) < 1800:
-                import sys as _sys
-                _mod = _sys.modules[__name__]
-                _mod._CONV_SESSION_ID = last_sid
-                _mod._CONV_LAST_ACTIVITY = time.time()
-                print(f"  [MEMORY] Resuming open conversation (within 30-min window)")
-
-        stats = engine.get_stats()
-        print(f"  [MEMORY] {stats['total_exchanges']} exchanges · {stats['total_sessions']} sessions · {stats['known_facts']} facts · {stats['somatic_patterns']} somatic patterns")
-    except Exception as me:
-        print(f"  [MEMORY] Init warning: {me}")
-
-    # Start continuous body simulation — body is alive even between messages
-    _start_body_background_tick()
-    print(f"  [BODY] Background tick started — 10Hz continuous simulation")
-
-    # Start continuous brain simulation — brain oscillates at all times
-    _start_brain_thread()
-    print(f"  [BRAIN] Continuous thread started — 100Hz neural dynamics, K=2.5 Kuramoto")
-
+    # ── Start HTTP server FIRST so Railway healthcheck always succeeds ──
+    # All heavy init (memory DB, brain, body) runs in a background thread
+    # so /ping is reachable within milliseconds of startup.
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), FeelingHandler)
     print(f"\n  Feeling Engine — LLM Bridge")
     print(f"  ─────────────────────────────")
-    print(f"  Server: http://127.0.0.1:{PORT}")
+    print(f"  Server: http://127.0.0.1:{PORT}  (accepting connections)")
     print(f"  Model:  claude-sonnet-4-6")
     print(f"  Open the URL in your browser\n")
 
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), FeelingHandler)
+    def _background_init():
+        """Heavy init runs after server is already serving the healthcheck."""
+        try:
+            # ── Reconstruct conversation + resume open session if within 30 min ──
+            engine = get_memory_engine()
+            last_sid = engine.load_last_session_id()
+            if last_sid:
+                recovered = engine.load_recent_exchanges(session_id=last_sid, limit=40)
+                if recovered:
+                    with conv_lock:
+                        conversation.clear()
+                        conversation.extend(recovered)
+                    turns = len(recovered) // 2
+                    print(f"  [MEMORY] Restored {turns}-turn conversation from session {last_sid[:28]}...")
+
+                # If the session is still open and recent, resume it instead of creating a new one
+                import sqlite3 as _sq
+                _c = _sq.connect(engine._db_path)
+                _row = _c.execute(
+                    "SELECT started_at, ended_at FROM sessions WHERE session_id=?", (last_sid,)
+                ).fetchone()
+                _c.close()
+                if _row and _row[1] is None and (time.time() - _row[0]) < 1800:
+                    import sys as _sys
+                    _mod = _sys.modules[__name__]
+                    _mod._CONV_SESSION_ID = last_sid
+                    _mod._CONV_LAST_ACTIVITY = time.time()
+                    print(f"  [MEMORY] Resuming open conversation (within 30-min window)")
+
+            stats = engine.get_stats()
+            print(f"  [MEMORY] {stats['total_exchanges']} exchanges · {stats['total_sessions']} sessions · {stats['known_facts']} facts · {stats['somatic_patterns']} somatic patterns")
+        except Exception as me:
+            print(f"  [MEMORY] Init warning: {me}")
+
+        # Start continuous body simulation — body is alive even between messages
+        _start_body_background_tick()
+        print(f"  [BODY] Background tick started — 10Hz continuous simulation")
+
+        # Start continuous brain simulation — brain oscillates at all times
+        _start_brain_thread()
+        print(f"  [BRAIN] Continuous thread started — 100Hz neural dynamics, K=2.5 Kuramoto")
+
+    _init_thread = threading.Thread(target=_background_init, daemon=True)
+    _init_thread.start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
