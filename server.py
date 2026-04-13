@@ -1635,6 +1635,10 @@ def build_chat_html() -> str:
     region_connections = {abbrev: r.connects_to for abbrev, r in _BR.items()}
     region_conn_json = json.dumps(region_connections)
 
+    # E/I ratio per region — drives excitatory (warm) vs inhibitory (cool) visual
+    region_ei = {abbrev: round(r.ei_ratio, 3) for abbrev, r in _BR.items()}
+    region_ei_json = json.dumps(region_ei)
+
     # Pre-configured voice ID from env — skip the ElevenLabs /voices API call
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
@@ -1900,6 +1904,18 @@ const NT_INFO={nt_info_json};
 const REGION_NET={region_net_json};
 const REGION_FUNC={region_func_json};
 const REGION_CONN={region_conn_json};
+const REGION_EI={region_ei_json};
+// EEG band display: frequency (Hz), color, and speed multiplier
+const EEG_BANDS={{
+  delta:{{hz:2,   col:'#3a5fff', ringAlpha:0.55}},
+  theta:{{hz:6,   col:'#8b5cf6', ringAlpha:0.55}},
+  alpha:{{hz:10,  col:'#06b6d4', ringAlpha:0.50}},
+  beta: {{hz:20,  col:'#f59e0b', ringAlpha:0.60}},
+  gamma:{{hz:40,  col:'#f43f5e', ringAlpha:0.70}},
+}};
+// Which regions belong to each resting-state network
+const NET_REGIONS={{}};
+Object.entries(REGION_NET).forEach(([a,n])=>{{(NET_REGIONS[n]=NET_REGIONS[n]||[]).push(a);}});
 
 // ── BODY STATE ───────────────────────────────────────────────
 let bodyState=null, bodyAct={{}}, bodyTab='body';
@@ -2089,6 +2105,21 @@ let signalPulses=[];
 // Without this, resting activity (0.008–0.012) is invisible (threshold was 0.10).
 function normAct(v){{return Math.min(1,Math.pow(v/0.70,0.35));}}
 
+function _brainPath(ctx,x0,y0,bw,bh){{
+  ctx.beginPath();
+  ctx.moveTo(x0+bw*0.50,y0+bh*0.03);
+  ctx.bezierCurveTo(x0+bw*0.63,y0+bh*0.005,x0+bw*0.80,y0+bh*0.015,x0+bw*0.92,y0+bh*0.08);
+  ctx.bezierCurveTo(x0+bw*0.99,y0+bh*0.16,x0+bw*1.00,y0+bh*0.30,x0+bw*0.98,y0+bh*0.44);
+  ctx.bezierCurveTo(x0+bw*0.97,y0+bh*0.60,x0+bw*0.91,y0+bh*0.74,x0+bw*0.82,y0+bh*0.82);
+  ctx.bezierCurveTo(x0+bw*0.76,y0+bh*0.88,x0+bw*0.68,y0+bh*0.92,x0+bw*0.58,y0+bh*0.90);
+  ctx.bezierCurveTo(x0+bw*0.48,y0+bh*0.92,x0+bw*0.37,y0+bh*0.90,x0+bw*0.28,y0+bh*0.85);
+  ctx.bezierCurveTo(x0+bw*0.19,y0+bh*0.80,x0+bw*0.12,y0+bh*0.70,x0+bw*0.08,y0+bh*0.58);
+  ctx.bezierCurveTo(x0+bw*0.03,y0+bh*0.46,x0+bw*0.02,y0+bh*0.32,x0+bw*0.04,y0+bh*0.20);
+  ctx.bezierCurveTo(x0+bw*0.06,y0+bh*0.10,x0+bw*0.18,y0+bh*0.03,x0+bw*0.34,y0+bh*0.01);
+  ctx.bezierCurveTo(x0+bw*0.40,y0+bh*0.00,x0+bw*0.46,y0+bh*0.00,x0+bw*0.50,y0+bh*0.03);
+  ctx.closePath();
+}}
+
 function animBrain(){{
   brainT+=0.018;
   const W=bC.width,H=bC.height;
@@ -2097,48 +2128,69 @@ function animBrain(){{
   bX.clearRect(0,0,W,H);
   drawSilhouette(bX,x0,y0,bw,bh);
 
-  // ── Clip all drawing to brain shape — connections/dots can't escape ──
+  const talking=streaming||isSpeaking;
+
+  // ── 1. EEG BAND RING — pulsing border at real brainwave frequency ──
+  // Oscillates at the dominant band's actual Hz, color-coded by band type.
+  const domBand=curState?.dominant_band||eegState&&Object.entries(eegState).sort((a,b)=>b[1]-a[1])[0]?.[0]||'alpha';
+  const bandInfo=EEG_BANDS[domBand]||EEG_BANDS.alpha;
+  const eegPhase=brainT*(bandInfo.hz/10);  // scaled to visible animation rate
+  const eegPulse=0.5+0.5*Math.sin(eegPhase*Math.PI*2);
+  const eegAlpha=bandInfo.ringAlpha*eegPulse*(talking?1.4:0.7);
+  const eegLw=1.5+eegPulse*(talking?4.5:2.5);
+  _brainPath(bX,x0,y0,bw,bh);
+  bX.strokeStyle=bandInfo.col+Math.round(eegAlpha*255).toString(16).padStart(2,'0');
+  bX.lineWidth=eegLw;bX.stroke();
+  // Secondary harmonic ring (slightly offset phase) for depth
+  const eegPhase2=brainT*(bandInfo.hz/10)+0.33;
+  const eegPulse2=0.5+0.5*Math.sin(eegPhase2*Math.PI*2);
+  _brainPath(bX,x0-1,y0-1,bw+2,bh+2);
+  bX.strokeStyle=bandInfo.col+Math.round(eegPulse2*0.35*eegAlpha*255).toString(16).padStart(2,'0');
+  bX.lineWidth=eegLw*0.5;bX.stroke();
+
+  // ── Clip all drawing to brain shape ─────────────────────────
   bX.save();
-  bX.beginPath();
-  bX.moveTo(x0+bw*0.50,y0+bh*0.03);
-  bX.bezierCurveTo(x0+bw*0.63,y0+bh*0.005,x0+bw*0.80,y0+bh*0.015,x0+bw*0.92,y0+bh*0.08);
-  bX.bezierCurveTo(x0+bw*0.99,y0+bh*0.16,x0+bw*1.00,y0+bh*0.30,x0+bw*0.98,y0+bh*0.44);
-  bX.bezierCurveTo(x0+bw*0.97,y0+bh*0.60,x0+bw*0.91,y0+bh*0.74,x0+bw*0.82,y0+bh*0.82);
-  bX.bezierCurveTo(x0+bw*0.76,y0+bh*0.88,x0+bw*0.68,y0+bh*0.92,x0+bw*0.58,y0+bh*0.90);
-  bX.bezierCurveTo(x0+bw*0.48,y0+bh*0.92,x0+bw*0.37,y0+bh*0.90,x0+bw*0.28,y0+bh*0.85);
-  bX.bezierCurveTo(x0+bw*0.19,y0+bh*0.80,x0+bw*0.12,y0+bh*0.70,x0+bw*0.08,y0+bh*0.58);
-  bX.bezierCurveTo(x0+bw*0.03,y0+bh*0.46,x0+bw*0.02,y0+bh*0.32,x0+bw*0.04,y0+bh*0.20);
-  bX.bezierCurveTo(x0+bw*0.06,y0+bh*0.10,x0+bw*0.18,y0+bh*0.03,x0+bw*0.34,y0+bh*0.01);
-  bX.bezierCurveTo(x0+bw*0.40,y0+bh*0.00,x0+bw*0.46,y0+bh*0.00,x0+bw*0.50,y0+bh*0.03);
-  bX.closePath();
+  _brainPath(bX,x0,y0,bw,bh);
   bX.clip();
 
-  // ── Lobe labels (anatomical orientation) ────────────────────
+  // ── 2. DOMINANT RSN NETWORK WASH ────────────────────────────
+  // Compute which resting-state network has the highest mean activity.
+  // Flood the brain interior with that network's color — like fMRI BOLD signal.
+  const netScores={{}};
+  for(const [net,regs] of Object.entries(NET_REGIONS)){{
+    const acts=regs.map(r=>normAct(brainAct[r]||0));
+    netScores[net]=acts.reduce((s,v)=>s+v,0)/acts.length;
+  }}
+  const domNet=Object.entries(netScores).sort((a,b)=>b[1]-a[1])[0];
+  if(domNet){{
+    const [netName,netScore]=domNet;
+    const washCol=NET_COLORS[netName]||'#444488';
+    const washAlpha=Math.min(0.13,netScore*0.18)*(talking?1.5:1.0);
+    _brainPath(bX,x0,y0,bw,bh);
+    bX.fillStyle=washCol+Math.round(washAlpha*255).toString(16).padStart(2,'0');
+    bX.fill();
+  }}
+
+  // ── Lobe labels ─────────────────────────────────────────────
   bX.font=`6px Courier New`;
   bX.letterSpacing='1.5px';
   [['FRONTAL',0.82,0.12],['PARIETAL',0.33,0.12],['TEMPORAL',0.70,0.72],
    ['OCCIPITAL',0.10,0.35],['LIMBIC',0.55,0.50],['CEREBELLUM',0.20,0.89]]
   .forEach(([lbl,rx,ry])=>{{
     const [lx,ly]=rc(rx,ry,x0,y0,bw,bh);
-    bX.fillStyle='rgba(80,100,180,0.20)';
+    bX.fillStyle='rgba(80,100,180,0.18)';
     bX.fillText(lbl,lx-(lbl.length*3.5),ly);
   }});
 
   const allR=Object.entries(REGION_POS).map(([a,p])=>[a,normAct(brainAct[a]||0),p]);
   const top=allR.filter(([,v])=>v>0.18).sort((a,b)=>b[1]-a[1]).slice(0,32);
-
-  // Build fast lookup: abbrev → {v, p, idx}
   const topMap=new Map(top.map(([a,v,p],i)=>[a,{{v,p,i}}]));
 
-  // ── Connections — only real anatomical pathways ─────────────
-  const talking=streaming||isSpeaking;
+  // ── 3. ANATOMICAL CONNECTIONS ────────────────────────────────
   const connThr=talking?0.04:0.09;
-
-  // Draw anatomically real connections between co-active regions
   const drawnEdges=new Set();
   for(const [ai,av,api] of top){{
-    const targets=REGION_CONN[ai]||[];
-    for(const aj of targets){{
+    for(const aj of (REGION_CONN[ai]||[])){{
       if(!topMap.has(aj))continue;
       const edgeKey=ai<aj?`${{ai}}|${{aj}}`:`${{aj}}|${{ai}}`;
       if(drawnEdges.has(edgeKey))continue;
@@ -2163,26 +2215,29 @@ function animBrain(){{
     }}
   }}
 
-  // ── Spawn signal pulses along real anatomical pathways ──────
-  // Weight source selection by activity — busier regions fire more
+  // ── 4. SIGNAL PULSES — propagation delay by distance ────────
+  // Real axonal conduction: longer pathways take proportionally longer.
+  // Speed ∝ 1/distance so far-apart regions have slower pulses.
   if(top.length>1&&Math.random()<(talking?0.35:0.18)){{
     const totalAct=top.reduce((s,[,v])=>s+v,0);
     let rand=Math.random()*totalAct,pi=0;
     for(let i=0;i<top.length;i++){{rand-=top[i][1];if(rand<=0){{pi=i;break;}}}}
     const ai=top[pi][0];
-    // Follow only real anatomical connections that are currently active
     const realTargets=(REGION_CONN[ai]||[]).filter(c=>topMap.has(c));
     if(realTargets.length>0){{
       const targetAbbrev=realTargets[Math.floor(Math.random()*realTargets.length)];
       const pj=top.findIndex(([a])=>a===targetAbbrev);
       if(pj>=0&&pj!==pi){{
-        signalPulses.push({{i:pi,j:pj,phase:0,spd:0.016+Math.random()*0.034,src:ai,dst:targetAbbrev}});
+        // Propagation delay: compute normalized distance, invert for speed
+        const [px1,py1]=top[pi][2],[px2,py2]=top[pj][2];
+        const dist=Math.sqrt((px1-px2)**2+(py1-py2)**2);
+        const spd=Math.max(0.010,Math.min(0.040,0.032/(dist+0.05)));
+        signalPulses.push({{i:pi,j:pj,phase:0,spd,src:ai,dst:targetAbbrev}});
       }}
     }}
   }}
   signalPulses=signalPulses.filter(p=>{{p.phase+=p.spd;return p.phase<1;}});
 
-  // Signal pulses — glowing dots traveling along real anatomical pathways
   signalPulses.forEach(pulse=>{{
     if(pulse.i>=top.length||pulse.j>=top.length)return;
     const [,,pi]=top[pulse.i],[,,pj]=top[pulse.j];
@@ -2194,12 +2249,10 @@ function animBrain(){{
     const qy=(1-t)*(1-t)*yi+2*(1-t)*t*my+t*t*yj;
     const col=NET_COLORS[REGION_NET[pulse.src||top[pulse.i][0]]]||'#8888ff';
     const fade=Math.sin(t*Math.PI);
-    // Outer halo
     const g2=bX.createRadialGradient(qx,qy,0,qx,qy,14);
     g2.addColorStop(0,col+Math.round(fade*120).toString(16).padStart(2,'0'));
     g2.addColorStop(1,'rgba(0,0,0,0)');
     bX.beginPath();bX.arc(qx,qy,14,0,Math.PI*2);bX.fillStyle=g2;bX.fill();
-    // Inner bright core
     const g=bX.createRadialGradient(qx,qy,0,qx,qy,6);
     g.addColorStop(0,col+Math.round(fade*255).toString(16).padStart(2,'0'));
     g.addColorStop(0.5,col+Math.round(fade*100).toString(16).padStart(2,'0'));
@@ -2207,23 +2260,34 @@ function animBrain(){{
     bX.beginPath();bX.arc(qx,qy,6,0,Math.PI*2);bX.fillStyle=g;bX.fill();
   }});
 
-  // ── All 65 regions — high contrast active vs dim inactive ──
+  // ── 5. REGION DOTS — E/I ratio + DMN slow oscillation ───────
   allR.forEach(([abbrev,act,pos])=>{{
     const [cx,cy]=rc(pos[0],pos[1],x0,y0,bw,bh);
     const col=NET_COLORS[REGION_NET[abbrev]]||'#555588';
+    const ei=REGION_EI[abbrev]||0.8;  // excitatory ratio (0=pure inhibitory, 1=pure excit.)
+    const isDMN=REGION_NET[abbrev]==='default_mode';
 
-    // Inactive: ghost dot only — barely visible
+    // Resting state slow oscillation for DMN — ~0.03Hz infra-slow rhythm
+    // This is the hallmark of the default mode network at rest
+    const dmnOsc=isDMN?0.5+0.5*Math.sin(brainT*0.08+pos[0]*3.1):1;
+
     if(act<0.10){{
-      bX.beginPath();bX.arc(cx,cy,1.2,0,Math.PI*2);
-      bX.fillStyle=col+'0d';bX.fill();
+      // Ghost dot — dim but always present, DMN nodes breathe slowly
+      const ghostR=isDMN?1.5*dmnOsc:1.2;
+      const ghostA=isDMN?(0.06+dmnOsc*0.08):0.05;
+      bX.beginPath();bX.arc(cx,cy,ghostR,0,Math.PI*2);
+      bX.fillStyle=col+Math.round(ghostA*255).toString(16).padStart(2,'0');bX.fill();
       return;
     }}
 
     const voiceMod=isSpeaking?1+voiceAmp*0.80:1;
-    const pulse=act>0.20?1+0.32*Math.sin(brainT*2.8+pos[0]*9+pos[1]*7):1;
+    // Region pulse: DMN uses slow oscillation, others use faster neural oscillation
+    const pulseMod=isDMN
+      ?(1+0.28*dmnOsc)
+      :(act>0.20?1+0.32*Math.sin(brainT*2.8+pos[0]*9+pos[1]*7):1);
 
-    // Outer glow — large and dramatic for highly active regions
-    const gr=(5+act*42)*voiceMod*pulse;
+    // ── Outer glow (network color) ─────────────────────────────
+    const gr=(5+act*42)*voiceMod*pulseMod;
     const grd=bX.createRadialGradient(cx,cy,0,cx,cy,gr);
     const glowAlpha=Math.min(0.75,act*0.85);
     grd.addColorStop(0,col+Math.round(glowAlpha*255).toString(16).padStart(2,'0'));
@@ -2231,19 +2295,26 @@ function animBrain(){{
     grd.addColorStop(1,'rgba(0,0,0,0)');
     bX.beginPath();bX.arc(cx,cy,gr,0,Math.PI*2);bX.fillStyle=grd;bX.fill();
 
-    // Core dot — bright solid centre
-    const r=Math.max(1.8,(1.8+act*8.5)*pulse*voiceMod);
+    // ── Core dot (E/I modulated) ───────────────────────────────
+    // Excitatory-dominant (ei>0.7): warm white-yellow core
+    // Inhibitory-dominant (ei<0.5): cool blue ring that suppresses outward
+    const r=Math.max(1.8,(1.8+act*8.5)*pulseMod*voiceMod);
     bX.beginPath();bX.arc(cx,cy,r,0,Math.PI*2);
     bX.fillStyle=col+Math.round((0.55+act*0.45)*255).toString(16).padStart(2,'0');
     bX.fill();
 
-    // Inner bright core for highly active
-    if(act>0.45){{
-      bX.beginPath();bX.arc(cx,cy,r*0.45,0,Math.PI*2);
-      bX.fillStyle=`rgba(240,248,255,${{(act*0.9).toFixed(2)}})`;bX.fill();
+    if(ei>0.70&&act>0.35){{
+      // Excitatory: bright warm core — glutamatergic excitation
+      bX.beginPath();bX.arc(cx,cy,r*0.55,0,Math.PI*2);
+      bX.fillStyle=`rgba(255,240,200,${{(act*(ei-0.3)).toFixed(2)}})`;bX.fill();
+    }} else if(ei<0.55&&act>0.25){{
+      // Inhibitory: cool blue suppression ring — GABA-ergic
+      bX.beginPath();bX.arc(cx,cy,r*1.3,0,Math.PI*2);
+      bX.strokeStyle=`rgba(80,140,255,${{(act*0.45).toFixed(2)}})`;
+      bX.lineWidth=1.2;bX.stroke();
     }}
 
-    // Label — shown for anything meaningfully active
+    // Label for active regions
     if(act>0.22){{
       const labelAlpha=Math.min(0.95,0.35+act*0.85);
       const fontSize=Math.max(7,6+Math.round(act*5));
@@ -2253,7 +2324,7 @@ function animBrain(){{
     }}
   }});
 
-  // ── Remove clip — HUD bars sit outside brain boundary ────────
+  // ── Remove clip ──────────────────────────────────────────────
   bX.restore();
 
   // ── Brain outline — drawn last, always fully visible ─────────
