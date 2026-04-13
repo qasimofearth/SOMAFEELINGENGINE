@@ -3571,6 +3571,13 @@ async function startOpenMic(){{
 }}
 
 function _vadSend(){{
+  // Echo cooldown: discard anything captured within 2s of Elan finishing speech
+  if(Date.now()-_ttsEndedAt<2000){{
+    vadTranscript='';
+    document.getElementById('msg-input').value='';
+    _setVadStatus('open · listening');
+    return;
+  }}
   const txt=vadTranscript.trim();
   vadTranscript='';
   _setVadStatus('open · listening');
@@ -3835,15 +3842,18 @@ function _computeElParams(){{
 }}
 
 // ── STREAMING TTS QUEUE ───────────────────────────────────────
+let _ttsEndedAt=0; // timestamp when TTS last finished — used for echo cooldown
 function _onQueueEmpty(){{
   ttsQueueRunning=false;
   if(ttsFetchCount>0) return; // more audio still arriving
   isSpeaking=false; voiceAmp=0;
+  _ttsEndedAt=Date.now();
   document.getElementById('voice-indicator').classList.remove('active');
   const _vfp=document.getElementById('voice-freq-panel');if(_vfp)_vfp.classList.remove('active');
-  // Resume recognition after Elan finishes speaking
+  // Resume recognition after Elan finishes speaking.
+  // 1500ms delay gives speaker audio time to physically decay — prevents echo loop.
   if(openMicMode&&recognition&&!isListening){{
-    setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(e){{}}}},300);
+    setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(e){{}}}},1500);
   }}
 }}
 
