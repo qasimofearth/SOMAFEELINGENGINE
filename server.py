@@ -1197,7 +1197,8 @@ _anthropic_client_key = None
 
 def _get_anthropic_client():
     global _anthropic_client, _anthropic_client_key
-    key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", _RUNTIME_API_KEY))
+    # Runtime key (set via /setkey) takes priority over env vars
+    key = _RUNTIME_API_KEY or os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
     if _anthropic_client is None or key != _anthropic_client_key:
         _anthropic_client = anthropic.Anthropic(api_key=key)
         _anthropic_client_key = key
