@@ -1177,7 +1177,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
 
 
 # ── AUTH ──────────────────────────────────────────────────────
-_PASSWORD = os.environ.get("FEELING_PASSWORD", "")   # empty = no password required
+_PASSWORD = os.environ.get("FEELING_PASSWORD", "SOMA2026")  # default password; override via FEELING_PASSWORD env or /setkey
 
 # Runtime key override — set via /setkey if Railway env injection fails
 _RUNTIME_API_KEY = ""
