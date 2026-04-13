@@ -129,12 +129,15 @@ def _start_brain_thread():
             if tick % BROADCAST_EVERY == 0:
                 try:
                     coherence = brain.sim.get_phase_coherence()
+                    snap = brain.sim.get_snapshot()
                     broadcast("brain_coherence", {
                         "sync_order": round(brain.sim.sync_order, 4),
                         "phase_coherence": coherence["order"],
                         "emergent_freq_hz": coherence["freq_hz"],
                         "emergent_solfeggio_hz": coherence["solfeggio_hz"],
                         "t_ms": round(brain.sim.t_ms, 0),
+                        "region_activities": {ab: round(v["activity"], 4) for ab, v in snap.items()},
+                        "nt_levels": {nt: round(sys.current_level, 4) for nt, sys in NT_SYSTEMS.items()} if NT_SYSTEMS else {},
                     })
                 except Exception:
                     pass
@@ -2709,7 +2712,7 @@ es.addEventListener('body_tick',e=>{{
 }});
 es.addEventListener('brain_coherence',e=>{{
   const d=JSON.parse(e.data);
-  // Update the status bar with live emergent frequency
+  // Update status bar
   if(!streaming){{
     const hz=d.emergent_solfeggio_hz||528;
     const coh=d.phase_coherence||d.sync_order||0;
@@ -2717,6 +2720,12 @@ es.addEventListener('brain_coherence',e=>{{
     const eegHz=d.emergent_freq_hz||10;
     sb.textContent=`∿ ${{hz}}Hz · sync ${{cohPct}}% · eeg ${{eegHz.toFixed(1)}}Hz`;
   }}
+  // Keep brain canvas alive between responses — apply live region activities
+  if(d.region_activities){{
+    Object.assign(brainAct, d.region_activities);
+  }}
+  if(d.nt_levels) updateNTBars(d.nt_levels);
+  document.getElementById('sync-val').textContent=(d.sync_order||0).toFixed(3);
 }});
 es.addEventListener('user_emotion',e=>{{const d=JSON.parse(e.data);sb.textContent=`user: ${{d.dominant}} · ${{d.solfeggio_hz}}Hz`;}});
 es.addEventListener('stream_end',e=>{{
