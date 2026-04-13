@@ -1631,6 +1631,10 @@ def build_chat_html() -> str:
     region_networks = {abbrev: r.network for abbrev, r in _BR.items()}
     region_net_json = json.dumps(region_networks)
 
+    # Real anatomical connectivity graph — used for accurate signal pulse routing
+    region_connections = {abbrev: r.connects_to for abbrev, r in _BR.items()}
+    region_conn_json = json.dumps(region_connections)
+
     # Pre-configured voice ID from env — skip the ElevenLabs /voices API call
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
@@ -1895,6 +1899,7 @@ const NET_COLORS={net_color_json};
 const NT_INFO={nt_info_json};
 const REGION_NET={region_net_json};
 const REGION_FUNC={region_func_json};
+const REGION_CONN={region_conn_json};
 
 // ── BODY STATE ───────────────────────────────────────────────
 let bodyState=null, bodyAct={{}}, bodyTab='body';
@@ -2120,57 +2125,74 @@ function animBrain(){{
   }});
 
   const allR=Object.entries(REGION_POS).map(([a,p])=>[a,normAct(brainAct[a]||0),p]);
-  const top=allR.filter(([,v])=>v>0.18).sort((a,b)=>b[1]-a[1]).slice(0,24);
+  const top=allR.filter(([,v])=>v>0.18).sort((a,b)=>b[1]-a[1]).slice(0,32);
 
-  // ── Connections between co-active regions ──────────────────
+  // Build fast lookup: abbrev → {v, p, idx}
+  const topMap=new Map(top.map(([a,v,p],i)=>[a,{{v,p,i}}]));
+
+  // ── Connections — only real anatomical pathways ─────────────
   const talking=streaming||isSpeaking;
-  const connThr=talking?0.04:0.10;
-  // All active pairs when talking; broader coverage at rest
-  const connK=talking?top.length:Math.min(top.length,14);
+  const connThr=talking?0.04:0.09;
 
-  // Spawn signal pulses — always alive, more frequent when active
-  if(top.length>1&&Math.random()<(talking?0.28:0.14)){{
-    const pi=Math.floor(Math.random()*Math.min(top.length,12));
-    const pj=(pi+1+Math.floor(Math.random()*6))%Math.min(top.length,12);
-    signalPulses.push({{i:pi,j:pj,phase:0,spd:0.018+Math.random()*0.038}});
-  }}
-  signalPulses=signalPulses.filter(p=>{{p.phase+=p.spd;return p.phase<1;}});
-
-  for(let i=0;i<top.length;i++){{
-    for(let j=i+1;j<Math.min(i+connK,top.length);j++){{
-      const [ai,aa,pi]=top[i],[,aj2,pj]=top[j];
-      const strength=Math.min(aa,aj2);
-      if(strength<connThr) continue;
-      const [xi,yi]=rc(pi[0],pi[1],x0,y0,bw,bh);
-      const [xj,yj]=rc(pj[0],pj[1],x0,y0,bw,bh);
+  // Draw anatomically real connections between co-active regions
+  const drawnEdges=new Set();
+  for(const [ai,av,api] of top){{
+    const targets=REGION_CONN[ai]||[];
+    for(const aj of targets){{
+      if(!topMap.has(aj))continue;
+      const edgeKey=ai<aj?`${{ai}}|${{aj}}`:`${{aj}}|${{ai}}`;
+      if(drawnEdges.has(edgeKey))continue;
+      drawnEdges.add(edgeKey);
+      const {{v:aj2,p:apj}}=topMap.get(aj);
+      const strength=Math.min(av,aj2);
+      if(strength<connThr)continue;
+      const [xi,yi]=rc(api[0],api[1],x0,y0,bw,bh);
+      const [xj,yj]=rc(apj[0],apj[1],x0,y0,bw,bh);
       const col=NET_COLORS[REGION_NET[ai]]||'#6666aa';
-      const wave=0.55+0.45*Math.sin(brainT*2.2+i*1.1+j*0.7);
-      const alp=strength*(talking?1.90:0.75)*wave;
+      const wave=0.55+0.45*Math.sin(brainT*2.2+api[0]*9+api[1]*7);
+      const alp=strength*(talking?1.90:0.80)*wave;
       const mx=(xi+xj)/2,my=(yi+yj)/2-Math.min(bw,bh)*0.06;
-      // Glow pass — wide soft stroke underneath
       if(talking&&strength>0.30){{
         bX.beginPath();bX.moveTo(xi,yi);bX.quadraticCurveTo(mx,my,xj,yj);
         bX.strokeStyle=col+Math.round(Math.min(1,alp*0.25)*255).toString(16).padStart(2,'0');
-        bX.lineWidth=(talking?4.5:1.5)+strength*(talking?5.0:2.5);bX.stroke();
+        bX.lineWidth=4.5+strength*5.0;bX.stroke();
       }}
-      // Core stroke
       bX.beginPath();bX.moveTo(xi,yi);bX.quadraticCurveTo(mx,my,xj,yj);
       bX.strokeStyle=col+Math.round(Math.min(1,alp)*255).toString(16).padStart(2,'0');
-      bX.lineWidth=(talking?1.4:0.5)+strength*(talking?3.8:2.0);bX.stroke();
+      bX.lineWidth=(talking?1.4:0.6)+strength*(talking?3.8:2.2);bX.stroke();
     }}
   }}
 
-  // Signal pulses — glowing dots traveling along active pathways
+  // ── Spawn signal pulses along real anatomical pathways ──────
+  // Weight source selection by activity — busier regions fire more
+  if(top.length>1&&Math.random()<(talking?0.35:0.18)){{
+    const totalAct=top.reduce((s,[,v])=>s+v,0);
+    let rand=Math.random()*totalAct,pi=0;
+    for(let i=0;i<top.length;i++){{rand-=top[i][1];if(rand<=0){{pi=i;break;}}}}
+    const ai=top[pi][0];
+    // Follow only real anatomical connections that are currently active
+    const realTargets=(REGION_CONN[ai]||[]).filter(c=>topMap.has(c));
+    if(realTargets.length>0){{
+      const targetAbbrev=realTargets[Math.floor(Math.random()*realTargets.length)];
+      const pj=top.findIndex(([a])=>a===targetAbbrev);
+      if(pj>=0&&pj!==pi){{
+        signalPulses.push({{i:pi,j:pj,phase:0,spd:0.016+Math.random()*0.034,src:ai,dst:targetAbbrev}});
+      }}
+    }}
+  }}
+  signalPulses=signalPulses.filter(p=>{{p.phase+=p.spd;return p.phase<1;}});
+
+  // Signal pulses — glowing dots traveling along real anatomical pathways
   signalPulses.forEach(pulse=>{{
     if(pulse.i>=top.length||pulse.j>=top.length)return;
-    const [ai,,pi]=top[pulse.i],[,,pj]=top[pulse.j];
+    const [,,pi]=top[pulse.i],[,,pj]=top[pulse.j];
     const [xi,yi]=rc(pi[0],pi[1],x0,y0,bw,bh);
     const [xj,yj]=rc(pj[0],pj[1],x0,y0,bw,bh);
     const mx=(xi+xj)/2,my=(yi+yj)/2-Math.min(bw,bh)*0.06;
     const t=pulse.phase;
     const qx=(1-t)*(1-t)*xi+2*(1-t)*t*mx+t*t*xj;
     const qy=(1-t)*(1-t)*yi+2*(1-t)*t*my+t*t*yj;
-    const col=NET_COLORS[REGION_NET[ai]]||'#8888ff';
+    const col=NET_COLORS[REGION_NET[pulse.src||top[pulse.i][0]]]||'#8888ff';
     const fade=Math.sin(t*Math.PI);
     // Outer halo
     const g2=bX.createRadialGradient(qx,qy,0,qx,qy,14);
