@@ -3,7 +3,7 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "CLAUDE_API_KEY=${{CLAUDE_API_KEY}} FEELING_PASSWORD=${{FEELING_PASSWORD}} python server.py"
-healthcheckPath = "/healthz"
+healthcheckPath = "/ping"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

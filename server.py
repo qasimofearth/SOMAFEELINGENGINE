@@ -1426,9 +1426,9 @@ class FeelingHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        # /healthz is always public — Railway's health checker must reach it
-        # without auth or the new instance is never marked healthy.
-        if path == "/healthz":
+        # /ping is the Railway health check — always public, never auth-gated.
+        # /healthz also public (legacy curl scripts use it).
+        if path in ("/ping", "/healthz"):
             self._handle_healthz()
             return
 
