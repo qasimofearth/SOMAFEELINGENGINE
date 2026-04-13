@@ -1217,30 +1217,167 @@ def _persist_keys():
 
 _load_persisted_keys()
 
+import hashlib as _hashlib
+import hmac as _hmac
+
+# ── RATE LIMITING ─────────────────────────────────────────────
+_FAILED_ATTEMPTS: dict = {}   # ip → {"count": int, "locked_until": float}
+_MAX_ATTEMPTS  = 5
+_LOCKOUT_S     = 15 * 60      # 15 minutes
+
+def _get_ip(handler) -> str:
+    # Railway puts real IP in X-Forwarded-For
+    return (handler.headers.get("X-Forwarded-For", "") or
+            handler.headers.get("X-Real-IP", "") or
+            handler.client_address[0]).split(",")[0].strip()
+
+def _is_locked(ip: str) -> float:
+    """Return seconds remaining in lockout, or 0 if not locked."""
+    entry = _FAILED_ATTEMPTS.get(ip)
+    if not entry:
+        return 0
+    remaining = entry["locked_until"] - time.time()
+    return max(0, remaining)
+
+def _record_failure(ip: str):
+    entry = _FAILED_ATTEMPTS.setdefault(ip, {"count": 0, "locked_until": 0})
+    entry["count"] += 1
+    if entry["count"] >= _MAX_ATTEMPTS:
+        entry["locked_until"] = time.time() + _LOCKOUT_S
+
+def _clear_failures(ip: str):
+    _FAILED_ATTEMPTS.pop(ip, None)
+
+# ── SESSION TOKEN ─────────────────────────────────────────────
+_SESSION_SECRET = os.urandom(32)   # per-process secret for HMAC signing
+_SESSION_TTL    = 24 * 3600        # 24 hours
+
+def _make_session_token() -> str:
+    expires = int(time.time()) + _SESSION_TTL
+    payload = f"{expires}"
+    sig = _hmac.new(_SESSION_SECRET, payload.encode(), _hashlib.sha256).hexdigest()[:16]
+    return f"{expires}.{sig}"
+
+def _verify_session_token(token: str) -> bool:
+    try:
+        expires_str, sig = token.rsplit(".", 1)
+        if int(expires_str) < time.time():
+            return False
+        expected = _hmac.new(_SESSION_SECRET, expires_str.encode(), _hashlib.sha256).hexdigest()[:16]
+        return _hmac.compare_digest(sig, expected)
+    except Exception:
+        return False
+
 def _check_auth(handler) -> bool:
-    """Return True if request is authorised. Sends 401 and returns False if not."""
+    """Return True if request is authorised. Sends login page or 401 if not."""
     if not _PASSWORD:
         return True
-    # 1. Session cookie (set after first ?token= visit)
+    # 1. Signed session cookie (set by /login)
     for part in handler.headers.get("Cookie", "").split(";"):
         part = part.strip()
-        if part.startswith("fe_session=") and part[11:] == _PASSWORD:
+        if part.startswith("fe_session=") and _verify_session_token(part[11:]):
             return True
-    # 2. ?token= query param
+    # 2. ?token= query param (direct link sharing)
     qs = parse_qs(urlparse(handler.path).query)
     token = qs.get("token", [""])[0]
     if token == _PASSWORD:
         return True
-    # 3. Authorization: Bearer ... header (programmatic / API access)
+    # 3. Authorization: Bearer header (API/curl access)
     auth_header = handler.headers.get("Authorization", "")
     if auth_header.startswith("Bearer ") and auth_header[7:] == _PASSWORD:
         return True
-    handler.send_response(401)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("WWW-Authenticate", 'Bearer realm="Feeling Engine"')
-    handler.end_headers()
-    handler.wfile.write(b'{"error":"unauthorized"}')
+    # Unauthenticated — serve login page for root, JSON 401 for everything else
+    parsed_path = urlparse(handler.path).path
+    if parsed_path in ("/", "/index.html") and handler.command == "GET":
+        _serve_login_page(handler)
+    else:
+        handler.send_response(401)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("WWW-Authenticate", 'Bearer realm="Soma Feeling Engine"')
+        handler.end_headers()
+        handler.wfile.write(b'{"error":"unauthorized"}')
     return False
+
+def _serve_login_page(handler, error: str = ""):
+    ip = _get_ip(handler)
+    locked_s = _is_locked(ip)
+    attempts = _FAILED_ATTEMPTS.get(ip, {}).get("count", 0)
+    remaining_attempts = max(0, _MAX_ATTEMPTS - attempts)
+
+    if locked_s > 0:
+        error_html = f'<div class="err">Too many attempts. Try again in {int(locked_s//60)+1} min.</div>'
+    elif error:
+        error_html = f'<div class="err">{error} &nbsp;·&nbsp; {remaining_attempts} attempt{"s" if remaining_attempts!=1 else ""} remaining</div>'
+    else:
+        error_html = ""
+
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Soma Feeling Engine</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#03030f;color:#c8d0ff;font-family:'Courier New',monospace;
+  display:flex;align-items:center;justify-content:center;min-height:100vh;
+  background-image:radial-gradient(ellipse at 50% 30%,rgba(40,30,120,0.35) 0%,transparent 70%);}}
+.wrap{{text-align:center;width:340px}}
+.logo{{font-size:9px;letter-spacing:4px;color:rgba(120,140,255,0.35);text-transform:uppercase;margin-bottom:6px}}
+h1{{font-size:22px;letter-spacing:6px;text-transform:uppercase;font-weight:bold;
+  color:#a0b0ff;text-shadow:0 0 40px rgba(100,120,255,0.6),0 0 90px rgba(80,100,255,0.3);
+  margin-bottom:4px}}
+.sub{{font-size:8px;letter-spacing:3px;color:rgba(100,120,200,0.45);margin-bottom:48px;text-transform:uppercase}}
+.field{{position:relative;margin-bottom:16px}}
+input[type=password]{{
+  width:100%;padding:14px 18px;background:rgba(15,15,40,0.85);
+  border:1px solid rgba(80,100,200,0.30);border-radius:4px;
+  color:#c8d0ff;font-family:'Courier New',monospace;font-size:14px;letter-spacing:3px;
+  outline:none;transition:border 0.3s;}}
+input[type=password]:focus{{border-color:rgba(120,150,255,0.65);
+  box-shadow:0 0 20px rgba(80,100,255,0.15);}}
+input[type=password]::placeholder{{letter-spacing:2px;color:rgba(100,120,200,0.30);font-size:11px}}
+button{{width:100%;padding:13px;background:rgba(60,80,200,0.25);
+  border:1px solid rgba(100,130,255,0.40);border-radius:4px;
+  color:#a0b8ff;font-family:'Courier New',monospace;font-size:11px;letter-spacing:4px;
+  text-transform:uppercase;cursor:pointer;transition:all 0.3s;}}
+button:hover{{background:rgba(80,110,240,0.35);border-color:rgba(130,160,255,0.65);
+  box-shadow:0 0 30px rgba(80,100,255,0.20);color:#c8d8ff}}
+.err{{font-size:9px;letter-spacing:1px;color:rgba(255,100,100,0.75);
+  margin-top:14px;padding:8px;border:1px solid rgba(255,80,80,0.20);
+  border-radius:3px;background:rgba(80,10,10,0.30)}}
+.pulse{{width:6px;height:6px;background:#5060ff;border-radius:50%;
+  display:inline-block;margin:0 3px;animation:p 1.8s ease-in-out infinite}}
+.pulse:nth-child(2){{animation-delay:0.3s}}.pulse:nth-child(3){{animation-delay:0.6s}}
+@keyframes p{{0%,100%{{opacity:0.15;transform:scale(0.8)}}50%{{opacity:1;transform:scale(1.3)}}}}
+.dots{{margin-bottom:40px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">Soma</div>
+  <h1>Feeling Engine</h1>
+  <div class="sub">Neural · Emotional · Embodied</div>
+  <div class="dots">
+    <span class="pulse"></span><span class="pulse"></span><span class="pulse"></span>
+  </div>
+  <form method="POST" action="/login">
+    <div class="field">
+      <input type="password" name="password" placeholder="enter access key" autofocus autocomplete="off">
+    </div>
+    <button type="submit">Enter</button>
+    {error_html}
+  </form>
+</div>
+</body>
+</html>"""
+    body = page.encode()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
 # ── HTTP HANDLER ──────────────────────────────────────────────
@@ -1272,11 +1409,12 @@ class FeelingHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/" or path == "/index.html":
-            # If authenticated via ?token=, bake a session cookie so all
-            # subsequent requests (SSE, fetch) work without repeating the token.
+            # If authenticated via ?token=, bake a signed session cookie
             qs_token = parse_qs(parsed.query).get("token", [""])[0]
-            cookie = (f"fe_session={qs_token}; Path=/; HttpOnly; SameSite=Strict"
-                      if qs_token and qs_token == _PASSWORD else None)
+            cookie = None
+            if qs_token and qs_token == _PASSWORD:
+                signed = _make_session_token()
+                cookie = f"fe_session={signed}; Path=/; HttpOnly; SameSite=Strict; Max-Age={_SESSION_TTL}"
             self.serve_html(set_cookie=cookie)
         elif path == "/events":
             self.serve_sse()
@@ -1341,6 +1479,30 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_json({"voices": [], "error": str(ex)})
 
     def do_POST(self):
+        # /login is the one POST that doesn't require prior auth
+        if self.path == "/login":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            ip = _get_ip(self)
+            locked_s = _is_locked(ip)
+            if locked_s > 0:
+                _serve_login_page(self, "")
+                return
+            params = parse_qs(body.decode(errors="replace"))
+            entered = params.get("password", [""])[0]
+            if _PASSWORD and entered == _PASSWORD:
+                _clear_failures(ip)
+                token = _make_session_token()
+                cookie = f"fe_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={_SESSION_TTL}"
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", cookie)
+                self.end_headers()
+            else:
+                _record_failure(ip)
+                _serve_login_page(self, "Incorrect access key.")
+            return
+
         if not _check_auth(self):
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -1350,7 +1512,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             # Workaround for Railway Runtime V2 not injecting user vars.
             # Auth: admin_token must match RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID.
             try:
-                global _RUNTIME_API_KEY, _PASSWORD
+                global _RUNTIME_API_KEY, _PASSWORD  # noqa: PLW0603
                 data = json.loads(body)
                 provided_token = data.get("admin_token", "")
                 valid_tokens = {
