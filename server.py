@@ -2078,6 +2078,12 @@ function rc(rx,ry,x0,y0,w,h){{return[x0+rx*w,y0+ry*h];}}
 // ── BRAIN ANIMATION ───────────────────────────────────────────
 let brainT=0;
 let signalPulses=[];
+
+// Power-curve normalization: maps raw Wilson-Cowan activity (0.008 rest → 0.7 peak)
+// to display range (0.24 rest → 1.0 peak), preserving the relative hierarchy.
+// Without this, resting activity (0.008–0.012) is invisible (threshold was 0.10).
+function normAct(v){{return Math.min(1,Math.pow(v/0.70,0.35));}}
+
 function animBrain(){{
   brainT+=0.018;
   const W=bC.width,H=bC.height;
@@ -2113,17 +2119,17 @@ function animBrain(){{
     bX.fillText(lbl,lx-(lbl.length*3.5),ly);
   }});
 
-  const allR=Object.entries(REGION_POS).map(([a,p])=>[a,brainAct[a]||0,p]);
-  const top=allR.filter(([,v])=>v>0.22).sort((a,b)=>b[1]-a[1]).slice(0,24);
+  const allR=Object.entries(REGION_POS).map(([a,p])=>[a,normAct(brainAct[a]||0),p]);
+  const top=allR.filter(([,v])=>v>0.18).sort((a,b)=>b[1]-a[1]).slice(0,24);
 
   // ── Connections between co-active regions ──────────────────
   const talking=streaming||isSpeaking;
-  const connThr=talking?0.04:0.14;
+  const connThr=talking?0.04:0.10;
   // All active pairs when talking; broader coverage at rest
   const connK=talking?top.length:Math.min(top.length,14);
 
-  // Spawn signal pulses — more frequent when active
-  if(top.length>1&&Math.random()<(talking?0.28:0.06)){{
+  // Spawn signal pulses — always alive, more frequent when active
+  if(top.length>1&&Math.random()<(talking?0.28:0.14)){{
     const pi=Math.floor(Math.random()*Math.min(top.length,12));
     const pj=(pi+1+Math.floor(Math.random()*6))%Math.min(top.length,12);
     signalPulses.push({{i:pi,j:pj,phase:0,spd:0.018+Math.random()*0.038}});
