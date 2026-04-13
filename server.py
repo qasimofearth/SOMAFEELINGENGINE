@@ -1288,8 +1288,12 @@ def _check_auth(handler) -> bool:
         return True
     # Unauthenticated — serve login page for root, JSON 401 for everything else
     parsed_path = urlparse(handler.path).path
-    if parsed_path in ("/", "/index.html") and handler.command == "GET":
-        _serve_login_page(handler)
+    cmd = getattr(handler, 'command', 'GET')
+    if parsed_path in ("/", "/index.html", "") and cmd in ("GET", "HEAD"):
+        try:
+            _serve_login_page(handler)
+        except Exception as _e:
+            print(f"[LOGIN PAGE ERROR] {_e}", flush=True)
     else:
         handler.send_response(401)
         handler.send_header("Content-Type", "application/json")
