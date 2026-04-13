@@ -1391,6 +1391,20 @@ class FeelingHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _handle_healthz(self):
+        env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+        key = env_key or _RUNTIME_API_KEY
+        self.send_json({
+            "status": "ok",
+            "key_set": bool(key),
+            "key_source": "env" if env_key else ("runtime" if _RUNTIME_API_KEY else "none"),
+            "key_len": len(key),
+            "key_prefix": key[:12] if key else "",
+            "railway_env": os.environ.get("RAILWAY_ENVIRONMENT_NAME", ""),
+            "railway_service_id": os.environ.get("RAILWAY_SERVICE_ID", ""),
+            "all_env_keys": sorted(os.environ.keys()),
+        })
+
     def _is_authed(self) -> bool:
         """Return True if this request is authenticated, without sending any response."""
         if not _PASSWORD:
@@ -1410,8 +1424,14 @@ class FeelingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        # Serve login page for unauthenticated root requests — bypass _check_auth
-        # so Railway CDN/proxy can't interfere with the 401→login redirect flow.
+
+        # /healthz is always public — Railway's health checker must reach it
+        # without auth or the new instance is never marked healthy.
+        if path == "/healthz":
+            self._handle_healthz()
+            return
+
+        # Login page — serve without auth for root path
         if path in ("/", "/index.html", ""):
             if not self._is_authed():
                 _serve_login_page(self)
@@ -1431,18 +1451,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/healthz":
-            env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
-            key = env_key or _RUNTIME_API_KEY
-            all_keys = sorted(os.environ.keys())
-            self.send_json({
-                "key_set": bool(key),
-                "key_source": "env" if env_key else ("runtime" if _RUNTIME_API_KEY else "none"),
-                "key_len": len(key),
-                "key_prefix": key[:12] if key else "",
-                "railway_env": os.environ.get("RAILWAY_ENVIRONMENT_NAME", ""),
-                "railway_service_id": os.environ.get("RAILWAY_SERVICE_ID", ""),
-                "all_env_keys": all_keys,
-            })
+            self._handle_healthz()
             return
 
         if path == "/" or path == "/index.html":
