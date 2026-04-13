@@ -26,6 +26,9 @@ import queue
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+print(f"[STARTUP] Python {sys.version} | pid={os.getpid()}", flush=True)
+print(f"[STARTUP] PORT={os.environ.get('PORT','?')} | CWD={os.getcwd()}", flush=True)
+
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_here))  # local: parent of feeling_engine/
 sys.path.insert(0, _here)                   # Railway: repo root is /app
@@ -34,6 +37,7 @@ sys.path.insert(0, _here)                   # Railway: repo root is /app
 # feeling_engine package by properly loading its __init__.py
 try:
     import feeling_engine as _fe_test  # noqa: F401
+    print("[STARTUP] feeling_engine imported directly", flush=True)
 except ImportError:
     import importlib.util as _ilu
     _init = os.path.join(_here, "__init__.py")
@@ -44,8 +48,11 @@ except ImportError:
     sys.modules["feeling_engine"] = _mod
     _spec.loader.exec_module(_mod)
     del _ilu, _init, _spec, _mod
+    print("[STARTUP] feeling_engine registered via importlib", flush=True)
 
+print("[STARTUP] importing anthropic...", flush=True)
 import anthropic
+print("[STARTUP] anthropic OK", flush=True)
 from feeling_engine.text_emotion import analyze_text
 from feeling_engine.emotion_map import EMOTION_MAP
 from feeling_engine import build_emotion_tree, tree_to_frequency_spectrum
@@ -55,8 +62,10 @@ from feeling_engine.brain import BrainEngine
 from feeling_engine.brain.neurotransmitters import NT_SYSTEMS
 from feeling_engine.brain.emotion_circuits import EMOTION_CIRCUITS
 from dataclasses import asdict
+print("[STARTUP] all feeling_engine imports OK", flush=True)
 
 PORT = int(os.environ.get("PORT", 7433))
+print(f"[STARTUP] binding to 0.0.0.0:{PORT}", flush=True)
 
 # Per-model emotional fingerprint memories (existing)
 MEMORIES: dict = {}
