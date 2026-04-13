@@ -3317,6 +3317,13 @@ function unlock(){{
   streaming=false;
   ['send-btn','compare-btn','msg-input','img-btn'].forEach(id=>document.getElementById(id).disabled=false);
   document.getElementById('msg-input').focus();
+  // Auto-send any VAD message that was queued while Elan was speaking/streaming
+  const queued=document.getElementById('msg-input').value.trim();
+  if(openMicMode&&queued&&!isSpeaking&&ttsFetchCount===0){{
+    setTimeout(()=>{{
+      if(document.getElementById('msg-input').value.trim()===queued&&!streaming)send();
+    }},200);
+  }}
 }}
 function send(){{
   const inp=document.getElementById('msg-input'),msg=inp.value.trim();
@@ -3551,12 +3558,15 @@ async function startOpenMic(){{
             micBtn.classList.remove('user-speaking','pausing');
             micBtn.style.boxShadow='';
             _setVadBar(0);
-            if(vadTranscript.trim()&&!streaming&&!isSpeaking&&ttsFetchCount===0){{
-              _vadSend();
-            }} else {{
-              vadTranscript='';
-              document.getElementById('msg-input').value='';
-              _setVadStatus('open · listening');
+            if(vadTranscript.trim()){{
+              if(!streaming&&!isSpeaking&&ttsFetchCount===0){{
+                _vadSend();
+              }} else {{
+                // Elan is still speaking/streaming — show transcript in input box
+                // so it's visible and will auto-send once Elan finishes
+                document.getElementById('msg-input').value=vadTranscript.trim();
+                _setVadStatus('queued · waiting for Elan...');
+              }}
             }}
           }}
         }}
