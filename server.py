@@ -1419,6 +1419,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
         elif not _check_auth(self):
             return
 
+        if path == "/debug-path":
+            # Temporary: expose what path/headers Railway actually sends
+            self.send_json({
+                "raw_path": self.path,
+                "parsed_path": path,
+                "command": self.command,
+                "host": self.headers.get("Host",""),
+                "x_forwarded": self.headers.get("X-Forwarded-For",""),
+            })
+            return
+
         if path == "/healthz":
             env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
             key = env_key or _RUNTIME_API_KEY
