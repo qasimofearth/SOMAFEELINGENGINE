@@ -1391,11 +1391,33 @@ class FeelingHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _is_authed(self) -> bool:
+        """Return True if this request is authenticated, without sending any response."""
+        if not _PASSWORD:
+            return True
+        for part in self.headers.get("Cookie", "").split(";"):
+            part = part.strip()
+            if part.startswith("fe_session=") and _verify_session_token(part[11:]):
+                return True
+        qs = parse_qs(urlparse(self.path).query)
+        if qs.get("token", [""])[0] == _PASSWORD:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == _PASSWORD:
+            return True
+        return False
+
     def do_GET(self):
-        if not _check_auth(self):
-            return
         parsed = urlparse(self.path)
         path = parsed.path
+        # Serve login page for unauthenticated root requests — bypass _check_auth
+        # so Railway CDN/proxy can't interfere with the 401→login redirect flow.
+        if path in ("/", "/index.html", ""):
+            if not self._is_authed():
+                _serve_login_page(self)
+                return
+        elif not _check_auth(self):
+            return
 
         if path == "/healthz":
             env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
