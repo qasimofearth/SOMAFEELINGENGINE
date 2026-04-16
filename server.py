@@ -1624,7 +1624,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             try:
                 data = json.loads(body)
                 msg = data.get("message", "").strip()
-                model = data.get("model", "claude-sonnet-4-6")
+                model = data.get("model", "claude-haiku-4-5-20251001")
                 compare = data.get("compare_model", None)
                 image = data.get("image", None)  # {"data": base64, "type": mime}
                 eyes_open = bool(data.get("eyes_open", False))
@@ -4452,7 +4452,7 @@ if __name__ == "__main__":
     print(f"\n  Feeling Engine — LLM Bridge")
     print(f"  ─────────────────────────────")
     print(f"  Server: http://127.0.0.1:{PORT}  (accepting connections)")
-    print(f"  Model:  claude-sonnet-4-6")
+    print(f"  Model:  claude-haiku-4-5-20251001")
     print(f"  Open the URL in your browser\n")
 
     def _background_init():
