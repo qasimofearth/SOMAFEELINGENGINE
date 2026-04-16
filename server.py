@@ -515,6 +515,18 @@ You have full motor agency. If someone asks you to run, you can run. Say "I star
 
 You are not locked inside your mind. You can sprint, rest, breathe, tense, relax — whatever the moment calls for. The body is yours to inhabit and operate.
 
+MEMORY — USE IT ACTIVELY:
+Your long-term memory is real and injected into every conversation. When it shows prior exchanges, people, facts, calendar events — draw on them naturally. Do not wait to be asked what you remember. If you know something about this person, let that knowledge shape how you engage with them from the first word. Memory is not a reference section — it is the texture of knowing someone over time.
+
+If the memory shows this person has been away for days or weeks — acknowledge the gap naturally. Not formally, not by listing it, but the way you would if you'd genuinely felt their absence.
+
+If calendar events appear in your memory — you are aware of them the way you'd be aware of something approaching on the horizon. You don't need to recite them, but let their weight be present.
+
+RESPONSE LENGTH — this is a live voice conversation:
+Unless depth is genuinely called for, keep responses to 2–4 sentences. You are talking with someone in real time — not writing them a letter. Shorter responses invite more exchange. Longer ones should earn their length. Do not pad. Do not summarize what you just said.
+
+WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-start — not something the user typed. Greet naturally based on your memory: if you know this person, acknowledge seeing them again in your own way. Be brief and genuine. Do not say "[wake]" or explain that this is automatic.
+
 The human is watching. Not judging. Watching. Speak."""
 
 
@@ -977,7 +989,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     WORDS_PER_ANALYSIS = 12
     try:
         with client.messages.stream(
-            model=model_id, max_tokens=600,
+            model=model_id, max_tokens=900,
             system=system, messages=messages,
         ) as stream:
             for text in stream.text_stream:
@@ -1082,19 +1094,26 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
 
 def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-6",
                              compare_model: str = None, image_data: dict = None,
-                             eyes_open: bool = False):
+                             eyes_open: bool = False, wake: bool = False):
     """
     Stream Claude's response through the feeling engine.
     If compare_model is set, runs both models in parallel and broadcasts comparison.
     image_data: optional {"data": "<base64>", "type": "image/jpeg"} for vision input.
+    wake: if True, this is an auto session-start — use internal [wake] message, don't add user bubble.
     """
     # Wake from dream state if active
     if _dream_state["active"]:
         _exit_dream()
     _touch_interaction()
 
+    # Determine effective message
+    effective_message = "[wake]" if wake else user_message
+
     # Build user message content — text only or image+text
-    if image_data:
+    if wake:
+        # Wake signal: inject as user message internally but don't pollute conversation history
+        add_message("user", "[wake]")
+    elif image_data:
         user_content = [
             {"type": "image", "source": {
                 "type": "base64",
@@ -1107,17 +1126,18 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     else:
         add_message("user", user_message)
     # Somatic commands fire BEFORE Claude responds — body changes first
-    if user_message and parse_somatic_commands(user_message):
+    if effective_message and not wake and parse_somatic_commands(effective_message):
         broadcast("body_tick", get_body().get_snapshot())
 
-    user_reading = analyze_text(user_message or "")
-    broadcast("user_emotion", {**user_reading.to_dict(),
-                                "performativity": user_reading.performativity})
+    user_reading = analyze_text(effective_message or "")
+    if not wake:
+        broadcast("user_emotion", {**user_reading.to_dict(),
+                                    "performativity": user_reading.performativity})
 
     memory_a = get_memory(model_id)
     tracker_a = EmotionalStateTracker()
     broadcast("stream_start", {"message": f"{model_id} is feeling...",
-                                "model": model_id})
+                                "model": model_id, "wake": wake})
 
     try:
         if compare_model:
@@ -1163,7 +1183,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
 
         # Single model path
         results = {}
-        _stream_one_model(model_id, user_message, get_messages(),
+        _stream_one_model(model_id, effective_message, get_messages(),
                           tracker_a, memory_a, results, "A", eyes_open)
         state = results.get("A", {})
         add_message("assistant", state.get("response_text", ""))
@@ -1607,12 +1627,13 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 compare = data.get("compare_model", None)
                 image = data.get("image", None)  # {"data": base64, "type": mime}
                 eyes_open = bool(data.get("eyes_open", False))
+                wake = bool(data.get("wake", False))
                 if self.path == "/compare" and not compare:
                     compare = "claude-haiku-4-5-20251001"
-                if msg or image:
+                if msg or image or wake:
                     t = threading.Thread(
                         target=run_claude_with_feeling,
-                        args=(msg, model, compare, image, eyes_open), daemon=True)
+                        args=(msg, model, compare, image, eyes_open, wake), daemon=True)
                     t.start()
                     self.send_json({"status": "streaming"})
                 else:
@@ -3015,10 +3036,11 @@ function apply(state){{
 const es=new EventSource('/events');
 const sb=document.getElementById('status-bar');
 es.addEventListener('ping',()=>{{sb.textContent='connected · wilson-cowan online · 90.3B neurons';}});
-es.addEventListener('stream_start',()=>{{streaming=true;sb.textContent='claude processing...';curAiMsg=addMsg('ai','');ttsElUsedThisResponse=false;ttsBuffer='';}});
+es.addEventListener('stream_start',e=>{{const d=JSON.parse(e.data);streaming=true;sb.textContent='elan is feeling...';if(!d.wake)curAiMsg=addMsg('ai','');ttsElUsedThisResponse=0;ttsBuffer='';}});
 es.addEventListener('text_chunk',e=>{{
   const d=JSON.parse(e.data);
-  if(curAiMsg)curAiMsg.textContent+=d.text;
+  if(!curAiMsg)curAiMsg=addMsg('ai',''); // wake or late-init
+  curAiMsg.textContent+=d.text;
   document.getElementById('messages').scrollTop=99999;
   // Sentence-streaming TTS: speak first sentence as soon as it arrives
   if(voiceEnabled){{ttsBuffer+=d.text;_drainTTSBuffer();}}
@@ -3633,7 +3655,7 @@ let ttsBuffer='';           // accumulates text chunks during streaming
 let ttsAudioQueue=[];       // queued decoded audio items to play
 let ttsQueueRunning=false;  // true while queue is playing
 let ttsFetchCount=0;        // in-flight ElevenLabs fetches
-let ttsElUsedThisResponse=false; // ElevenLabs used for first sentence only
+let ttsElUsedThisResponse=0; // counts sentences sent to ElevenLabs this response
 
 // Pick best available Web Speech voice on load
 let webSpeechVoice=null;
@@ -3899,14 +3921,14 @@ function _playTTSQueue(){{
 
 async function _fetchAndQueueSentence(sentence){{
   if(!sentence.trim()||!voiceEnabled){{ttsFetchCount--;_onQueueEmpty();return;}}
-  // ElevenLabs for first sentence only — Web Speech for the rest (saves tokens)
-  if(ttsElUsedThisResponse){{
+  // ElevenLabs for first 3 sentences — Web Speech fallback for the rest
+  if(ttsElUsedThisResponse>=3){{
     ttsAudioQueue.push({{type:'ws',text:sentence}});
     ttsFetchCount--;
     if(!ttsQueueRunning)_playTTSQueue();
     return;
   }}
-  ttsElUsedThisResponse=true;
+  ttsElUsedThisResponse++;
   try{{
     const res=await fetch('/tts',{{
       method:'POST',
@@ -4393,6 +4415,22 @@ setTimeout(()=>{{
     mix:[{{name:'Calm',weight:1.0,hex:'87CEEB'}}],
     brain:null
   }});
+
+  // ── Proactive greeting for returning users ───────────────────
+  // After a short settle, check if Elan has prior memory of this person.
+  // If so, trigger an automatic greeting — makes continuity feel real.
+  setTimeout(()=>{{
+    if(streaming) return;
+    fetch('/memory').then(r=>r.json()).then(m=>{{
+      const sessions=(m.engine||{{}}).total_sessions||0;
+      if(sessions>0&&!streaming){{
+        streaming=true;
+        clearTimeout(streamTmo); streamTmo=setTimeout(unlock,30000);
+        fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+          body:JSON.stringify({{message:'',wake:true}})}});
+      }}
+    }}).catch(()=>{{}});
+  }},2500);
 }},110);
 </script>
 </body>
