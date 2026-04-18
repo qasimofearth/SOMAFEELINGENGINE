@@ -991,17 +991,40 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     def _iter_stream():
         """Yield text chunks from whichever provider is active."""
         if provider == "groq":
-            groq_model = "llama-3.3-70b-versatile"
-            def _to_groq_content(c):
+            def _to_groq_content(c, vision=False):
                 if isinstance(c, str):
                     return c
-                # List content blocks (image+text) — extract text only, drop image data
                 if isinstance(c, list):
-                    parts = [b.get("text","") for b in c if isinstance(b,dict) and b.get("type")=="text"]
-                    return " ".join(parts).strip() or "[image]"
+                    if vision:
+                        # Convert Anthropic image blocks → OpenAI image_url blocks
+                        out = []
+                        for b in c:
+                            if not isinstance(b, dict): continue
+                            if b.get("type") == "text":
+                                out.append({"type": "text", "text": b["text"]})
+                            elif b.get("type") == "image":
+                                src = b.get("source", {})
+                                if src.get("type") == "base64":
+                                    mime = src.get("media_type", "image/jpeg")
+                                    data = src.get("data", "")
+                                    out.append({"type": "image_url",
+                                                "image_url": {"url": f"data:{mime};base64,{data}"}})
+                        return out if out else "[image]"
+                    else:
+                        # Text-only model — strip images, keep text
+                        parts = [b.get("text","") for b in c if isinstance(b,dict) and b.get("type")=="text"]
+                        return " ".join(parts).strip() or "[image]"
                 return str(c)
+
+            # Detect if the last user message has image content
+            has_image = any(
+                isinstance(m.get("content"), list) and
+                any(isinstance(b, dict) and b.get("type") == "image" for b in m["content"])
+                for m in messages if m.get("role") == "user"
+            )
+            groq_model = "meta-llama/llama-4-scout-17b-16e-instruct" if has_image else "llama-3.3-70b-versatile"
             groq_msgs = [{"role": "system", "content": system}] + [
-                {"role": m["role"], "content": _to_groq_content(m["content"])}
+                {"role": m["role"], "content": _to_groq_content(m["content"], vision=has_image)}
                 for m in messages
             ]
             stream = _get_groq_client().chat.completions.create(
