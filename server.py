@@ -951,7 +951,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False):
     """Stream a single model, fill out[label] with final state."""
-    client = _get_anthropic_client()
+    provider = _get_provider()
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
@@ -987,52 +987,70 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     full_response = ""
     chunk_buffer = ""
     WORDS_PER_ANALYSIS = 12
+
+    def _iter_stream():
+        """Yield text chunks from whichever provider is active."""
+        if provider == "groq":
+            groq_model = "llama-3.3-70b-versatile"
+            groq_msgs = [{"role": "system", "content": system}] + [
+                {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else str(m["content"])}
+                for m in messages
+            ]
+            stream = _get_groq_client().chat.completions.create(
+                model=groq_model, max_tokens=900, messages=groq_msgs, stream=True
+            )
+            for chunk in stream:
+                text = chunk.choices[0].delta.content or ""
+                if text:
+                    yield text
+        else:
+            with _get_anthropic_client().messages.stream(
+                model=model_id, max_tokens=900,
+                system=system, messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield text
+
     try:
-        with client.messages.stream(
-            model=model_id, max_tokens=900,
-            system=system, messages=messages,
-        ) as stream:
-            for text in stream.text_stream:
-                full_response += text
-                chunk_buffer += text
-                if label == "A":  # only primary model streams to chat
-                    broadcast("text_chunk", {"text": text})
-                if len(chunk_buffer.split()) >= WORDS_PER_ANALYSIS:
-                    reading = analyze_text(chunk_buffer)
-                    state = tracker.update(reading, nt_levels=_last_nt)  # NT feedback loop
-                    state["performativity"] = reading.performativity
-                    state["signal_quality"] = round(1.0 - reading.performativity, 3)
-                    memory.record_moment(state, word_count=len(chunk_buffer.split()))
-                    if label == "A":
-                        # Run emotion through brain simulation
-                        emotion_name = state.get("emotion", "Calm")
-                        intensity = min(1.0, 0.3 + abs(state.get("arousal", 0.4)) * 0.7)
-                        brain_result = get_brain().process_emotion(emotion_name, intensity)
-                        _last_nt = brain_result.get("nt_levels", _last_nt)  # carry forward
-                        # Run emotion through body simulation
-                        body_result = get_body().process_emotion(emotion_name, intensity, brain_result)
-                        # Apply body→brain afferent feedback at physiological weight.
-                        # Interoception (vagal, skin, muscle, visceral) is a major
-                        # input to insula and brainstem — not a minor side channel.
-                        afferent = get_body().get_afferent_brain_drives()
-                        for region, drive in afferent.items():
-                            if region in get_brain().sim.states:
-                                get_brain().sim.inject_drive(region, drive * 0.38, additive=True)
-                        state["brain"] = {
-                            "active_regions": brain_result["active_regions"][:12],
-                            "region_activities": {ab: v["activity"] for ab, v in get_brain().sim.get_snapshot().items()},
-                            "nt_levels": brain_result["nt_levels"],
-                            "eeg_bands": brain_result["eeg_bands"],
-                            "networks": brain_result["networks"],
-                            "sync_order": brain_result["sync_order"],
-                            "dominant_band": brain_result["dominant_band"],
-                            "narrative": brain_result["narrative"],
-                            "circuit_description": brain_result["circuit_description"],
-                            "sim_time_ms": brain_result["sim_time_ms"],
-                        }
-                        state["body"] = body_result
-                        broadcast("emotion_update", state)
-                    chunk_buffer = ""
+        for text in _iter_stream():
+            full_response += text
+            chunk_buffer += text
+            if label == "A":  # only primary model streams to chat
+                broadcast("text_chunk", {"text": text})
+            if len(chunk_buffer.split()) >= WORDS_PER_ANALYSIS:
+                reading = analyze_text(chunk_buffer)
+                state = tracker.update(reading, nt_levels=_last_nt)  # NT feedback loop
+                state["performativity"] = reading.performativity
+                state["signal_quality"] = round(1.0 - reading.performativity, 3)
+                memory.record_moment(state, word_count=len(chunk_buffer.split()))
+                if label == "A":
+                    # Run emotion through brain simulation
+                    emotion_name = state.get("emotion", "Calm")
+                    intensity = min(1.0, 0.3 + abs(state.get("arousal", 0.4)) * 0.7)
+                    brain_result = get_brain().process_emotion(emotion_name, intensity)
+                    _last_nt = brain_result.get("nt_levels", _last_nt)  # carry forward
+                    # Run emotion through body simulation
+                    body_result = get_body().process_emotion(emotion_name, intensity, brain_result)
+                    # Apply body→brain afferent feedback at physiological weight.
+                    afferent = get_body().get_afferent_brain_drives()
+                    for region, drive in afferent.items():
+                        if region in get_brain().sim.states:
+                            get_brain().sim.inject_drive(region, drive * 0.38, additive=True)
+                    state["brain"] = {
+                        "active_regions": brain_result["active_regions"][:12],
+                        "region_activities": {ab: v["activity"] for ab, v in get_brain().sim.get_snapshot().items()},
+                        "nt_levels": brain_result["nt_levels"],
+                        "eeg_bands": brain_result["eeg_bands"],
+                        "networks": brain_result["networks"],
+                        "sync_order": brain_result["sync_order"],
+                        "dominant_band": brain_result["dominant_band"],
+                        "narrative": brain_result["narrative"],
+                        "circuit_description": brain_result["circuit_description"],
+                        "sim_time_ms": brain_result["sim_time_ms"],
+                    }
+                    state["body"] = body_result
+                    broadcast("emotion_update", state)
+                chunk_buffer = ""
         if chunk_buffer.strip():
             reading = analyze_text(chunk_buffer)
             state = tracker.update(reading, nt_levels=_last_nt)
@@ -1210,10 +1228,27 @@ _PASSWORD = os.environ.get("FEELING_PASSWORD", "")  # TEMP: empty to let Railway
 
 # Runtime key override — set via /setkey if Railway env injection fails
 _RUNTIME_API_KEY = ""
+_RUNTIME_GROQ_KEY = ""
 
-# Cached Anthropic client — rebuilt only when the key changes
+# Cached clients — rebuilt only when the key changes
 _anthropic_client = None
 _anthropic_client_key = None
+_groq_client = None
+_groq_client_key = None
+
+def _get_provider() -> str:
+    """Return 'groq' if a Groq key is available, else 'anthropic'."""
+    groq_key = (_RUNTIME_GROQ_KEY or os.environ.get("GROQ_API_KEY", "")).strip()
+    return "groq" if groq_key else "anthropic"
+
+def _get_groq_client():
+    global _groq_client, _groq_client_key
+    from openai import OpenAI
+    key = (_RUNTIME_GROQ_KEY or os.environ.get("GROQ_API_KEY", "")).strip()
+    if _groq_client is None or key != _groq_client_key:
+        _groq_client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+        _groq_client_key = key
+    return _groq_client
 
 def _get_anthropic_client():
     global _anthropic_client, _anthropic_client_key
@@ -1228,12 +1263,14 @@ def _get_anthropic_client():
 _KEYS_FILE = "/tmp/fe_keys.json"
 
 def _load_persisted_keys():
-    global _RUNTIME_API_KEY, _PASSWORD
+    global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD
     try:
         with open(_KEYS_FILE) as f:
             d = json.load(f)
         if d.get("key") and not _RUNTIME_API_KEY:
             _RUNTIME_API_KEY = d["key"]
+        if d.get("groq_key") and not _RUNTIME_GROQ_KEY:
+            _RUNTIME_GROQ_KEY = d["groq_key"]
         if d.get("password") and not _PASSWORD:
             _PASSWORD = d["password"]
     except Exception:
@@ -1242,7 +1279,7 @@ def _load_persisted_keys():
 def _persist_keys():
     try:
         with open(_KEYS_FILE, "w") as f:
-            json.dump({"key": _RUNTIME_API_KEY, "password": _PASSWORD}, f)
+            json.dump({"key": _RUNTIME_API_KEY, "groq_key": _RUNTIME_GROQ_KEY, "password": _PASSWORD}, f)
     except Exception:
         pass
 
@@ -1605,15 +1642,20 @@ class FeelingHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({"error": "forbidden — use RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID as admin_token"}).encode())
                     return
                 new_key = data.get("key", "").strip()
+                new_groq_key = data.get("groq_key", "").strip()
                 new_password = data.get("password", "").strip()
                 if new_key:
                     _RUNTIME_API_KEY = new_key
+                if new_groq_key:
+                    _RUNTIME_GROQ_KEY = new_groq_key
                 if new_password:
                     _PASSWORD = new_password
                 _persist_keys()
                 self.send_json({
                     "ok": True,
+                    "provider": _get_provider(),
                     "key_set": bool(_RUNTIME_API_KEY),
+                    "groq_key_set": bool(_RUNTIME_GROQ_KEY or os.environ.get("GROQ_API_KEY","")),
                     "password_set": bool(_PASSWORD),
                 })
             except Exception as e:
