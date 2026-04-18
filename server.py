@@ -1594,7 +1594,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_json({"voices": [], "error": str(ex)})
 
     def do_POST(self):
-        global _RUNTIME_API_KEY, _PASSWORD  # must be at top of function
+        global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD  # must be at top of function
         # /login is the one POST that doesn't require prior auth
         if self.path == "/login":
             length = int(self.headers.get("Content-Length", 0))
