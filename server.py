@@ -992,8 +992,16 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         """Yield text chunks from whichever provider is active."""
         if provider == "groq":
             groq_model = "llama-3.3-70b-versatile"
+            def _to_groq_content(c):
+                if isinstance(c, str):
+                    return c
+                # List content blocks (image+text) — extract text only, drop image data
+                if isinstance(c, list):
+                    parts = [b.get("text","") for b in c if isinstance(b,dict) and b.get("type")=="text"]
+                    return " ".join(parts).strip() or "[image]"
+                return str(c)
             groq_msgs = [{"role": "system", "content": system}] + [
-                {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else str(m["content"])}
+                {"role": m["role"], "content": _to_groq_content(m["content"])}
                 for m in messages
             ]
             stream = _get_groq_client().chat.completions.create(
