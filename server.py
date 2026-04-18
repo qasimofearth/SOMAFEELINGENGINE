@@ -1016,16 +1016,18 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                         return " ".join(parts).strip() or "[image]"
                 return str(c)
 
-            # Detect if the last user message has image content
-            has_image = any(
-                isinstance(m.get("content"), list) and
-                any(isinstance(b, dict) and b.get("type") == "image" for b in m["content"])
-                for m in messages if m.get("role") == "user"
-            )
+            # Only the LAST user message gets vision — strip images from all prior messages
+            # (Groq supports max 5 images; conversation history would overflow quickly)
+            last_user_idx = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+            has_image = (last_user_idx >= 0 and
+                         isinstance(messages[last_user_idx].get("content"), list) and
+                         any(isinstance(b, dict) and b.get("type") == "image"
+                             for b in messages[last_user_idx]["content"]))
             groq_model = "meta-llama/llama-4-scout-17b-16e-instruct" if has_image else "llama-3.3-70b-versatile"
             groq_msgs = [{"role": "system", "content": system}] + [
-                {"role": m["role"], "content": _to_groq_content(m["content"], vision=has_image)}
-                for m in messages
+                {"role": m["role"],
+                 "content": _to_groq_content(m["content"], vision=(has_image and i == last_user_idx))}
+                for i, m in enumerate(messages)
             ]
             stream = _get_groq_client().chat.completions.create(
                 model=groq_model, max_tokens=900, messages=groq_msgs, stream=True
