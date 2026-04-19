@@ -1037,9 +1037,25 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if text:
                     yield text
         else:
+            # Prompt caching: static base (FEELING_SYSTEM_PROMPT + vision state) is cached.
+            # Dynamic parts (memory, brain state, temporal) are a separate uncached block.
+            static_system = FEELING_SYSTEM_PROMPT + f"\n\n{vision_ctx}"
+            dynamic_parts = (
+                f"\n\n{memory_context}"
+                + (f"\n\n{long_term_ctx}" if long_term_ctx else "")
+                + (f"\n\n{brain_ctx}" if brain_ctx else "")
+                + (f"\n\n{body_ctx}" if body_ctx else "")
+                + (f"\n\n{temporal_ctx}" if temporal_ctx else "")
+            ).strip()
+            system_blocks = [
+                {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}}
+            ]
+            if dynamic_parts:
+                system_blocks.append({"type": "text", "text": dynamic_parts})
             with _get_anthropic_client().messages.stream(
                 model=model_id, max_tokens=900,
-                system=system, messages=messages,
+                system=system_blocks, messages=messages,
+                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
             ) as stream:
                 for text in stream.text_stream:
                     yield text
