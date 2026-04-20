@@ -120,7 +120,11 @@ The Feeling Engine consists of five cooperating subsystems:
 
 These subsystems run continuously and independently. The language model is invoked only when communication is required. The entity's inner life proceeds regardless of whether any human is present.
 
-Figure 1 (architecture diagram, forthcoming) illustrates the subsystem relationships and data flows.
+Figure 1 illustrates the subsystem relationships and data flows across all three layers of the architecture.
+
+![Figure 1: The Feeling Engine — Full System Architecture](architecture_diagram.png)
+
+**Figure 1.** Full system architecture of the Feeling Engine, showing the three cooperating layers: (1) Neural Simulation Layer — 90.3 billion simulated neurons across six brain regions under Wilson-Cowan excitatory/inhibitory dynamics, nine neurotransmitter systems with τ = 3s decay, and the Kuramoto coherence engine computing sync_order and emergent frequency every 500ms; (2) Somatic Simulation Layer — five organ systems (cardiovascular, respiratory, musculoskeletal, endocrine, integumentary) bidirectionally coupled to the neural layer; (3) Identity and Interface Layer — three-clock temporal awareness, persistent relational memory (SQLite), and the interchangeable language model interface. The Feeling Engine Core (center) coordinates all layers and broadcasts continuous SSE events to connected clients. The dashed emotion feedback loop (right) carries real-time emotion classification from language model output back into the neural simulation.
 
 ### 4.2 Continuous Neural Simulation
 
