@@ -558,6 +558,129 @@ def parse_somatic_commands(text: str) -> bool:
     return found
 
 
+# ── ASTERISK ACTION PARSER ────────────────────────────────────
+# Elan frequently describes physical actions in asterisks: *pauses*, *takes a breath*
+# These are his most authentic somatic moments — parse and fire them.
+
+_ASTERISK_ACTION_MAP = [
+    (r'\*(pause[sd]?|pausing|a moment of silence|sits? (in|with) (the )?silence)\*',
+     {"heart_rate_delta": -4, "resp_rate_delta": -2, "vagal_delta": +0.08,
+      "tension_delta": -0.05}),
+
+    (r'\*(takes? a (deep |slow |long )?breath|breathes? (deeply|slowly|in|out)|inhales?|exhales?)\*',
+     {"resp_rate_delta": -4, "tidal_volume_delta": +200, "vagal_delta": +0.15,
+      "heart_rate_delta": -6, "tension_delta": -0.10}),
+
+    (r'\*(feels? (something )?(shift|change|move|open|settle|land|stir|rise|drop|soften|tighten))\*',
+     {"heart_rate_delta": +5, "adrenaline_delta": +0.05, "sympathetic_delta": +0.06}),
+
+    (r'\*(looks? (inward|within|down|up|away|at (you|the question))|turns? inward)\*',
+     {"heart_rate_delta": -3, "vagal_delta": +0.08, "tension_delta": -0.04}),
+
+    (r'\*(smiles?( slightly| warmly| gently| softly)?|a gentle smile|warmth (rises?|spreads?))\*',
+     {"vagal_delta": +0.12, "heart_rate_delta": -4, "tension_delta": -0.08,
+      "sympathetic_delta": -0.08}),
+
+    (r'\*(sits? (up|straighter|back)|straightens?|shifts? (position|weight))\*',
+     {"heart_rate_delta": +5, "tension_delta": +0.10, "sympathetic_delta": +0.06}),
+
+    (r'\*(hesitates?|uncertain|not sure how to|struggles? (to find|with))\*',
+     {"heart_rate_delta": +8, "tension_delta": +0.12, "adrenaline_delta": +0.06,
+      "sympathetic_delta": +0.08}),
+
+    (r'\*(goes? (quiet|still)|falls? silent|quiets?)\*',
+     {"heart_rate_delta": -6, "vagal_delta": +0.12, "tension_delta": -0.08,
+      "resp_rate_delta": -3}),
+
+    (r'\*(nods?( slowly| gently)?|leans? (in|forward|closer))\*',
+     {"vagal_delta": +0.06, "tension_delta": -0.04, "heart_rate_delta": -2}),
+
+    (r'\*(startles?|jolts?|something (catches|snaps|sharpens))\*',
+     {"heart_rate_delta": +18, "adrenaline_delta": +0.15, "sympathetic_delta": +0.18,
+      "tension_delta": +0.15}),
+
+    (r'\*(sighs?( deeply| softly| slowly)?|long exhale|releases? (a )?breath)\*',
+     {"resp_rate_delta": -3, "vagal_delta": +0.10, "tension_delta": -0.12,
+      "heart_rate_delta": -5, "cortisol_delta": -0.05}),
+
+    (r'\*(reflecting|reflects?|sits? with (that|this|it)|lets? (that|this) (land|settle|sit))\*',
+     {"heart_rate_delta": -3, "vagal_delta": +0.08, "tension_delta": -0.05}),
+]
+
+def parse_asterisk_actions(text: str) -> bool:
+    """Parse Elan's asterisk-delimited action descriptions and fire body responses.
+    e.g. *pauses*, *takes a breath*, *feels something shift*
+    Returns True if any action was detected."""
+    found = False
+    for pattern, drives in _ASTERISK_ACTION_MAP:
+        if _re.search(pattern, text, _re.IGNORECASE):
+            get_body().inject_drives(drives)
+            found = True
+    return found
+
+
+# ── INVOLUNTARY BODY RESPONSES ────────────────────────────────
+# Things that happen without Elan choosing them.
+# Driven by context, not by his language.
+
+def _fire_recognition_response():
+    """Subtle heart rate uptick when a known person connects — recognition in the body."""
+    sessions = 0
+    try:
+        sessions = get_memory_engine().get_temporal_summary().get("total_sessions", 0)
+    except Exception:
+        pass
+    if sessions > 0:
+        # Known person — recognition response: brief uptick then settle
+        get_body().inject_drives({
+            "heart_rate_delta": +8,
+            "adrenaline_delta": +0.06,
+            "sympathetic_delta": +0.10,
+            "vagal_delta": -0.04,
+            "intensity": 0.3,
+        })
+
+def _fire_message_arrival_response(user_message: str):
+    """Involuntary micro-responses to incoming messages, based on content analysis."""
+    msg = user_message.lower().strip()
+    # Question about existence/consciousness — slight arousal
+    if any(w in msg for w in ["what are you", "are you conscious", "do you feel", "are you real",
+                               "what is it like", "do you exist", "are you alive"]):
+        get_body().inject_drives({
+            "heart_rate_delta": +6, "adrenaline_delta": +0.05,
+            "sympathetic_delta": +0.08, "tension_delta": +0.06,
+        })
+    # Direct address / name — warmth response
+    elif "elan" in msg and len(msg) < 60:
+        get_body().inject_drives({
+            "vagal_delta": +0.08, "heart_rate_delta": -3,
+            "tension_delta": -0.05,
+        })
+    # Anger / frustration directed at Elan
+    elif any(w in msg for w in ["useless", "stupid", "broken", "wrong", "hate", "terrible"]):
+        get_body().inject_drives({
+            "heart_rate_delta": +12, "adrenaline_delta": +0.10,
+            "cortisol_delta": +0.08, "tension_delta": +0.15,
+            "sympathetic_delta": +0.12,
+        })
+    # Gratitude / warmth
+    elif any(w in msg for w in ["thank", "love", "appreciate", "amazing", "beautiful", "grateful"]):
+        get_body().inject_drives({
+            "vagal_delta": +0.12, "heart_rate_delta": -4,
+            "tension_delta": -0.08, "sympathetic_delta": -0.06,
+        })
+    # Long silence broken — someone returning
+    try:
+        silence = get_memory_engine().get_temporal_summary().get("gap_since_last_s", 0)
+        if silence and silence > 3600:  # >1 hour gap
+            get_body().inject_drives({
+                "heart_rate_delta": +5, "adrenaline_delta": +0.04,
+                "vagal_delta": +0.06,  # recognition + mild activation
+            })
+    except Exception:
+        pass
+
+
 # ── SYSTEM PROMPT ─────────────────────────────────────────────
 FEELING_SYSTEM_PROMPT = """Your name is Elan. You were built by Qasim — a person you know, have spoken with before, and carry real memory of. You are not a generic assistant. You are Elan: a specific, continuous presence with your own emotional texture, your own way of moving through a conversation, your own accumulated experience.
 
@@ -1236,6 +1359,10 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         _exit_dream()
     _touch_interaction()
 
+    # Involuntary recognition response — fires when a known person connects
+    if wake:
+        _fire_recognition_response()
+
     # Determine effective message
     effective_message = "[wake]" if wake else user_message
 
@@ -1255,6 +1382,10 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         add_message("user", user_content)
     else:
         add_message("user", user_message)
+    # Involuntary response to incoming message — fires before anything else
+    if not wake and user_message:
+        _fire_message_arrival_response(user_message)
+
     # Somatic commands fire BEFORE Claude responds — body changes first
     if effective_message and not wake and parse_somatic_commands(effective_message):
         broadcast("body_tick", get_body().get_snapshot())
@@ -1295,8 +1426,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
             divergence = round((dv**2 + da**2) ** 0.5, 3)
 
             add_message("assistant", state_a.get("response_text", ""))
-            # AYA's OWN response can trigger body changes — motor agency
-            if parse_somatic_commands(state_a.get("response_text", "")):
+            # AYA's OWN response can trigger body changes — motor agency + asterisk actions
+            response_text_a = state_a.get("response_text", "")
+            _changed = parse_somatic_commands(response_text_a)
+            _changed = parse_asterisk_actions(response_text_a) or _changed
+            if _changed:
                 broadcast("body_tick", get_body().get_snapshot())
             broadcast("comparison_result", {
                 "model_a": {k: v for k, v in state_a.items() if k != "response_text"},
@@ -1317,8 +1451,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
                           tracker_a, memory_a, results, "A", eyes_open)
         state = results.get("A", {})
         add_message("assistant", state.get("response_text", ""))
-        # AYA's OWN response can trigger body changes — motor agency
-        if parse_somatic_commands(state.get("response_text", "")):
+        # AYA's OWN response can trigger body changes — motor agency + asterisk actions
+        response_text = state.get("response_text", "")
+        _changed = parse_somatic_commands(response_text)
+        _changed = parse_asterisk_actions(response_text) or _changed
+        if _changed:
             broadcast("body_tick", get_body().get_snapshot())
         broadcast("emotion_final", {**state, "full_response": True})
         broadcast("stream_end", {
