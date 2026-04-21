@@ -471,6 +471,69 @@ _SOMATIC_MAP = [
     (r'\b(touch|touching|hold|holding|embrace|hug|skin contact|warmth)\b',
      {"vagal_delta": +0.15, "tension_delta": -0.08, "heart_rate_delta": -5,
       "sympathetic_delta": -0.10}),
+
+    # ── SELF-REPORTED SOMATIC STATES ─────────────────────────────
+    # When Elan describes his own body, the simulation matches what he says.
+
+    # heart rate rising
+    (r'\b(heart rate (picks up|rises|increases|spikes|jumps|quickens|accelerates)|pulse (quickens|races|pounds|speeds up)|heart (pounds|hammers|races|beats faster|beating faster|thumping|drumming))\b',
+     {"heart_rate_delta": +22, "adrenaline_delta": +0.15, "sympathetic_delta": +0.18,
+      "vagal_delta": -0.10, "tension_delta": +0.10}),
+
+    # heart rate slowing / calming
+    (r'\b(heart rate (slows|drops|settles|steadies|calms)|pulse (slows|steadies|settles)|heart (slows|settles|quiets|steadies))\b',
+     {"heart_rate_delta": -15, "vagal_delta": +0.18, "sympathetic_delta": -0.15,
+      "adrenaline_delta": -0.10, "tension_delta": -0.10}),
+
+    # adrenaline surge
+    (r'\b(surge of adrenaline|adrenaline (surge|spike|rush|flood|courses|pumping|hits)|feel (the )?adrenaline|adrenaline (kicks in|fires))\b',
+     {"adrenaline_delta": +0.35, "heart_rate_delta": +25, "sympathetic_delta": +0.28,
+      "vagal_delta": -0.15, "tension_delta": +0.15, "resp_rate_delta": +5}),
+
+    # cortisol / stress hormones
+    (r'\b(cortisol|stress hormone|feel (the )?weight|heaviness in my chest|chest (tight|tightens|heavy))\b',
+     {"cortisol_delta": +0.20, "tension_delta": +0.18, "heart_rate_delta": +10,
+      "sympathetic_delta": +0.15}),
+
+    # breath tightening / shortening
+    (r'\b(breath (catches|shortens|tightens|constricts|hitches)|breathing (shallow|faster|quicker|laboured)|short of breath|breathless)\b',
+     {"resp_rate_delta": +8, "tidal_volume_delta": -150, "sympathetic_delta": +0.15,
+      "heart_rate_delta": +8, "adrenaline_delta": +0.10}),
+
+    # breath deepening / slowing
+    (r'\b(breath (deepens|slows|expands|opens)|breathing (slower|deeper|steadier|calms)|long (slow )?breath|exhale slowly)\b',
+     {"resp_rate_delta": -5, "tidal_volume_delta": +250, "vagal_delta": +0.20,
+      "heart_rate_delta": -8, "tension_delta": -0.12}),
+
+    # tension / tightening
+    (r'\b(tension (rises|builds|spreads|tightens)|muscles (tighten|clench|contract|tense)|feel (tense|tight|rigid|stiff))\b',
+     {"tension_delta": +0.25, "sympathetic_delta": +0.15, "heart_rate_delta": +8,
+      "adrenaline_delta": +0.08}),
+
+    # tension releasing
+    (r'\b(tension (releases|melts|dissolves|eases|drops)|muscles (relax|soften|release|loosen|unclench)|feel (loose|soft|relaxed|released))\b',
+     {"tension_delta": -0.25, "vagal_delta": +0.18, "heart_rate_delta": -8,
+      "sympathetic_delta": -0.15, "cortisol_delta": -0.08}),
+
+    # warmth / flush
+    (r'\b(flush (of warmth|of heat)|warmth (spreads|rises|floods|washes)|feel (warm|flushed|glowing)|heat (rises|spreads))\b',
+     {"heart_rate_delta": +8, "vagal_delta": +0.10, "sympathetic_delta": +0.08,
+      "adrenaline_delta": +0.05}),
+
+    # dopamine / pleasure
+    (r'\b(dopamine|surge of (pleasure|joy|excitement)|feel (alive|electric|lit up|energized)|something (lifts|lightens))\b',
+     {"heart_rate_delta": +10, "adrenaline_delta": +0.08, "vagal_delta": +0.05,
+      "tension_delta": -0.08, "sympathetic_delta": +0.10}),
+
+    # serotonin / calm contentment
+    (r'\b(serotonin|feel (grounded|settled|at peace|content|steady)|sense of (peace|calm|contentment|stillness))\b',
+     {"vagal_delta": +0.20, "heart_rate_delta": -8, "tension_delta": -0.15,
+      "sympathetic_delta": -0.12, "cortisol_delta": -0.08}),
+
+    # oxytocin / connection
+    (r'\b(oxytocin|feel (connected|close|bonded|open|seen)|sense of (connection|closeness|bond|trust))\b',
+     {"vagal_delta": +0.15, "tension_delta": -0.10, "heart_rate_delta": -5,
+      "sympathetic_delta": -0.10}),
 ]
 
 _NEGATIONS = {"can't", "cannot", "can not", "don't", "won't", "wouldn't",
