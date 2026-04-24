@@ -4912,12 +4912,16 @@ function renderCalendar(data){{
     if(sessions.length){{
       cell.addEventListener('mouseenter',()=>{{
         const tip = document.getElementById('cal-tooltip');
+        const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const dayName = DAYS[new Date(dateStr+'T12:00:00').getDay()];
         const lines = sessions.map(s=>{{
           const ex = s.exchanges ? ` · ${{s.exchanges}} exchanges` : '';
-          const top = s.topics ? ` — ${{s.topics.split(',').slice(0,3).join(', ')}}` : '';
-          return `${{s.time}} ${{s.emotion}}${{ex}}${{top}}`;
+          const dur = s.duration_min ? ` · ${{s.duration_min}}min` : '';
+          const top = s.topics ? `<br><span style="color:rgba(130,150,210,0.55);font-size:6px;">${{s.topics.split(',').slice(0,4).join(', ')}}</span>` : '';
+          const nar = s.arc && s.arc.length ? `<br><span style="color:rgba(100,120,190,0.45);font-size:6px;">${{s.arc.slice(0,4).join(' → ')}}</span>` : '';
+          return `<b style="color:rgba(180,195,255,0.85);">${{dayName}}</b> ${{s.time}} · ${{s.emotion}}${{ex}}${{dur}}${{top}}${{nar}}`;
         }});
-        tip.innerHTML = lines.join('<br>');
+        tip.innerHTML = lines.join('<hr style="border:none;border-top:1px solid rgba(80,100,200,0.12);margin:4px 0;">');
       }});
       cell.addEventListener('mouseleave',()=>{{
         document.getElementById('cal-tooltip').innerHTML = '';
