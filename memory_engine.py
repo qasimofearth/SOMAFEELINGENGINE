@@ -287,7 +287,54 @@ class MemoryEngine:
             if col not in ep_cols:
                 c.execute(f"ALTER TABLE episodes ADD COLUMN {col} {typedef}")
         c.commit()
+        # Run timestamp repair after schema is ready
+        self._repair_episode_timestamps(c)
+        c.commit()
         c.close()
+
+    def _repair_episode_timestamps(self, c):
+        """
+        Detect and fix backfill artifacts where many episodes share an identical
+        timestamp (happens when the backfill script used time.time() instead of
+        the original exchange timestamp). Safe to run on every startup — skips
+        if no artifact is detected.
+        """
+        total = c.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        if total == 0:
+            return
+        # Find the most common timestamp and how many episodes share it
+        row = c.execute(
+            "SELECT timestamp, COUNT(*) as cnt FROM episodes "
+            "GROUP BY timestamp ORDER BY cnt DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return
+        worst_ts, worst_cnt = row[0], row[1]
+        # If more than 30% of all episodes share ONE timestamp, it's a backfill artifact
+        if worst_cnt < max(30, total * 0.30):
+            return
+        # Build lookup: first 120 chars of user_msg → actual exchange timestamp
+        lookup = {}
+        for ex_ts, user_msg in c.execute(
+            "SELECT timestamp, user_msg FROM exchanges WHERE user_msg IS NOT NULL"
+        ).fetchall():
+            key = (user_msg or "")[:120].strip()
+            if key and key not in lookup:
+                lookup[key] = ex_ts
+        if not lookup:
+            return
+        fixed = 0
+        episodes = c.execute(
+            "SELECT id, timestamp, summary FROM episodes"
+        ).fetchall()
+        for ep_id, ep_ts, summary in episodes:
+            key = (summary or "")[:120].strip()
+            if key in lookup and lookup[key] != ep_ts:
+                c.execute("UPDATE episodes SET timestamp=? WHERE id=?",
+                          (lookup[key], ep_id))
+                fixed += 1
+        if fixed:
+            print(f"[memory] repaired {fixed}/{total} episode timestamps", flush=True)
 
     # ── SESSION MANAGEMENT ────────────────────────────────────
 
