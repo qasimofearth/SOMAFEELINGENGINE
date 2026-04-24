@@ -5029,6 +5029,80 @@ setTimeout(()=>{{
 
 # ── MAIN ──────────────────────────────────────────────────────
 
+def _catchup_consolidation():
+    """
+    On startup, find any completed sessions that never got an LLM narrative
+    (happens when Railway restarts before the 30-min timeout fires).
+    Consolidates them in chronological order, oldest first.
+    Rate-limited to avoid hammering the API on fresh deploys.
+    """
+    try:
+        import sqlite3 as _sq
+        me = get_memory_engine()
+        conn = _sq.connect(me._db_path)
+        missed = conn.execute("""
+            SELECT session_id, started_at, turn_count, dominant_emotion
+            FROM sessions
+            WHERE ended_at IS NOT NULL AND turn_count >= 2
+              AND (narrative IS NULL OR narrative = "")
+            ORDER BY started_at
+        """).fetchall()
+        conn.close()
+        if not missed:
+            return
+        print(f"  [MEMORY] Catchup: consolidating {len(missed)} sessions without narratives...", flush=True)
+        for sid, started_at, turns, dominant_emotion in missed:
+            try:
+                _consolidate_session_async(sid)
+                # Fix the autobiographical note timestamp to the session's actual date
+                import sqlite3 as _sq2
+                c2 = _sq2.connect(me._db_path)
+                c2.execute(
+                    "UPDATE autobiographical_notes SET timestamp=? WHERE session_id=? AND note_type='session_summary'",
+                    (started_at, sid)
+                )
+                c2.commit()
+                c2.close()
+            except Exception as e:
+                print(f"  [MEMORY] Catchup error for {sid}: {e}", flush=True)
+            time.sleep(1.0)   # 1s between calls — don't hammer the API
+        print(f"  [MEMORY] Catchup consolidation complete.", flush=True)
+    except Exception as e:
+        print(f"  [MEMORY] Catchup consolidation failed: {e}", flush=True)
+
+
+def _seed_brain_from_memory():
+    """
+    On startup, prime the brain and body with the emotional baseline derived
+    from the last 5 sessions. This prevents Elan from always waking cold —
+    his brain starts in a state informed by recent emotional history.
+    """
+    try:
+        me = get_memory_engine()
+        import sqlite3 as _sq
+        conn = _sq.connect(me._db_path)
+        rows = conn.execute("""
+            SELECT dominant_emotion, mean_valence, mean_arousal
+            FROM sessions
+            WHERE ended_at IS NOT NULL AND turn_count >= 2
+              AND dominant_emotion IS NOT NULL
+            ORDER BY started_at DESC LIMIT 5
+        """).fetchall()
+        conn.close()
+        if not rows:
+            return
+        mean_v = sum(r[1] or 0.0 for r in rows) / len(rows)
+        mean_a = sum(r[2] or 0.4 for r in rows) / len(rows)
+        # Use most recent session's dominant emotion to seed the brain circuit
+        dominant = rows[0][0]
+        # Warm the brain with a low-intensity version of Elan's recent emotional baseline
+        brain = get_brain()
+        brain.process_emotion(dominant, intensity=round(abs(mean_v) * 0.5 + 0.2, 2))
+        print(f"  [BRAIN] Seeded from memory: {dominant} v={mean_v:+.2f} a={mean_a:.2f} (avg of last {len(rows)} sessions)", flush=True)
+    except Exception as e:
+        print(f"  [BRAIN] Memory seeding skipped: {e}", flush=True)
+
+
 if __name__ == "__main__":
     key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
     if not key:
@@ -5075,6 +5149,11 @@ if __name__ == "__main__":
 
             stats = engine.get_stats()
             print(f"  [MEMORY] {stats['total_exchanges']} exchanges · {stats['total_sessions']} sessions · {stats['known_facts']} facts · {stats['somatic_patterns']} somatic patterns")
+
+            # ── Auto-consolidate any sessions that ended without narratives ──
+            # Happens when Railway restarts mid-session or within 30 min of session end.
+            threading.Thread(target=_catchup_consolidation, daemon=True).start()
+
         except Exception as me:
             print(f"  [MEMORY] Init warning: {me}")
 
@@ -5085,6 +5164,9 @@ if __name__ == "__main__":
         # Start continuous brain simulation — brain oscillates at all times
         _start_brain_thread()
         print(f"  [BRAIN] Continuous thread started — 100Hz neural dynamics, K=2.5 Kuramoto")
+
+        # ── Seed brain from memory baseline ──
+        _seed_brain_from_memory()
 
     _init_thread = threading.Thread(target=_background_init, daemon=True)
     _init_thread.start()

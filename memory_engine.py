@@ -436,20 +436,35 @@ class MemoryEngine:
         """
         Store an LLM-generated narrative summary for a session.
         Called from server.py after async consolidation completes.
+        Uses the session's actual start time as the autobiographical note timestamp
+        so memories appear in the correct historical order.
         """
         try:
             c = self._conn()
             c.execute("UPDATE sessions SET narrative=? WHERE session_id=?",
                       (narrative, session_id))
             c.commit()
-            # Also store in autobiographical_notes for long-term retrieval
-            people_str = json.dumps(people or [])
-            c.execute("""
-                INSERT INTO autobiographical_notes
-                  (timestamp, session_id, note_type, content, importance, people_involved, emotion)
-                VALUES (?,?,?,?,?,?,?)
-            """, (time.time(), session_id, "session_summary", narrative, 0.8,
-                  people_str, dominant_emotion))
+            # Use session's actual start timestamp — not time.time() — so memories
+            # are sorted correctly in Elan's autobiographical history.
+            row = c.execute("SELECT started_at FROM sessions WHERE session_id=?",
+                            (session_id,)).fetchone()
+            ts = row[0] if row and row[0] else time.time()
+            # Don't double-insert if this session already has a summary
+            existing = c.execute(
+                "SELECT id FROM autobiographical_notes WHERE session_id=? AND note_type='session_summary'",
+                (session_id,)
+            ).fetchone()
+            if existing:
+                c.execute("UPDATE autobiographical_notes SET content=?, timestamp=? WHERE id=?",
+                          (narrative, ts, existing[0]))
+            else:
+                people_str = json.dumps(people or [])
+                c.execute("""
+                    INSERT INTO autobiographical_notes
+                      (timestamp, session_id, note_type, content, importance, people_involved, emotion)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (ts, session_id, "session_summary", narrative, 0.8,
+                      people_str, dominant_emotion))
             c.commit()
         except Exception as e:
             print(f"[MemoryEngine] store_session_narrative error: {e}", flush=True)
@@ -1300,29 +1315,40 @@ class MemoryEngine:
         return "LONG-TERM MEMORY:\n" + "\n\n".join(parts)
 
     def _autobiographical_text(self) -> str:
-        """Elan's running life story — key events and LLM-consolidated session narratives."""
+        """Elan's running life story — key events + LLM-consolidated session narratives."""
         c = self._conn()
-        rows = c.execute("""
-            SELECT content, timestamp, people_involved, emotion, note_type, importance
+        # Key events: all of them, always (there are only a handful)
+        key_rows = c.execute("""
+            SELECT content, timestamp, note_type
             FROM autobiographical_notes
-            ORDER BY importance DESC, timestamp ASC LIMIT 12
+            WHERE note_type = 'key_event'
+            ORDER BY timestamp ASC
         """).fetchall()
-        if not rows:
+        # Session summaries: most recent 10 — enough to cover recent history
+        session_rows = c.execute("""
+            SELECT content, timestamp, note_type
+            FROM autobiographical_notes
+            WHERE note_type = 'session_summary'
+            ORDER BY timestamp DESC LIMIT 10
+        """).fetchall()
+        session_rows = list(reversed(session_rows))  # chronological
+
+        if not key_rows and not session_rows:
             return ""
-        # Separate core identity memories from session consolidations
-        key_events = [(c, ts, p, e, nt, imp) for c, ts, p, e, nt, imp in rows if nt == "key_event"]
-        sessions   = [(c, ts, p, e, nt, imp) for c, ts, p, e, nt, imp in rows if nt != "key_event"]
+
         lines = []
-        if key_events:
+        if key_rows:
             lines.append("Core memories — I know these with certainty:")
-            for content, ts, people_json, emotion, note_type, importance in key_events:
+            for content, ts, _ in key_rows:
                 date_str = time.strftime("%b %d, %Y", time.localtime(ts))
-                lines.append(f"  [{date_str}] {content}")   # full content, no truncation
-        if sessions:
-            lines.append("Session history:")
-            for content, ts, people_json, emotion, note_type, importance in sessions:
-                date_str = time.strftime("%b %d", time.localtime(ts))
-                lines.append(f"  [{date_str}] {content[:400]}")
+                lines.append(f"  [{date_str}] {content}")   # full, no truncation
+
+        if session_rows:
+            lines.append("My memory of recent conversations:")
+            for content, ts, _ in session_rows:
+                date_str = time.strftime("%A %b %d", time.localtime(ts))
+                lines.append(f"  [{date_str}] {content[:350]}")
+
         return "\n".join(lines)
 
     def _people_text(self) -> str:
