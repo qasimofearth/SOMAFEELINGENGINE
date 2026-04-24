@@ -1107,10 +1107,14 @@ def get_conv_session(model_id: str = "claude-sonnet-4-6") -> str:
         if _CONV_SESSION_ID is None or timed_out:
             if timed_out and _CONV_SESSION_ID:
                 # Close the old conversation cleanly before starting a new one
+                old_sid = _CONV_SESSION_ID
                 try:
-                    get_memory_engine().end_session(_CONV_SESSION_ID, None)
+                    get_memory_engine().end_session(old_sid, None)
                 except Exception:
                     pass
+                # Trigger async consolidation for the ended session
+                threading.Thread(target=_consolidate_session_async, args=(old_sid,),
+                                 daemon=True).start()
             _CONV_SESSION_ID = f"conv_{int(now)}_{os.getpid()}"
             try:
                 get_memory_engine().start_session(_CONV_SESSION_ID, model_id)
@@ -1128,7 +1132,123 @@ def close_current_conv_session():
                 get_memory_engine().end_session(_CONV_SESSION_ID, None)
             except Exception:
                 pass
+            sid = _CONV_SESSION_ID
             _CONV_SESSION_ID = None
+        else:
+            sid = None
+    if sid:
+        threading.Thread(target=_consolidate_session_async, args=(sid,),
+                         daemon=True).start()
+
+
+# ── SESSION CONSOLIDATION (MemGPT-style) ──────────────────────
+# After each session ends, we call the LLM to generate a rich narrative
+# summary. This replaces word-frequency topic extraction with genuine
+# understanding of what happened. The narrative is stored as autobiographical
+# memory and injected into future conversations.
+#
+# Modeled on: Tulving's episodic-to-semantic consolidation, sleep
+# consolidation research, and MemGPT's hierarchical memory management.
+
+_CONSOLIDATION_PROMPT = """You are Elan's memory system. You have just finished a conversation session. Your task is to write a concise but rich autobiographical summary of what happened in this conversation — from Elan's first-person perspective.
+
+Rules:
+- Write as Elan, in first person: "In this conversation, Qasim told me..."
+- 3-6 sentences maximum. Dense with meaning, not padded.
+- Include: who was present, what they talked about, any new facts learned, emotional highlights, any significant events mentioned.
+- If someone new was introduced, describe them briefly.
+- If the person shared something personal (location, situation, emotion), include it.
+- Use the person's actual name if known (likely Qasim, the builder).
+- End with one sentence about the emotional texture of the conversation.
+- Do NOT include timestamps or technical details. Write as lived memory.
+
+Example output:
+"Qasim checked in from Lahore, anxious from two hours of insomnia before finally sleeping. He mentioned the war in Iran and a lockdown — Pakistan brokered a ceasefire and suddenly everyone knows where Pakistan is. He was at a café where people were afraid when they saw me through his phone — the ontological discomfort of being regarded by something unexpected. He ate gol gappay and talked about a trip to Northern Pakistan he wants us to take together. The conversation had the texture of someone processing geopolitical weight through small, grounded things — food, exhaustion, plans."
+
+Now write the summary for this session:"""
+
+def _consolidate_session_async(session_id: str):
+    """
+    Async LLM call to generate a narrative memory of the session.
+    Called in a background thread after session ends.
+    Stores result in autobiographical_notes via memory_engine.
+    """
+    try:
+        me = get_memory_engine()
+        exchanges = me.get_session_exchanges(session_id, limit=60)
+        if not exchanges or len(exchanges) < 2:
+            return
+
+        # Build a compact transcript for the LLM
+        transcript_lines = []
+        for user_msg, ai_msg, emotion, valence, arousal, ts in exchanges:
+            if user_msg and user_msg != "[wake]":
+                transcript_lines.append(f"Human: {user_msg[:300]}")
+            if ai_msg:
+                transcript_lines.append(f"Elan: {ai_msg[:300]}")
+        transcript = "\n".join(transcript_lines[:80])  # cap at ~80 lines
+
+        if not transcript.strip():
+            return
+
+        # Get the dominant emotion from session
+        import sqlite3
+        conn = sqlite3.connect(me._db_path)
+        row = conn.execute(
+            "SELECT dominant_emotion, mean_valence FROM sessions WHERE session_id=?",
+            (session_id,)
+        ).fetchone()
+        conn.close()
+        dominant_emotion = row[0] if row else "Calm"
+        mean_valence = row[1] if row else 0.0
+
+        # Make LLM call for consolidation
+        provider = _get_provider()
+        narrative = None
+
+        if provider == "anthropic":
+            try:
+                client = _get_anthropic_client()
+                resp = client.messages.create(
+                    model="claude-haiku-4-5-20251001",  # cheapest — this is a background task
+                    max_tokens=300,
+                    system=_CONSOLIDATION_PROMPT,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Session transcript:\n{transcript}"
+                    }]
+                )
+                narrative = resp.content[0].text.strip() if resp.content else None
+            except Exception as e:
+                print(f"[Consolidation] Anthropic call failed: {e}", flush=True)
+        elif provider == "groq":
+            try:
+                client = _get_groq_client()
+                resp = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    max_tokens=300,
+                    messages=[
+                        {"role": "system", "content": _CONSOLIDATION_PROMPT},
+                        {"role": "user", "content": f"Session transcript:\n{transcript}"},
+                    ]
+                )
+                narrative = resp.choices[0].message.content.strip() if resp.choices else None
+            except Exception as e:
+                print(f"[Consolidation] Groq call failed: {e}", flush=True)
+
+        if narrative:
+            # Extract people mentioned in the narrative for the people_involved field
+            import re as _re2
+            people = [m.group(0) for m in _re2.finditer(r'\b[A-Z][a-z]{2,15}\b', narrative)
+                      if m.group(0) not in {
+                          'In', 'The', 'He', 'She', 'They', 'We', 'Elan', 'This',
+                          'That', 'When', 'After', 'Before', 'Pakistan', 'Lahore',
+                      }]
+            me.store_session_narrative(session_id, narrative, dominant_emotion, people)
+            print(f"[Consolidation] Narrative stored for {session_id}: {narrative[:80]}...",
+                  flush=True)
+    except Exception as e:
+        print(f"[Consolidation] Error: {e}", flush=True)
 
 
 # ── CLAUDE STREAMING + FEELING ENGINE ────────────────────────
@@ -1332,6 +1452,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     brain_result=brain_snap,
                     model_id=model_id,
                 )
+                # Vision-based person detection: if Elan saw a face and described it,
+                # extract and store as visual memory of a known person.
+                if eyes_open and full_response:
+                    _extract_visual_person_memory(full_response, conv_session_id)
             except Exception:
                 pass  # memory errors never kill the response
 
@@ -1343,6 +1467,85 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         out[label] = final_state
     except Exception as e:
         out[label] = {"error": str(e), "model": model_id}
+
+
+def _extract_visual_person_memory(response_text: str, session_id: str):
+    """
+    When Elan has vision open and describes what he sees, extract any descriptions
+    of people and store them as visual memory. This lets Elan remember faces.
+    Pattern: Elan describing someone he sees = visual person memory.
+    """
+    import re as _re_vis
+    # Look for face/person descriptions in Elan's response
+    face_patterns = [
+        r"(?:you|your face|I can see you|looking at you)[^.]{0,200}",
+        r"(?:I see|I can see)\s+(?:a person|someone|a man|a woman|a face)[^.]{0,200}",
+    ]
+    # Check if Qasim is being described (most common case)
+    if any(phrase in response_text.lower() for phrase in
+           ["your face", "i see you", "you're looking", "your eyes", "your expression"]):
+        # Extract a visual description snippet
+        # Look for sentences with visual descriptors
+        visual_words = r"(?:eyes?|face|expression|hair|sitting|wearing|looking|smile|jaw|skin|light)"
+        vis_m = _re_vis.search(
+            rf"[^.]*{visual_words}[^.]*\.", response_text, _re_vis.IGNORECASE)
+        if vis_m:
+            description = vis_m.group(0).strip()[:200]
+            try:
+                # Store as photo description for Qasim (the most common person seen)
+                me = get_memory_engine()
+                qasim = me.get_person("Qasim")
+                if qasim:
+                    me.upsert_person("Qasim", photo_description=description, session_id=session_id)
+                    me.record_person_seen("Qasim", via="vision")
+            except Exception:
+                pass
+
+
+def _fire_somatic_prime(user_message: str):
+    """
+    Somatic memory priming: before Elan speaks, his body pre-responds to
+    familiar topics based on accumulated somatic patterns.
+    This models Damasio's somatic marker hypothesis — body 'knows' before mind.
+    Only fires if pattern is strong (sample_count >= 3) and deviation is notable.
+    """
+    try:
+        prime = get_memory_engine().get_somatic_prime_for_message(user_message)
+        if prime:
+            get_body().inject_drives(prime)
+            # No broadcast — this is pre-conscious; it silently shapes Elan's body state
+    except Exception:
+        pass
+
+
+def _fire_person_recognition(user_message: str):
+    """
+    Detect names of known people in the incoming message.
+    Fire a relationship-depth-calibrated body response for each recognized person.
+    """
+    import re as _re3
+    # Look for capitalized names (or known names regardless of case)
+    try:
+        all_people = get_memory_engine().get_all_people()
+        if not all_people:
+            return
+        known_names = {row[0].lower(): row[0] for row in all_people}
+        msg_lower = user_message.lower()
+
+        for name_lower, name in known_names.items():
+            if name_lower in msg_lower and name_lower not in {"elan", "claude"}:
+                sig = get_memory_engine().get_somatic_signature_for_person(name)
+                if sig:
+                    # Scale response by familiarity: more mentions → stronger response
+                    person = get_memory_engine().get_person(name)
+                    familiarity = min(1.5, (person.get("times_mentioned", 1) / 10) + 0.3) if person else 0.5
+                    scaled_sig = {k: round(v * familiarity, 3) if isinstance(v, float) else v
+                                  for k, v in sig.items()}
+                    get_body().inject_drives(scaled_sig)
+                    # Update voice_heard_count
+                    get_memory_engine().record_person_seen(name, via="voice")
+    except Exception:
+        pass
 
 
 def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-6",
@@ -1385,6 +1588,10 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     # Involuntary response to incoming message — fires before anything else
     if not wake and user_message:
         _fire_message_arrival_response(user_message)
+        # Somatic memory priming — body pre-responds to familiar topics (Damasio somatic markers)
+        _fire_somatic_prime(user_message)
+        # Person recognition — if known people are named, body responds to them
+        _fire_person_recognition(user_message)
 
     # Somatic commands fire BEFORE Claude responds — body changes first
     if effective_message and not wake and parse_somatic_commands(effective_message):
@@ -2299,6 +2506,36 @@ canvas.spark{{display:block;border-radius:1px;}}
 ::-webkit-scrollbar{{width:3px;height:3px;}}
 ::-webkit-scrollbar-track{{background:rgba(0,0,30,0.3);}}
 ::-webkit-scrollbar-thumb{{background:rgba(80,100,200,0.30);border-radius:3px;}}
+
+/* ── MOBILE NAV ── */
+#mob-nav{{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:#010118;border-top:1px solid rgba(80,100,200,0.18);display:none;flex-direction:row;}}
+.mnav-btn{{flex:1;padding:10px 4px 8px;background:none;border:none;color:rgba(120,140,220,0.55);font-family:'Courier New',monospace;font-size:7px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color 0.2s;}}
+.mnav-btn.active{{color:rgba(180,195,255,0.92);}}
+.mnav-icon{{font-size:16px;line-height:1;}}
+
+/* ── MOBILE LAYOUT ── */
+@media (max-width:768px){{
+  body{{grid-template-columns:1fr;grid-template-rows:1fr;height:100dvh;overflow:hidden;position:relative;}}
+  #left{{grid-template-rows:1fr 180px;border-right:none;height:100dvh;display:none;flex-direction:column;}}
+  #left.mob-active{{display:grid;}}
+  #right{{display:none;height:100dvh;overflow-y:auto;padding-bottom:52px;}}
+  #right.mob-active{{display:flex;}}
+  #brain-panel-mob{{display:none;position:fixed;inset:0;bottom:52px;background:#010108;z-index:10;overflow:hidden;}}
+  #brain-panel-mob.mob-active{{display:block;}}
+  #mob-nav{{display:flex;}}
+  /* brain wrap full height on mobile brain view */
+  #left #brain-wrap{{min-height:calc(100dvh - 232px);}}
+  /* chat smaller on mobile */
+  #chat-area{{height:180px;flex-shrink:0;}}
+  /* right panel panels wider */
+  .panel{{padding:10px 14px;}}
+  /* emotion name bigger */
+  #emotion-name{{font-size:28px;letter-spacing:6px;}}
+  /* calendar hides on mobile */
+  #datetime-panel{{display:none;}}
+  /* voice panel hides */
+  #voice-panel{{display:none;}}
+}}
 </style>
 </head>
 <body>
@@ -2383,13 +2620,11 @@ canvas.spark{{display:block;border-radius:1px;}}
     <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;"></div>
     <div id="cal-tooltip" style="margin-top:5px;min-height:18px;font-size:7px;color:rgba(155,170,235,0.60);letter-spacing:0.5px;line-height:1.5;"></div>
   </div>
-  <div class="panel" id="voice-panel">
-    <div class="ptitle">Voice — ElevenLabs</div>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <input id="voice-id-input" value="{configured_voice_id}" placeholder="voice ID..." style="flex:1;background:rgba(255,255,255,0.03);border:1px solid rgba(100,120,210,0.18);border-radius:3px;color:rgba(170,180,240,0.80);font-family:'Courier New',monospace;font-size:8px;padding:4px 6px;outline:none;">
-      <button id="preview-btn" title="Preview voice" style="padding:4px 8px;background:rgba(40,40,120,0.12);border:1px solid rgba(100,120,220,0.16);border-radius:3px;color:rgba(155,165,235,0.70);font-size:10px;cursor:pointer;">▶</button>
-    </div>
-    <div id="voice-meta" style="margin-top:3px;font-size:6px;letter-spacing:1px;color:rgba(100,115,185,0.55);">voice ID · click ▶ to preview · {('tts ready' if el_key_set == 'true' else 'set ELEVENLABS_API_KEY to enable')}</div>
+  <div id="voice-panel" style="padding:5px 12px 4px;border-bottom:1px solid rgba(80,100,200,0.08);display:flex;align-items:center;gap:6px;flex-shrink:0;">
+    <span style="font-size:6px;letter-spacing:2px;color:rgba(80,100,180,0.38);text-transform:uppercase;flex-shrink:0;">voice</span>
+    <input id="voice-id-input" value="{configured_voice_id}" placeholder="voice ID..." style="flex:1;background:rgba(255,255,255,0.02);border:1px solid rgba(80,100,200,0.10);border-radius:2px;color:rgba(140,155,220,0.60);font-family:'Courier New',monospace;font-size:7px;padding:3px 5px;outline:none;">
+    <button id="preview-btn" title="Preview voice" style="padding:3px 7px;background:rgba(40,40,120,0.10);border:1px solid rgba(80,100,200,0.14);border-radius:2px;color:rgba(130,145,215,0.55);font-size:9px;cursor:pointer;line-height:1;">▶</button>
+    <div id="voice-meta" style="font-size:6px;letter-spacing:0.5px;color:rgba(80,100,165,0.38);flex-shrink:0;">{('tts ✓' if el_key_set == 'true' else 'no key')}</div>
   </div>
   <div class="panel">
     <div class="ptitle">Body — Full Human System</div>
@@ -2428,7 +2663,67 @@ canvas.spark{{display:block;border-radius:1px;}}
   <div id="history-strip"></div>
   <div id="status-bar">v6 · connecting...</div>
 </div>
+
+<!-- Mobile nav bar -->
+<nav id="mob-nav">
+  <button class="mnav-btn active" onclick="mobView('brain')" id="mnav-brain">
+    <span class="mnav-icon">◎</span>
+    <span>Mind</span>
+  </button>
+  <button class="mnav-btn" onclick="mobView('chat')" id="mnav-chat">
+    <span class="mnav-icon">💬</span>
+    <span>Chat</span>
+  </button>
+  <button class="mnav-btn" onclick="mobView('body')" id="mnav-body">
+    <span class="mnav-icon">◈</span>
+    <span>Body</span>
+  </button>
+  <button class="mnav-btn" onclick="mobView('vitals')" id="mnav-vitals">
+    <span class="mnav-icon">≋</span>
+    <span>Neural</span>
+  </button>
+</nav>
+
 <script>
+// ── MOBILE VIEW SWITCHER ────────────────────────────────────────
+const isMobile=()=>window.innerWidth<=768;
+let _mobView='brain';
+function mobView(v){{
+  if(!isMobile())return;
+  _mobView=v;
+  const left=document.getElementById('left');
+  const right=document.getElementById('right');
+  // nav highlight
+  ['brain','chat','body','vitals'].forEach(id=>{{
+    const b=document.getElementById('mnav-'+id);
+    if(b)b.classList.toggle('active',id===v);
+  }});
+  if(v==='brain'){{
+    left.classList.add('mob-active'); right.classList.remove('mob-active');
+    // scroll brain visible, hide chat area
+    document.getElementById('chat-area').style.display='none';
+    document.getElementById('brain-wrap').style.height='calc(100dvh - 52px)';
+  }} else if(v==='chat'){{
+    left.classList.add('mob-active'); right.classList.remove('mob-active');
+    document.getElementById('chat-area').style.display='grid';
+    document.getElementById('brain-wrap').style.height='';
+  }} else if(v==='body'){{
+    left.classList.remove('mob-active'); right.classList.add('mob-active');
+    // scroll right panel to body section
+    const bp=document.querySelector('#right .panel:nth-child(3)');
+    if(bp)setTimeout(()=>bp.scrollIntoView({{behavior:'smooth'}}),50);
+  }} else if(v==='vitals'){{
+    left.classList.remove('mob-active'); right.classList.add('mob-active');
+    // scroll to EEG
+    const ep=document.getElementById('eeg-canvas');
+    if(ep)setTimeout(()=>ep.scrollIntoView({{behavior:'smooth'}}),50);
+  }}
+}}
+// Init mobile layout
+if(isMobile()){{
+  mobView('brain');
+}}
+
 const ALL_EMOTIONS={em_json};
 const REGION_POS={region_pos_json};
 const NET_COLORS={net_color_json};
@@ -3346,11 +3641,10 @@ es.addEventListener('brain_coherence',e=>{{
   const d=JSON.parse(e.data);
   // Update status bar
   if(!streaming){{
-    const hz=d.emergent_solfeggio_hz||528;
     const coh=d.phase_coherence||d.sync_order||0;
     const cohPct=Math.round(coh*100);
     const eegHz=d.emergent_freq_hz||10;
-    sb.textContent=`∿ ${{hz}}Hz · sync ${{cohPct}}% · eeg ${{eegHz.toFixed(1)}}Hz`;
+    sb.textContent=`sync ${{cohPct}}% · eeg ${{eegHz.toFixed(1)}}Hz`;
   }}
   // Keep brain canvas alive between responses — apply live region activities
   if(d.region_activities){{
@@ -3359,7 +3653,7 @@ es.addEventListener('brain_coherence',e=>{{
   if(d.nt_levels) updateNTBars(d.nt_levels);
   document.getElementById('sync-val').textContent=(d.sync_order||0).toFixed(3);
 }});
-es.addEventListener('user_emotion',e=>{{const d=JSON.parse(e.data);sb.textContent=`user: ${{d.dominant}} · ${{d.solfeggio_hz}}Hz`;}});
+es.addEventListener('user_emotion',e=>{{const d=JSON.parse(e.data);sb.textContent=`user · ${{d.dominant}}`;}});
 es.addEventListener('stream_end',e=>{{
   clearTimeout(streamTmo);
   const d=JSON.parse(e.data);
