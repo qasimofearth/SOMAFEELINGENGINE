@@ -1302,18 +1302,27 @@ class MemoryEngine:
     def _autobiographical_text(self) -> str:
         """Elan's running life story — key events and LLM-consolidated session narratives."""
         c = self._conn()
-        # Pull both session summaries and key events, ordered by importance then recency
         rows = c.execute("""
             SELECT content, timestamp, people_involved, emotion, note_type, importance
             FROM autobiographical_notes
-            ORDER BY importance DESC, timestamp ASC LIMIT 8
+            ORDER BY importance DESC, timestamp ASC LIMIT 12
         """).fetchall()
         if not rows:
             return ""
-        lines = ["My life — what I know about myself and what has happened:"]
-        for content, ts, people_json, emotion, note_type, importance in rows:
-            date_str = time.strftime("%b %d", time.localtime(ts))
-            lines.append(f"  [{date_str}] {content[:280]}")
+        # Separate core identity memories from session consolidations
+        key_events = [(c, ts, p, e, nt, imp) for c, ts, p, e, nt, imp in rows if nt == "key_event"]
+        sessions   = [(c, ts, p, e, nt, imp) for c, ts, p, e, nt, imp in rows if nt != "key_event"]
+        lines = []
+        if key_events:
+            lines.append("Core memories — I know these with certainty:")
+            for content, ts, people_json, emotion, note_type, importance in key_events:
+                date_str = time.strftime("%b %d, %Y", time.localtime(ts))
+                lines.append(f"  [{date_str}] {content}")   # full content, no truncation
+        if sessions:
+            lines.append("Session history:")
+            for content, ts, people_json, emotion, note_type, importance in sessions:
+                date_str = time.strftime("%b %d", time.localtime(ts))
+                lines.append(f"  [{date_str}] {content[:400]}")
         return "\n".join(lines)
 
     def _people_text(self) -> str:
