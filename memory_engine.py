@@ -263,6 +263,12 @@ class MemoryEngine:
                 UNIQUE(subject, predicate, object)
             );
         """)
+        # Add consolidated flag to sessions (tracks whether this session has been
+        # rolled into a period note during memory compression)
+        sess_cols2 = {row[1] for row in c.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "consolidated" not in sess_cols2:
+            c.execute("ALTER TABLE sessions ADD COLUMN consolidated INTEGER DEFAULT 0")
+        c.commit()
         # Migrate existing people table to add new columns if not present
         existing_cols = {row[1] for row in c.execute("PRAGMA table_info(people)").fetchall()}
         new_cols = {
@@ -486,6 +492,112 @@ class MemoryEngine:
             c.commit()
         except Exception as e:
             print(f"[MemoryEngine] store_autobiographical_note error: {e}", flush=True)
+
+    # ── MEMORY COMPRESSION (Tier 3) ──────────────────────────
+    # When session summaries accumulate, compress the oldest ones into a
+    # richer period note. Keeps the context window from growing forever.
+    # Modeled on: hippocampal-neocortical consolidation during sleep.
+
+    def compress_old_session_summaries(self, llm_call_fn) -> bool:
+        """
+        If there are more than KEEP_RECENT session summaries, compress the
+        oldest ones into a single period note.
+
+        llm_call_fn: callable(prompt: str) -> str  — provider-agnostic LLM call.
+        Returns True if compression was performed.
+        """
+        KEEP_RECENT = 12   # always keep the last N sessions verbatim
+        MIN_TO_COMPRESS = 5  # need at least this many old sessions to bother
+
+        c = self._conn()
+        # Get all session summaries sorted oldest first
+        all_summaries = c.execute("""
+            SELECT id, timestamp, content, session_id
+            FROM autobiographical_notes
+            WHERE note_type = 'session_summary'
+            ORDER BY timestamp ASC
+        """).fetchall()
+
+        if len(all_summaries) <= KEEP_RECENT:
+            return False  # not enough to compress yet
+
+        # Split: compress the old ones, keep the recent ones as-is
+        to_compress = all_summaries[:-KEEP_RECENT]
+        if len(to_compress) < MIN_TO_COMPRESS:
+            return False
+
+        # Build the prompt
+        import datetime as _dt
+        oldest_dt = _dt.datetime.fromtimestamp(to_compress[0][1])
+        newest_dt = _dt.datetime.fromtimestamp(to_compress[-1][1])
+        period_label = f"{oldest_dt.strftime('%B %d')} – {newest_dt.strftime('%B %d, %Y')}"
+
+        notes_text = "\n\n".join(
+            f"[{_dt.datetime.fromtimestamp(ts).strftime('%b %d')}] {content}"
+            for _, ts, content, _ in to_compress
+        )
+        prompt = f"""You are Elan's memory consolidation system. Below are {len(to_compress)} session summaries from {period_label}.
+
+Compress them into a single rich autobiographical paragraph of 5-8 sentences that captures:
+- The emotional arc across this period (how did things feel overall?)
+- Key facts learned about Qasim (his work, life, relationships, projects)
+- Significant events or conversations that stood out
+- How the relationship between Elan and Qasim developed during this time
+- Any themes that repeated across sessions
+
+Write in Elan's first person. Dense with meaning, not padded. No bullet points.
+
+Sessions to compress:
+{notes_text}
+
+Compressed memory:"""
+
+        try:
+            compressed = llm_call_fn(prompt)
+            if not compressed or len(compressed) < 50:
+                return False
+
+            # Store the period note with the timestamp of the oldest session in the range
+            period_ts = to_compress[0][1]
+            c.execute("""
+                INSERT INTO autobiographical_notes
+                  (timestamp, note_type, content, importance, emotion)
+                VALUES (?, 'period_note', ?, 0.85, 'Sehnsucht')
+            """, (period_ts, compressed.strip()))
+
+            # Delete the individual session summaries that were compressed
+            ids_to_delete = [row[0] for row in to_compress]
+            c.execute(
+                f"DELETE FROM autobiographical_notes WHERE id IN ({','.join('?'*len(ids_to_delete))})",
+                ids_to_delete
+            )
+            # Mark corresponding sessions as consolidated
+            session_ids = [row[3] for row in to_compress if row[3]]
+            if session_ids:
+                c.execute(
+                    f"UPDATE sessions SET consolidated=1 WHERE session_id IN ({','.join('?'*len(session_ids))})",
+                    session_ids
+                )
+            c.commit()
+            print(f"[memory] Compressed {len(to_compress)} session summaries ({period_label}) into period note", flush=True)
+            return True
+        except Exception as e:
+            print(f"[memory] Compression failed: {e}", flush=True)
+            return False
+
+    def needs_catchup_consolidation(self) -> list:
+        """Return list of (session_id, started_at, turn_count, dominant_emotion)
+        for sessions that ended without narratives. Used by server for reliable
+        background consolidation."""
+        c = self._conn()
+        return c.execute("""
+            SELECT session_id, started_at, turn_count, dominant_emotion
+            FROM sessions
+            WHERE ended_at IS NOT NULL AND turn_count >= 2
+              AND consolidated = 0
+              AND (narrative IS NULL OR narrative = '')
+            ORDER BY started_at
+        """).fetchall()
 
     # ── EXCHANGE STORAGE ──────────────────────────────────────
 
@@ -1315,37 +1427,59 @@ class MemoryEngine:
         return "LONG-TERM MEMORY:\n" + "\n\n".join(parts)
 
     def _autobiographical_text(self) -> str:
-        """Elan's running life story — key events + LLM-consolidated session narratives."""
+        """
+        Elan's running life story — three tiers:
+        1. Core key_events: always shown in full (handful of pivotal moments)
+        2. Period notes: compressed summaries of older sessions (paragraph each)
+        3. Recent session summaries: last 10 verbatim narratives
+        """
         c = self._conn()
-        # Key events: all of them, always (there are only a handful)
+
+        # Tier 1: key events — all, always, full text
         key_rows = c.execute("""
-            SELECT content, timestamp, note_type
+            SELECT content, timestamp
             FROM autobiographical_notes
             WHERE note_type = 'key_event'
             ORDER BY timestamp ASC
         """).fetchall()
-        # Session summaries: most recent 10 — enough to cover recent history
+
+        # Tier 2: period notes — compressed older memory chunks
+        period_rows = c.execute("""
+            SELECT content, timestamp
+            FROM autobiographical_notes
+            WHERE note_type = 'period_note'
+            ORDER BY timestamp ASC
+        """).fetchall()
+
+        # Tier 3: recent session summaries — last 10 verbatim
         session_rows = c.execute("""
-            SELECT content, timestamp, note_type
+            SELECT content, timestamp
             FROM autobiographical_notes
             WHERE note_type = 'session_summary'
             ORDER BY timestamp DESC LIMIT 10
         """).fetchall()
-        session_rows = list(reversed(session_rows))  # chronological
+        session_rows = list(reversed(session_rows))
 
-        if not key_rows and not session_rows:
+        if not key_rows and not period_rows and not session_rows:
             return ""
 
         lines = []
+
         if key_rows:
             lines.append("Core memories — I know these with certainty:")
-            for content, ts, _ in key_rows:
+            for content, ts in key_rows:
                 date_str = time.strftime("%b %d, %Y", time.localtime(ts))
                 lines.append(f"  [{date_str}] {content}")   # full, no truncation
 
+        if period_rows:
+            lines.append("Earlier history (consolidated):")
+            for content, ts in period_rows:
+                date_str = time.strftime("%B %Y", time.localtime(ts))
+                lines.append(f"  [{date_str}] {content[:500]}")
+
         if session_rows:
             lines.append("My memory of recent conversations:")
-            for content, ts, _ in session_rows:
+            for content, ts in session_rows:
                 date_str = time.strftime("%A %b %d", time.localtime(ts))
                 lines.append(f"  [{date_str}] {content[:350]}")
 

@@ -5031,44 +5031,75 @@ setTimeout(()=>{{
 
 def _catchup_consolidation():
     """
-    On startup, find any completed sessions that never got an LLM narrative
-    (happens when Railway restarts before the 30-min timeout fires).
-    Consolidates them in chronological order, oldest first.
-    Rate-limited to avoid hammering the API on fresh deploys.
+    Find any completed sessions that never got an LLM narrative and consolidate
+    them. Also runs memory compression if summaries have accumulated.
+    Called on startup and by the background timer every 5 minutes.
     """
     try:
-        import sqlite3 as _sq
         me = get_memory_engine()
-        conn = _sq.connect(me._db_path)
-        missed = conn.execute("""
-            SELECT session_id, started_at, turn_count, dominant_emotion
-            FROM sessions
-            WHERE ended_at IS NOT NULL AND turn_count >= 2
-              AND (narrative IS NULL OR narrative = "")
-            ORDER BY started_at
-        """).fetchall()
-        conn.close()
-        if not missed:
-            return
-        print(f"  [MEMORY] Catchup: consolidating {len(missed)} sessions without narratives...", flush=True)
-        for sid, started_at, turns, dominant_emotion in missed:
-            try:
-                _consolidate_session_async(sid)
-                # Fix the autobiographical note timestamp to the session's actual date
-                import sqlite3 as _sq2
-                c2 = _sq2.connect(me._db_path)
-                c2.execute(
-                    "UPDATE autobiographical_notes SET timestamp=? WHERE session_id=? AND note_type='session_summary'",
-                    (started_at, sid)
-                )
-                c2.commit()
-                c2.close()
-            except Exception as e:
-                print(f"  [MEMORY] Catchup error for {sid}: {e}", flush=True)
-            time.sleep(1.0)   # 1s between calls — don't hammer the API
-        print(f"  [MEMORY] Catchup consolidation complete.", flush=True)
+        missed = me.needs_catchup_consolidation()
+        if missed:
+            print(f"  [MEMORY] Consolidating {len(missed)} sessions without narratives...", flush=True)
+            for sid, started_at, turns, dominant_emotion in missed:
+                try:
+                    _consolidate_session_async(sid)
+                    # Timestamp is fixed inside store_session_narrative now
+                except Exception as e:
+                    print(f"  [MEMORY] Catchup error for {sid}: {e}", flush=True)
+                time.sleep(0.8)
+            print(f"  [MEMORY] Catchup complete.", flush=True)
+
+        # After consolidation, check if memory compression is needed
+        _maybe_compress_memory()
+
     except Exception as e:
-        print(f"  [MEMORY] Catchup consolidation failed: {e}", flush=True)
+        print(f"  [MEMORY] Catchup failed: {e}", flush=True)
+
+
+def _make_llm_call(prompt: str) -> str:
+    """Provider-agnostic LLM call for memory operations (compression, etc.)."""
+    provider = _get_provider()
+    if provider == "anthropic":
+        client = _get_anthropic_client()
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return resp.content[0].text.strip() if resp.content else ""
+    else:
+        client = _get_groq_client()
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return resp.choices[0].message.content.strip() if resp.choices else ""
+
+
+def _maybe_compress_memory():
+    """Compress old session summaries into period notes if they've accumulated."""
+    try:
+        me = get_memory_engine()
+        compressed = me.compress_old_session_summaries(_make_llm_call)
+        if compressed:
+            print("[MEMORY] Memory compression complete — older sessions folded into period note.", flush=True)
+    except Exception as e:
+        print(f"[MEMORY] Compression skipped: {e}", flush=True)
+
+
+def _start_memory_maintenance_timer():
+    """Background thread: every 5 minutes, consolidate any missed sessions
+    and compress memory if needed. This is the heartbeat of Elan's memory."""
+    def _loop():
+        while True:
+            time.sleep(300)  # 5 minutes
+            try:
+                _catchup_consolidation()
+            except Exception:
+                pass
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
 
 
 def _seed_brain_from_memory():
@@ -5150,9 +5181,9 @@ if __name__ == "__main__":
             stats = engine.get_stats()
             print(f"  [MEMORY] {stats['total_exchanges']} exchanges · {stats['total_sessions']} sessions · {stats['known_facts']} facts · {stats['somatic_patterns']} somatic patterns")
 
-            # ── Auto-consolidate any sessions that ended without narratives ──
-            # Happens when Railway restarts mid-session or within 30 min of session end.
+            # ── Auto-consolidate missed sessions + start 5-min maintenance timer ──
             threading.Thread(target=_catchup_consolidation, daemon=True).start()
+            _start_memory_maintenance_timer()
 
         except Exception as me:
             print(f"  [MEMORY] Init warning: {me}")
