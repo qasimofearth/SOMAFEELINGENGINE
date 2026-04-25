@@ -2386,6 +2386,7 @@ def build_chat_html() -> str:
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Feeling Engine — Neural Monitor</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;}}
@@ -2508,33 +2509,35 @@ canvas.spark{{display:block;border-radius:1px;}}
 ::-webkit-scrollbar-thumb{{background:rgba(80,100,200,0.30);border-radius:3px;}}
 
 /* ── MOBILE NAV ── */
-#mob-nav{{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:#010118;border-top:1px solid rgba(80,100,200,0.18);display:none;flex-direction:row;}}
-.mnav-btn{{flex:1;padding:10px 4px 8px;background:none;border:none;color:rgba(120,140,220,0.55);font-family:'Courier New',monospace;font-size:7px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color 0.2s;}}
-.mnav-btn.active{{color:rgba(180,195,255,0.92);}}
-.mnav-icon{{font-size:16px;line-height:1;}}
+#mob-nav{{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;
+  background:#010118;border-top:1px solid rgba(80,100,200,0.22);flex-direction:row;
+  padding-bottom:env(safe-area-inset-bottom,0px);}}
+.mnav-btn{{flex:1;padding:10px 4px 8px;background:none;border:none;
+  color:rgba(120,140,220,0.50);font-family:'Courier New',monospace;font-size:7px;
+  letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:4px;transition:color 0.2s;}}
+.mnav-btn.active{{color:rgba(200,215,255,0.95);}}
+.mnav-icon{{font-size:18px;line-height:1;}}
 
 /* ── MOBILE LAYOUT ── */
 @media (max-width:768px){{
-  body{{grid-template-columns:1fr;grid-template-rows:1fr;height:100dvh;overflow:hidden;position:relative;}}
-  #left{{grid-template-rows:1fr 180px;border-right:none;height:100dvh;display:none;flex-direction:column;}}
+  body{{grid-template-columns:1fr;grid-template-rows:1fr;
+    height:100dvh;overflow:hidden;position:fixed;width:100%;}}
+  #left{{display:none;grid-template-rows:1fr 160px;border-right:none;
+    height:calc(100dvh - 52px);flex-direction:column;overflow:hidden;}}
   #left.mob-active{{display:grid;}}
-  #right{{display:none;height:100dvh;overflow-y:auto;padding-bottom:52px;}}
+  #right{{display:none;height:calc(100dvh - 52px);overflow-y:auto;
+    padding-bottom:8px;flex-direction:column;}}
   #right.mob-active{{display:flex;}}
-  #brain-panel-mob{{display:none;position:fixed;inset:0;bottom:52px;background:#010108;z-index:10;overflow:hidden;}}
-  #brain-panel-mob.mob-active{{display:block;}}
   #mob-nav{{display:flex;}}
-  /* brain wrap full height on mobile brain view */
-  #left #brain-wrap{{min-height:calc(100dvh - 232px);}}
-  /* chat smaller on mobile */
-  #chat-area{{height:180px;flex-shrink:0;}}
-  /* right panel panels wider */
+  #left #brain-wrap{{height:calc(100dvh - 212px);min-height:0;}}
+  #chat-area{{height:160px;flex-shrink:0;}}
   .panel{{padding:10px 14px;}}
-  /* emotion name bigger */
-  #emotion-name{{font-size:28px;letter-spacing:6px;}}
-  /* calendar hides on mobile */
+  #emotion-name{{font-size:26px;letter-spacing:5px;}}
   #datetime-panel{{display:none;}}
-  /* voice panel hides */
   #voice-panel{{display:none;}}
+  /* make input usable on mobile */
+  #user-input{{font-size:14px;}}
 }}
 </style>
 </head>
@@ -2688,41 +2691,67 @@ canvas.spark{{display:block;border-radius:1px;}}
 // ── MOBILE VIEW SWITCHER ────────────────────────────────────────
 const isMobile=()=>window.innerWidth<=768;
 let _mobView='brain';
+
+function applyLayout(){{
+  if(isMobile()){{
+    mobView(_mobView);
+  }} else {{
+    // Desktop: reset everything — CSS grid handles it
+    const left=document.getElementById('left');
+    const right=document.getElementById('right');
+    left.classList.remove('mob-active');
+    right.classList.remove('mob-active');
+    left.style.display='';
+    right.style.display='';
+    const ca=document.getElementById('chat-area');
+    if(ca)ca.style.display='';
+    const bw=document.getElementById('brain-wrap');
+    if(bw)bw.style.height='';
+  }}
+}}
+
 function mobView(v){{
-  if(!isMobile())return;
   _mobView=v;
+  if(!isMobile())return;
   const left=document.getElementById('left');
   const right=document.getElementById('right');
-  // nav highlight
   ['brain','chat','body','vitals'].forEach(id=>{{
     const b=document.getElementById('mnav-'+id);
     if(b)b.classList.toggle('active',id===v);
   }});
   if(v==='brain'){{
     left.classList.add('mob-active'); right.classList.remove('mob-active');
-    // scroll brain visible, hide chat area
-    document.getElementById('chat-area').style.display='none';
-    document.getElementById('brain-wrap').style.height='calc(100dvh - 52px)';
+    const ca=document.getElementById('chat-area');
+    if(ca)ca.style.display='none';
+    const bw=document.getElementById('brain-wrap');
+    if(bw)bw.style.height='calc(100dvh - 52px)';
   }} else if(v==='chat'){{
     left.classList.add('mob-active'); right.classList.remove('mob-active');
-    document.getElementById('chat-area').style.display='grid';
-    document.getElementById('brain-wrap').style.height='';
+    const ca=document.getElementById('chat-area');
+    if(ca)ca.style.display='grid';
+    const bw=document.getElementById('brain-wrap');
+    if(bw)bw.style.height='';
   }} else if(v==='body'){{
     left.classList.remove('mob-active'); right.classList.add('mob-active');
-    // scroll right panel to body section
-    const bp=document.querySelector('#right .panel:nth-child(3)');
-    if(bp)setTimeout(()=>bp.scrollIntoView({{behavior:'smooth'}}),50);
+    setTimeout(()=>{{
+      const bp=document.querySelector('.panel[data-panel="body"]') ||
+               document.querySelector('#right .panel:nth-child(2)');
+      if(bp)bp.scrollIntoView({{behavior:'smooth',block:'start'}});
+      else document.getElementById('right').scrollTop=0;
+    }},60);
   }} else if(v==='vitals'){{
     left.classList.remove('mob-active'); right.classList.add('mob-active');
-    // scroll to EEG
-    const ep=document.getElementById('eeg-canvas');
-    if(ep)setTimeout(()=>ep.scrollIntoView({{behavior:'smooth'}}),50);
+    setTimeout(()=>{{
+      const ep=document.getElementById('eeg-canvas');
+      if(ep)ep.scrollIntoView({{behavior:'smooth',block:'start'}});
+    }},60);
   }}
 }}
-// Init mobile layout
-if(isMobile()){{
-  mobView('brain');
-}}
+
+// Auto-apply on load and on resize/orientation change
+applyLayout();
+window.addEventListener('resize',applyLayout);
+window.addEventListener('orientationchange',()=>setTimeout(applyLayout,200));
 
 const ALL_EMOTIONS={em_json};
 const REGION_POS={region_pos_json};
