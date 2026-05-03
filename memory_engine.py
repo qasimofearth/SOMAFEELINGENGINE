@@ -1645,13 +1645,13 @@ Compressed memory:"""
         episodes = []
 
         if current_user_msg:
-            for row in self.get_relevant_episodes(current_user_msg, limit=4):
+            for row in self.get_relevant_episodes(current_user_msg, limit=3):
                 key = (row[0], (row[1] or "")[:40])
                 if key not in seen:
                     seen.add(key)
                     episodes.append(_relevant_to_dict(row))
 
-        for row in self.get_recent_episodes(limit=8, min_importance=0.45):
+        for row in self.get_recent_episodes(limit=5, min_importance=0.50):
             key = (row[0], (row[2] or "")[:40])
             if key not in seen:
                 seen.add(key)
@@ -1663,15 +1663,15 @@ Compressed memory:"""
         episodes.sort(key=lambda e: e["ts"])
 
         lines = ["Recent memory (significant moments):"]
-        for ep in episodes[:10]:
+        for ep in episodes[:6]:
             dt = _dt.datetime.fromtimestamp(ep["ts"]).strftime("%b %d %H:%M")
             emotion = ep.get("emotion", "")
             mood = f" [{emotion}]" if emotion else ""
-            summary = (ep.get("summary") or "")[:140]
+            summary = (ep.get("summary") or "")[:120]
             line = f"  [{dt}]{mood} {summary}"
             response = ep.get("response")
             if response:
-                line += f"\n    → I said: {response[:100]}"
+                line += f" → {response[:60]}"
             lines.append(line)
         return "\n".join(lines)
 
@@ -1738,8 +1738,10 @@ Compressed memory:"""
                 })
 
             now = _dt.datetime.now()
-            cal_lines.append("Days we have talked:")
-            for day_key in sorted(days.keys()):
+            # Cap calendar to last 30 days — older history lives in session narratives
+            cutoff = (now.date() - _dt.timedelta(days=30)).strftime("%Y-%m-%d")
+            cal_lines.append("Days we have talked (last 30 days):")
+            for day_key in sorted(k for k in days.keys() if k >= cutoff):
                 day_dt = _dt.datetime.strptime(day_key, "%Y-%m-%d")
                 dow = day_dt.strftime("%A")   # "Monday", "Tuesday", etc.
                 date_label = day_dt.strftime("%B %d")

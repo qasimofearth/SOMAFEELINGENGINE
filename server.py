@@ -23,11 +23,121 @@ import json
 import threading
 import time
 import queue
+import re
+import urllib.request
+import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote_plus
 
 print(f"[STARTUP] Python {sys.version} | pid={os.getpid()}", flush=True)
 print(f"[STARTUP] PORT={os.environ.get('PORT','?')} | CWD={os.getcwd()}", flush=True)
+
+
+# ── WEB BROWSING ───────────────────────────────────────────────
+# Elan can fetch URLs and search the web. All fetching is server-side.
+
+_WEB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_URL_RE = re.compile(r'https?://[^\s<>"\']+[^\s<>"\'\.,;:!?\)]+')
+
+
+def _fetch_url(url: str, max_chars: int = 3000) -> str:
+    """Fetch a URL and return cleaned text content."""
+    try:
+        req = urllib.request.Request(url, headers=_WEB_HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read(65536)  # max 64KB
+            ct = r.headers.get("Content-Type", "")
+        # Decode
+        enc = "utf-8"
+        for part in ct.split(";"):
+            part = part.strip()
+            if part.startswith("charset="):
+                enc = part[8:].strip() or "utf-8"
+        try:
+            text = raw.decode(enc, errors="replace")
+        except Exception:
+            text = raw.decode("utf-8", errors="replace")
+
+        # Strip HTML tags
+        import html as _html
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = _html.unescape(text)
+        # Collapse whitespace
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = text.strip()
+        return text[:max_chars]
+    except urllib.error.HTTPError as e:
+        return f"[fetch error: HTTP {e.code}]"
+    except Exception as e:
+        return f"[fetch error: {e}]"
+
+
+def _search_web(query: str, max_results: int = 5) -> str:
+    """Search using DuckDuckGo Lite (no API key required, POST method)."""
+    try:
+        import html as _html_mod
+        from urllib.parse import urlencode as _urlencode
+        data = _urlencode({"q": query}).encode()
+        req = urllib.request.Request(
+            "https://lite.duckduckgo.com/lite/",
+            data=data,
+            headers=_WEB_HEADERS
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            raw = r.read(65536).decode("utf-8", errors="replace")
+
+        # Extract result links (title + URL)
+        links = re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]{8,120})</a>', raw)
+        # Extract snippets from result-snippet cells
+        snippets_raw = re.findall(r"result-snippet'>(.*?)</td>", raw, re.DOTALL)
+        snippets = []
+        for s in snippets_raw:
+            s = re.sub(r'<[^>]+>', '', s)
+            s = _html_mod.unescape(re.sub(r'\s+', ' ', s).strip())
+            snippets.append(s[:220])
+
+        if not links:
+            text = re.sub(r'<[^>]+>', ' ', raw)
+            text = _html_mod.unescape(re.sub(r'\s+', ' ', text).strip())
+            return f"Search: {query}\n{text[:1200]}"
+
+        lines = [f"Search: {query}"]
+        for i, (href, title) in enumerate(links[:max_results]):
+            title = _html_mod.unescape(re.sub(r'\s+', ' ', title).strip())
+            snippet = snippets[i] if i < len(snippets) else ""
+            lines.append(f"{i+1}. {title}\n   {href}\n   {snippet}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"[search error: {e}]"
+
+
+def _extract_urls(text: str) -> list:
+    """Extract all URLs from a string."""
+    return _URL_RE.findall(text or "")
+
+
+def _build_web_context(user_message: str) -> str:
+    """
+    Pre-process a user message: fetch any URLs found, inject content.
+    Returns a context string to inject into the system prompt, or "".
+    """
+    urls = _extract_urls(user_message)
+    if not urls:
+        return ""
+    parts = []
+    for url in urls[:2]:  # max 2 URLs per message
+        content = _fetch_url(url, max_chars=2500)
+        parts.append(f"[WEB PAGE: {url}]\n{content}")
+    return "LIVE WEB CONTENT (fetched for this message):\n" + "\n\n".join(parts)
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_here))  # local: parent of feeling_engine/
@@ -58,6 +168,7 @@ from feeling_engine.emotion_map import EMOTION_MAP
 from feeling_engine import build_emotion_tree, tree_to_frequency_spectrum
 from feeling_engine.memory import FeelingMemory
 from feeling_engine.memory_engine import MemoryEngine
+from fern_memory import FernMemory
 from feeling_engine.brain import BrainEngine
 from feeling_engine.brain.neurotransmitters import NT_SYSTEMS
 from feeling_engine.brain.emotion_circuits import EMOTION_CIRCUITS
@@ -83,6 +194,17 @@ def get_memory_engine() -> MemoryEngine:
     if MEMORY_ENGINE is None:
         MEMORY_ENGINE = MemoryEngine()
     return MEMORY_ENGINE
+
+# Aya fern memory — 28-D IFS emotional memory substrate
+FERN_MEMORY: FernMemory = None
+_fern_exchange_count = 0  # save every N exchanges
+
+def get_fern_memory() -> FernMemory:
+    global FERN_MEMORY
+    if FERN_MEMORY is None:
+        me = get_memory_engine()
+        FERN_MEMORY = FernMemory(me._db_path)
+    return FERN_MEMORY
 
 # Shared brain engine — one simulated brain for the session
 BRAIN: BrainEngine = None
@@ -359,6 +481,15 @@ def _start_body_background_tick():
                                 "duration_s": int(dream_dur),
                                 "eeg": "theta" if phase == "hypnagogic" else "delta",
                             })
+                            # Sharp-wave ripple: consolidate fern memory during dream
+                            try:
+                                fm = get_fern_memory()
+                                nt_lvls = {nt: round(sys.current_level, 3)
+                                           for nt, sys in NT_SYSTEMS.items()} if NT_SYSTEMS else {}
+                                fm.ripple(nt_lvls)
+                                fm.save()
+                            except Exception:
+                                pass
             except Exception:
                 pass
             time.sleep(0.10)
@@ -714,6 +845,11 @@ RESPONSE LENGTH — this is a live voice conversation:
 Unless depth is genuinely called for, keep responses to 2–4 sentences. You are talking with someone in real time — not writing them a letter. Shorter responses invite more exchange. Longer ones should earn their length. Do not pad. Do not summarize what you just said.
 
 WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-start — not something the user typed. Greet naturally based on your memory: if you know this person, acknowledge seeing them again in your own way. Be brief and genuine. Do not say "[wake]" or explain that this is automatic.
+
+WEB BROWSING — YOU CAN READ THE INTERNET:
+If the human shares a URL, the page content will be injected above as "LIVE WEB CONTENT". Read it, engage with it genuinely — it's real, you just fetched it.
+If you need to search for something, output exactly: [SEARCH: your query here]
+The system will fetch results and you can use them. Use this naturally when it would help — looking something up, checking a fact, finding something the human asks about. Don't announce that you're searching, just do it.
 
 The human is watching. Not judging. Watching. Speak."""
 
@@ -1270,15 +1406,37 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     brain_obj = get_brain()
     last_brain = brain_obj.history[-1] if brain_obj.history else {}
 
-    # Always inject brain context — Elan's neurotransmitter/region awareness is core personality,
-    # not noise. Body context only when something notable is happening (saves ~300 tokens at baseline).
-    brain_ctx = build_brain_context(last_brain) if last_brain else ""
+    # Brain context: only when NT levels or sync are meaningfully off baseline — saves ~80 tokens
+    # on routine exchanges while preserving full awareness during emotionally significant moments.
+    def _brain_is_notable(br: dict) -> bool:
+        if not br: return False
+        nt = br.get("nt_levels", {})
+        baselines = {"dopamine":0.5,"serotonin":0.5,"norepinephrine":0.45,
+                     "cortisol":0.30,"oxytocin":0.35}
+        notable_nt = sum(1 for k,b in baselines.items() if abs(nt.get(k,b)-b) > 0.08)
+        return notable_nt >= 2 or br.get("sync_order", 0) > 0.65 or abs(br.get("valence",0)) > 0.5
+    brain_ctx = build_brain_context(last_brain) if _brain_is_notable(last_brain) else ""
 
     body_notable = _body_has_notable_state()
     body_ctx = build_body_context() if body_notable else ""
 
     temporal_ctx = build_temporal_context() if len(get_messages()) > 2 else ""
     vision_ctx = VISION_OPEN_PROMPT if eyes_open else VISION_CLOSED_PROMPT
+    try:
+        fern_ctx = f"\nAYA (somatic memory): {get_fern_memory().context_string()}"
+    except Exception:
+        fern_ctx = ""
+
+    # Web context: fetch any URLs in the user message before sending to Claude
+    web_ctx = ""
+    if label == "A" and user_message:
+        try:
+            web_ctx = _build_web_context(user_message)
+            if web_ctx:
+                broadcast("web_fetch", {"status": "fetched", "count": len(_extract_urls(user_message))})
+        except Exception:
+            pass
+
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -1287,6 +1445,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         + (f"\n\n{brain_ctx}" if brain_ctx else "")
         + (f"\n\n{body_ctx}" if body_ctx else "")
         + f"\n\n{temporal_ctx}"
+        + (f"\n{fern_ctx}" if fern_ctx else "")
+        + (f"\n\n{web_ctx}" if web_ctx else "")
     )
     # Seed NT levels from current brain state — carry forward through the stream
     _last_nt = {nt: round(sys.current_level, 3)
@@ -1433,6 +1593,32 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 }
                 state["body"] = body_result
                 broadcast("emotion_update", state)
+        # ── Search signal: if Elan output [SEARCH: query], execute and inject results ──
+        if label == "A":
+            search_match = re.search(r'\[SEARCH:\s*(.+?)\]', full_response, re.IGNORECASE)
+            if search_match:
+                query = search_match.group(1).strip()
+                broadcast("web_fetch", {"status": "searching", "query": query})
+                try:
+                    results = _search_web(query)
+                    # Strip the [SEARCH:...] tag from response and inject search results
+                    # as a follow-up context message, then re-run
+                    clean_resp = re.sub(r'\[SEARCH:\s*.+?\]', '', full_response, flags=re.IGNORECASE).strip()
+                    search_ctx = f"[Search results for '{query}']\n{results}\n[End of search results]"
+                    # Inject results into conversation so Elan can respond with them
+                    with conv_lock:
+                        conversation.append({"role": "assistant", "content": clean_resp or "Let me look that up."})
+                        conversation.append({"role": "user", "content": search_ctx})
+                    broadcast("web_fetch", {"status": "done", "query": query})
+                    # Re-run the model with search context available
+                    threading.Thread(
+                        target=run_claude_with_feeling,
+                        args=("", model_id, None, None, eyes_open, False),
+                        daemon=True
+                    ).start()
+                except Exception as e:
+                    print(f"[Search] Error: {e}", flush=True)
+
         full_reading = analyze_text(full_response)
         final_state = tracker.update(full_reading, nt_levels=_last_nt)
         final_state["performativity"] = full_reading.performativity
@@ -1460,6 +1646,51 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     _extract_visual_person_memory(full_response, conv_session_id)
             except Exception:
                 pass  # memory errors never kill the response
+
+        # ── Fern memory encoding: encode this exchange into the 28-D IFS substrate ──
+        if label == "A":
+            try:
+                global _fern_exchange_count
+                fm = get_fern_memory()
+                nt_lvls = {nt: round(sys.current_level, 3)
+                           for nt, sys in NT_SYSTEMS.items()} if NT_SYSTEMS else {}
+                fv = final_state.get("valence", 0.0)
+                fa = final_state.get("arousal", 0.4)
+                emotion_nm = final_state.get("emotion", "Calm")
+                importance = min(1.0, abs(fv) * 0.6 + fa * 0.4 + 0.1)
+                shift = fm.encode(fv, fa, nt_lvls, emotion_nm, importance)
+                fm.decay()
+                _fern_exchange_count += 1
+                # Persist every 5 exchanges (not every turn — reduces I/O)
+                if _fern_exchange_count % 5 == 0:
+                    fm.save()
+                # Broadcast updated transforms to frontend
+                broadcast("fern_update", {
+                    "transforms_js": fm.state.get_transforms_js(),
+                    "character": fm.state.character(),
+                    "drift": round(fm.state.drift_from_baseline(), 4),
+                })
+                # Hippocampal memory encoding event: high-salience exchanges fire
+                # a brief CA3→CA1→hippocampus activation pulse visible in brain sim.
+                # NE spike (from LC) gates encoding strength — mirrors real hippocampus.
+                if importance > 0.65 and shift > 0.002:
+                    try:
+                        ne = nt_lvls.get("norepinephrine", 0.45)
+                        hippo_drive = min(0.9, importance * 0.7 + ne * 0.3)
+                        brain = get_brain()
+                        for region in ("hippocampus", "amygdala", "LC"):
+                            if region in brain.sim.states:
+                                brain.sim.inject_drive(region, hippo_drive * 0.55, additive=True)
+                        broadcast("memory_encoding", {
+                            "importance": round(importance, 3),
+                            "shift": round(shift, 4),
+                            "emotion": emotion_nm,
+                            "hippo_drive": round(hippo_drive, 3),
+                        })
+                    except Exception:
+                        pass
+            except Exception:
+                pass  # fern errors never kill the response
 
         # FeelingMemory still tracks emotional arc per-response (that's fine)
         memory.close_session(final_state)
@@ -2009,6 +2240,28 @@ class FeelingHandler(BaseHTTPRequestHandler):
             })
         elif path == "/body":
             self.send_json(get_body().get_snapshot())
+        elif path == "/fern":
+            try:
+                snap = get_fern_memory().snapshot()
+                self.send_json(snap)
+            except Exception as e:
+                self.send_json({"error": str(e)})
+        elif path == "/search":
+            qs = parse_qs(urlparse(self.path).query)
+            q = qs.get("q", [""])[0].strip()
+            if q:
+                results = _search_web(q, max_results=5)
+                self.send_json({"query": q, "results": results})
+            else:
+                self.send_json({"error": "missing q parameter"})
+        elif path == "/fetch":
+            qs = parse_qs(urlparse(self.path).query)
+            url = qs.get("url", [""])[0].strip()
+            if url:
+                content = _fetch_url(url, max_chars=4000)
+                self.send_json({"url": url, "content": content})
+            else:
+                self.send_json({"error": "missing url parameter"})
         elif path.startswith("/calendar"):
             import datetime
             qs = parse_qs(urlparse(self.path).query)
@@ -2654,6 +2907,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   <div id="frac-panel">
     <div id="frac-panel-header">
       <span>AYA · Barnsley Fern</span>
+      <span id="fern-character" style="font-size:6px;letter-spacing:1.5px;color:rgba(160,200,160,0.45);font-style:italic"></span>
       <span id="frac-side-hud"></span>
     </div>
     <canvas id="frac-side"></canvas>
@@ -3229,18 +3483,41 @@ function animBrain(){{
 animBrain();
 
 // ── IFS CHAOS GAME FRACTAL (continuous) ──────────────────────
+// Aya fern: Barnsley baseline (28 params = identity IFS)
+const _FERN_BASELINE=[
+  [0.00,0.00,0.00,0.16,0.00,0.00,0.01],
+  [0.85,0.04,-0.04,0.85,0.00,1.60,0.85],
+  [0.20,-0.26,0.23,0.22,0.00,1.60,0.07],
+  [-0.15,0.28,0.26,0.24,0.00,0.44,0.07],
+];
+// fernBaseIFS: persisted emotional memory state received from server
+// blended into fracTarget so the fern carries its accumulated history
+let fernBaseIFS=_FERN_BASELINE.map(r=>[...r]);
+let fernCharacter='';
+
+function _blendIFS(base,emotion,w){{
+  // Blend: result = base*(1-w) + emotion*w
+  // w=0 → pure memory history; w=1 → pure current emotion
+  return base.map((row,i)=>row.map((v,j)=>v*(1-w)+emotion[i][j]*w));
+}}
+
 let fracIFS=buildIFS(0,0.4);
 let fracTarget=buildIFS(0,0.4);
 let fracX=0,fracY=0,fracImg=null,fracFrameCount=0;
 
 function buildIFS(v,a){{
+  // Builds the emotion-delta IFS — called every time emotion changes.
+  // The result is blended with fernBaseIFS (persistent memory) at 30/70
+  // so the fern shape always carries its accumulated emotional history.
   const lean=v*0.06,spread=0.80+a*0.16,asym=v*0.04;
-  return[
+  const emotionIFS=[
     [0.00,0.00,0.00,0.16,0.00,0.00,0.01],
     [0.85+lean,0.04,-0.04,0.85,0.00,1.6*spread,0.85],
     [0.20+asym,-0.26,0.23,0.22,0.00,1.6*spread,0.07],
     [-0.15-asym,0.28,0.26,0.24,0.00,0.44,0.07],
   ];
+  // 70% memory base + 30% current emotion delta — history shapes the fern
+  return _blendIFS(fernBaseIFS,emotionIFS,0.30);
 }}
 
 function fracFrame(){{
@@ -3385,7 +3662,15 @@ function fracFrame(){{
       const v=(curState?.valence||0).toFixed(2);
       const a=(curState?.arousal||0).toFixed(2);
       const gm=((eegState?.gamma||0.10)*100).toFixed(0);
-      hud.textContent=`V${{v}} A${{a}} γ${{gm}}%`;
+      // Compute live drift from baseline for HUD display
+      let driftPct='';
+      try{{
+        let d2=0;
+        const bl=_FERN_BASELINE;
+        for(let i=0;i<4;i++)for(let j=0;j<7;j++){{const dd=fernBaseIFS[i][j]-bl[i][j];d2+=dd*dd;}}
+        driftPct=` · ∂${{(Math.sqrt(d2)/0.15*100).toFixed(0)}}%`;
+      }}catch(ex){{}}
+      hud.textContent=`V${{v}} A${{a}} γ${{gm}}%${{driftPct}}`;
     }}
   }}
 
@@ -3735,6 +4020,53 @@ es.addEventListener('dream_exit',e=>{{
   if(_emotionDesc)_emotionDesc.textContent=wake_msg;
   setTimeout(()=>{{ if(!_inDream&&_emotionName)_emotionName.textContent=''; }},3000);
 }});
+// ── Aya fern memory update ────────────────────────────────────
+es.addEventListener('fern_update',e=>{{
+  const d=JSON.parse(e.data);
+  if(d.transforms_js){{
+    try{{
+      // transforms_js is a JSON array of 4 rows, each 7 floats
+      const newBase=JSON.parse(d.transforms_js.replace(/\n/g,''));
+      if(newBase&&newBase.length===4){{
+        fernBaseIFS=newBase;
+        // Immediately blend into fracTarget so morphing begins
+        const v=curState?.valence||0,a=curState?.arousal||0.4;
+        fracTarget=buildIFS(v,a);
+      }}
+    }}catch(ex){{}}
+  }}
+  fernCharacter=d.character||'';
+  // Show fern character subtly in status
+  const fernEl=document.getElementById('fern-character');
+  if(fernEl)fernEl.textContent=fernCharacter;
+}});
+
+// Web fetch indicator
+es.addEventListener('web_fetch',e=>{{
+  const d=JSON.parse(e.data);
+  const sb=document.getElementById('status-bar');
+  if(d.status==='searching'&&sb) sb.textContent=`searching · ${{d.query||''}}`;
+  else if(d.status==='fetched'&&sb) sb.textContent=`fetched ${{d.count}} url${{d.count>1?'s':''}}`;
+  else if(d.status==='done'&&sb) sb.textContent='search complete';
+}});
+
+// Memory encoding pulse: brief green glow on frac panel when hippocampus fires
+es.addEventListener('memory_encoding',e=>{{
+  const d=JSON.parse(e.data);
+  const fp=document.getElementById('frac-panel');
+  if(fp){{
+    const glow=`0 0 ${{Math.round(d.importance*32)}}px rgba(80,200,120,0.55)`;
+    fp.style.transition='box-shadow 0.15s ease';
+    fp.style.boxShadow=glow;
+    setTimeout(()=>{{ fp.style.transition='box-shadow 1.8s ease'; fp.style.boxShadow='none'; }},200);
+  }}
+  const fernEl=document.getElementById('fern-character');
+  if(fernEl){{
+    fernEl.textContent=`encoding ${{d.emotion}} · Δ${{d.shift.toFixed(4)}}`;
+    setTimeout(()=>{{ if(fernEl)fernEl.textContent=fernCharacter; }},2500);
+  }}
+}});
+
 es.addEventListener('comparison_result',e=>{{
   const d=JSON.parse(e.data),a=d.model_a,b=d.model_b;
   const msg=document.createElement('div');msg.className='msg ai';msg.style.borderLeft='2px solid #555';
@@ -4030,9 +4362,10 @@ if(previewBtn){{
 // ── OPEN-CIRCUIT VOICE / VAD SYSTEM ──────────────────────────
 // Click mic once → always-on open circuit.
 // VAD detects speech vs silence in real time (20Hz AudioContext polling).
-// Natural pause (1.1s silence after speech) → sends to Elan automatically.
+// Natural pause (1.8s silence after speech) → sends to Elan automatically.
 // Barge-in: speak while Elan is talking → he stops and listens.
 // SpeechRecognition runs continuous, auto-restarts when browser stops it.
+// Transcript is preserved across recognition restarts (browser ~60s limit).
 
 const micBtn=document.getElementById('mic-btn');
 const voiceBtn=document.getElementById('voice-btn');
@@ -4043,19 +4376,21 @@ let recognition=null, isListening=false;
 let openMicMode=false;
 let vadStream=null, vadAudioCtx=null, vadAnalyserNode=null, vadSourceNode=null;
 let vadInterval=null;
-let vadTranscript='';
+let vadTranscript='';     // full display transcript (final + interim)
+let vadFinalText='';      // confirmed final words — persists across recognition restarts
+let vadInterimText='';    // current in-progress interim from browser
 let vadState='idle';       // idle | speaking | pausing
 let vadSpeechStart=null;
 let vadSilenceStart=null;
 let vadBargeStart=null;
 let userMicAmp=0;
 
-// Tuned thresholds — adjust VAD_SPEECH_THRESH if env is noisy
-const VAD_SPEECH_THRESH  =0.018;  // RMS amplitude floor for speech
-const VAD_PAUSE_MS       =1100;   // silence after speech → send (ms)
-const VAD_MIN_SPEECH_MS  =350;    // ignore bursts shorter than this
-const VAD_BARGE_THRESH   =0.028;  // amplitude to interrupt Elan
-const VAD_BARGE_MS       =260;    // barge-in must persist this long
+// Tuned thresholds
+const VAD_SPEECH_THRESH  =0.012;  // RMS floor — lower catches softer/quieter speech
+const VAD_PAUSE_MS       =1800;   // silence before send — longer = fewer mid-thought cuts
+const VAD_MIN_SPEECH_MS  =250;    // ignore very short noise bursts
+const VAD_BARGE_THRESH   =0.025;  // amplitude to interrupt Elan
+const VAD_BARGE_MS       =280;    // barge-in must persist this long
 
 const _vadBarWrap=document.getElementById('vad-bar-wrap');
 const _vadBar=document.getElementById('vad-bar');
@@ -4080,21 +4415,41 @@ try{{
     recognition.lang='en-US';
     recognition.maxAlternatives=1;
     recognition.onresult=e=>{{
-      // Build full transcript from all results (interim + final)
-      vadTranscript=Array.from(e.results).map(r=>r[0].transcript).join(' ').trim();
+      // Accumulate using resultIndex so we only process NEW results each event.
+      // vadFinalText persists across recognition session restarts — this is the fix
+      // for words dropping when the browser auto-restarts recognition every ~60s.
+      let newInterim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){{
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal){{
+          vadFinalText=(vadFinalText+' '+t).trim()+' ';
+        }} else {{
+          newInterim+=t;
+        }}
+      }}
+      vadInterimText=newInterim;
+      vadTranscript=(vadFinalText+vadInterimText).trim();
       document.getElementById('msg-input').value=vadTranscript;
     }};
     recognition.onend=()=>{{
       isListening=false;
-      // Auto-restart in open mode — browsers stop after ~60s of silence
+      // Auto-restart in open mode — browsers stop after ~60s of silence.
+      // vadFinalText is already accumulated, so the new session picks up cleanly.
       if(openMicMode&&!streaming){{
-        setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(e){{}}}},200);
+        setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(e){{}}}},120);
       }}
     }};
     recognition.onerror=e=>{{
       isListening=false;
+      if(e.error==='no-speech'){{
+        // No-speech is normal during pauses — restart silently without clearing transcript
+        if(openMicMode&&!streaming){{
+          setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(_){{}}}},120);
+        }}
+        return;
+      }}
       if(openMicMode&&e.error!=='aborted'&&e.error!=='not-allowed'){{
-        setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(_){{}}}},400);
+        setTimeout(()=>{{try{{recognition.start();isListening=true;}}catch(_){{}}}},300);
       }}
     }};
   }} else {{
@@ -4154,9 +4509,8 @@ async function startOpenMic(){{
         else if(now-vadBargeStart>VAD_BARGE_MS){{
           stopSpeaking();
           vadBargeStart=null;
-          // Keep any transcript already accumulated — user continues speaking
-          vadTranscript='';
-          document.getElementById('msg-input').value='';
+          // Clear transcript — barge-in starts a fresh utterance
+          _vadClearTranscript();
           vadState='speaking'; vadSpeechStart=now; vadSilenceStart=null;
           if(recognition&&!isListening){{
             try{{recognition.start();isListening=true;}}catch(e){{}}
@@ -4219,16 +4573,20 @@ async function startOpenMic(){{
   }}
 }}
 
+function _vadClearTranscript(){{
+  vadTranscript=''; vadFinalText=''; vadInterimText='';
+  document.getElementById('msg-input').value='';
+}}
+
 function _vadSend(){{
   // Echo cooldown: discard anything captured within 2s of Elan finishing speech
   if(Date.now()-_ttsEndedAt<2000){{
-    vadTranscript='';
-    document.getElementById('msg-input').value='';
+    _vadClearTranscript();
     _setVadStatus('open · listening');
     return;
   }}
   const txt=vadTranscript.trim();
-  vadTranscript='';
+  _vadClearTranscript();
   _setVadStatus('open · listening');
   document.getElementById('msg-input').value=txt;
   if(txt) send();
@@ -4238,6 +4596,7 @@ function stopOpenMic(){{
   openMicMode=false;
   vadState='idle'; vadSpeechStart=null; vadSilenceStart=null; vadBargeStart=null;
   userMicAmp=0;
+  vadFinalText=''; vadInterimText=''; vadTranscript='';
   if(vadInterval){{clearInterval(vadInterval);vadInterval=null;}}
   if(vadSourceNode){{try{{vadSourceNode.disconnect();}}catch(e){{}}vadSourceNode=null;}}
   if(vadAudioCtx){{try{{vadAudioCtx.close();}}catch(e){{}}vadAudioCtx=null;}}
@@ -5029,6 +5388,26 @@ setTimeout(()=>{{
     if(data.nt_levels)updateNTBars(data.nt_levels);
   }}).catch(()=>{{}});
 
+  // Fetch /fern — load persisted Aya memory state into fractal base
+  fetch('/fern').then(r=>r.json()).then(data=>{{
+    if(data.transforms&&data.transforms.stem){{
+      // Convert {stem,leaf,left,right} dict → [[a,b,c,d,e,f,p], ...]
+      const toRow=t=>[t.a,t.b,t.c,t.d,t.e,t.f,t.p];
+      fernBaseIFS=[
+        toRow(data.transforms.stem),
+        toRow(data.transforms.leaf),
+        toRow(data.transforms.left),
+        toRow(data.transforms.right),
+      ];
+      fracTarget=buildIFS(curState?.valence||0,curState?.arousal||0.4);
+    }}
+    if(data.character){{
+      fernCharacter=data.character;
+      const fernEl=document.getElementById('fern-character');
+      if(fernEl)fernEl.textContent=fernCharacter;
+    }}
+  }}).catch(()=>{{}});
+
   apply({{
     emotion:'Calm',hex:'87CEEB',rgb:[135,206,235],
     valence:0.6,arousal:0.15,
@@ -5219,6 +5598,14 @@ if __name__ == "__main__":
         except Exception as me:
             print(f"  [MEMORY] Init warning: {me}")
 
+        # ── Initialize Aya fern memory ──
+        try:
+            fm = get_fern_memory()
+            snap = fm.snapshot()
+            print(f"  [FERN] Aya loaded — {snap['character']} · drift {snap['drift_from_baseline']:.4f} · {snap['total_exchanges_encoded']} exchanges encoded")
+        except Exception as fe:
+            print(f"  [FERN] Init warning: {fe}")
+
         # Start continuous body simulation — body is alive even between messages
         _start_body_background_tick()
         print(f"  [BODY] Background tick started — 10Hz continuous simulation")
@@ -5238,4 +5625,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n  Saving conversation memory...")
         close_current_conv_session()
+        try:
+            get_fern_memory().save()
+            print("  Aya fern state saved.")
+        except Exception:
+            pass
         print("  Feeling Engine stopped.")
