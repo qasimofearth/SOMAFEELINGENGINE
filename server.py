@@ -1951,7 +1951,8 @@ def _get_anthropic_client():
         _anthropic_client_key = key
     return _anthropic_client
 
-_KEYS_FILE = "/tmp/fe_keys.json"
+# Use Railway Volume (/data) if available so keys survive redeploys; /tmp is ephemeral
+_KEYS_FILE = "/data/fe_keys.json" if os.path.isdir("/data") else "/tmp/fe_keys.json"
 
 def _load_persisted_keys():
     global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD
