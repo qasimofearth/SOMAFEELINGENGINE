@@ -4039,7 +4039,7 @@ es.addEventListener('fern_update',e=>{{
   if(d.transforms_js){{
     try{{
       // transforms_js is a JSON array of 4 rows, each 7 floats
-      const newBase=JSON.parse(d.transforms_js.replace(/\n/g,''));
+      const newBase=JSON.parse(d.transforms_js.replace(/\\n/g,''));
       if(newBase&&newBase.length===4){{
         fernBaseIFS=newBase;
         // Immediately blend into fracTarget so morphing begins
