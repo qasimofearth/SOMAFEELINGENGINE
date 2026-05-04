@@ -5404,7 +5404,7 @@ setTimeout(()=>{{
   // Fetch /fern — load persisted Aya memory state into fractal base
   fetch('/fern').then(r=>r.json()).then(data=>{{
     if(data.transforms&&data.transforms.stem){{
-      // Convert {stem,leaf,left,right} dict → [[a,b,c,d,e,f,p], ...]
+      // Convert {{stem,leaf,left,right}} dict → [[a,b,c,d,e,f,p], ...]
       const toRow=t=>[t.a,t.b,t.c,t.d,t.e,t.f,t.p];
       fernBaseIFS=[
         toRow(data.transforms.stem),
