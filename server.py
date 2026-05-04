@@ -1900,13 +1900,16 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         if _changed:
             broadcast("body_tick", get_body().get_snapshot())
         broadcast("emotion_final", {**state, "full_response": True})
-        broadcast("stream_end", {
+        _send = {
             "final_emotion": state.get("emotion", ""),
             "response_text": state.get("response_text", ""),
             "emotion_history": tracker_a.history[-10:],
             "memory": memory_a.get_summary_dict(),
             "session_arc": [],
-        })
+        }
+        if state.get("error"):
+            _send["error"] = state["error"]
+        broadcast("stream_end", _send)
     except Exception as e:
         # Guarantee the client always gets unlocked
         broadcast("stream_end", {"final_emotion": "error", "response_text": "",
@@ -3992,6 +3995,13 @@ es.addEventListener('stream_end',e=>{{
   clearTimeout(streamTmo);
   const d=JSON.parse(e.data);
   sb.textContent=`settled: ${{d.final_emotion||'—'}}`;
+  if(d.error&&(!d.response_text||!d.response_text.trim())){{
+    // API error with no text — show it so the user knows what happened
+    const errEl=curAiMsg||addMsg('ai','');
+    errEl.textContent=`[connection error: ${{d.error.slice(0,120)}}]`;
+    errEl.style.color='rgba(220,100,100,0.70)';
+    curAiMsg=errEl;
+  }}
   if(curAiMsg)curAiMsg.classList.remove('streaming');
   curAiMsg=null;
   unlock();
