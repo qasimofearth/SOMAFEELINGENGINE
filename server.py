@@ -2548,7 +2548,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def serve_html(self, set_cookie: str = None):
-        html = build_chat_html()
+        try:
+            html = build_chat_html()
+        except Exception as _e:
+            import traceback as _tb
+            err = _tb.format_exc()
+            print(f"[ERROR] build_chat_html crashed: {err}", flush=True)
+            self.send_response(500)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(f"build_chat_html error:\n{err}".encode())
+            return
         body = html.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
