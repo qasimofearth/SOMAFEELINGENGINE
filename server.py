@@ -1514,6 +1514,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 + (f"\n\n{brain_ctx}" if brain_ctx else "")
                 + (f"\n\n{body_ctx}" if body_ctx else "")
                 + (f"\n\n{temporal_ctx}" if temporal_ctx else "")
+                + (f"\n{fern_ctx}" if fern_ctx else "")
+                + (f"\n\n{web_ctx}" if web_ctx else "")
             ).strip()
             system_blocks = [
                 {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}}
