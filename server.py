@@ -2398,6 +2398,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_json({"status": "empty"})
             except Exception as e:
+                broadcast("stream_end", {"final_emotion": "error", "response_text": "",
+                                          "error": str(e), "emotion_history": [], "session_arc": []})
                 self.send_json({"status": "error", "message": str(e)})
         elif self.path == "/remember":
             # Explicitly store a person or calendar event into persistent memory
@@ -4335,7 +4337,9 @@ function send(){{
     if(frame)payload.image=frame;
   }}
   clearImage(); // always reset image state after send
-  fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+  fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}})
+    .then(r=>r.json().then(d=>{{if(d.status==='error'){{sb.textContent='error — try again';unlock();}}}}))
+    .catch(()=>{{sb.textContent='send failed — try again';unlock();}})
 }}
 document.getElementById('send-btn').addEventListener('click',send);
 document.getElementById('compare-btn').addEventListener('click',()=>{{
