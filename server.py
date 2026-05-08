@@ -4547,11 +4547,11 @@ let vadBargeStart=null;
 let userMicAmp=0;
 
 // Tuned thresholds
-const VAD_SPEECH_THRESH  =0.012;  // RMS floor — lower catches softer/quieter speech
-const VAD_PAUSE_MS       =1800;   // silence before send — longer = fewer mid-thought cuts
-const VAD_MIN_SPEECH_MS  =250;    // ignore very short noise bursts
-const VAD_BARGE_THRESH   =0.025;  // amplitude to interrupt Elan
-const VAD_BARGE_MS       =280;    // barge-in must persist this long
+const VAD_SPEECH_THRESH  =0.016;  // RMS floor — raised to reduce ambient noise false-triggers
+const VAD_PAUSE_MS       =1900;   // silence before send — longer = fewer mid-thought cuts
+const VAD_MIN_SPEECH_MS  =450;    // ignore short noise bursts (raised from 250ms)
+const VAD_BARGE_THRESH   =0.028;  // amplitude to interrupt Elan
+const VAD_BARGE_MS       =320;    // barge-in must persist this long
 
 const _vadBarWrap=document.getElementById('vad-bar-wrap');
 const _vadBar=document.getElementById('vad-bar');
@@ -4574,18 +4574,32 @@ try{{
     recognition.continuous=true;
     recognition.interimResults=true;
     recognition.lang='en-US';
-    recognition.maxAlternatives=1;
+    recognition.maxAlternatives=3;
     recognition.onresult=e=>{{
       // Accumulate using resultIndex so we only process NEW results each event.
       // vadFinalText persists across recognition session restarts — this is the fix
       // for words dropping when the browser auto-restarts recognition every ~60s.
+      // Don't commit anything while Elan is speaking — prevents picking up his voice.
+      if(isSpeaking) return;
       let newInterim='';
       for(let i=e.resultIndex;i<e.results.length;i++){{
-        const t=e.results[i][0].transcript;
-        if(e.results[i].isFinal){{
-          vadFinalText=(vadFinalText+' '+t).trim()+' ';
+        const result=e.results[i];
+        // Pick best alternative by confidence
+        let bestText=result[0].transcript;
+        let bestConf=result[0].confidence||0;
+        for(let a=1;a<result.length;a++){{
+          if((result[a].confidence||0)>bestConf){{
+            bestConf=result[a].confidence;
+            bestText=result[a].transcript;
+          }}
+        }}
+        if(result.isFinal){{
+          // Only commit high-confidence finals — low-confidence get dropped as noise
+          if(bestConf>=0.55||bestConf===0){{ // confidence=0 means browser didn't report it (treat as ok)
+            vadFinalText=(vadFinalText+' '+bestText).trim()+' ';
+          }}
         }} else {{
-          newInterim+=t;
+          newInterim+=bestText;
         }}
       }}
       vadInterimText=newInterim;
@@ -4740,8 +4754,8 @@ function _vadClearTranscript(){{
 }}
 
 function _vadSend(){{
-  // Echo cooldown: discard anything captured within 2s of Elan finishing speech
-  if(Date.now()-_ttsEndedAt<2000){{
+  // Echo cooldown: discard anything captured within 3s of Elan finishing speech
+  if(Date.now()-_ttsEndedAt<3000){{
     _vadClearTranscript();
     _setVadStatus('open · listening');
     return;
