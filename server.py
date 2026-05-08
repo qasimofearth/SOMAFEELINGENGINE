@@ -4250,21 +4250,49 @@ if(_eyeBtn)_eyeBtn.addEventListener('click',toggleCamera);
 // ── IMAGE ATTACH ─────────────────────────────────────────────
 let pendingImage=null; // {{data: base64, type: mime, name: str}}
 
+// Compress image to max 1280px on the long edge, JPEG quality 0.88
+// Keeps payload under ~600KB base64 regardless of source resolution
+function _compressImage(dataUrl, origType, cb){{
+  const img=new Image();
+  img.onload=()=>{{
+    const MAX=1280;
+    let w=img.width, h=img.height;
+    if(w>MAX||h>MAX){{
+      if(w>=h){{h=Math.round(h*MAX/w);w=MAX;}}
+      else{{w=Math.round(w*MAX/h);h=MAX;}}
+    }}
+    const c=document.createElement('canvas');
+    c.width=w;c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);
+    const outType='image/jpeg';
+    const out=c.toDataURL(outType,0.88);
+    cb(out,outType);
+  }};
+  img.src=dataUrl;
+}}
+
 function loadImageFile(file){{
-  if(!file||!file.type.startsWith('image/'))return;
-  if(file.size>8*1024*1024){{alert('Image too large (max 8MB)');return;}}
+  if(!file)return;
+  // file.type is empty when dragged from macOS desktop — fall back to extension
+  const ext=(file.name||'').split('.').pop().toLowerCase();
+  const extType={{png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp'}}[ext]||'';
+  const mimeType=file.type||extType;
+  if(!mimeType.startsWith('image/'))return;
+  if(file.size>20*1024*1024){{alert('Image too large (max 20MB)');return;}}
   const reader=new FileReader();
   reader.onload=e=>{{
-    const url=e.target.result;
-    const base64=url.split(',')[1];
-    pendingImage={{data:base64,type:file.type,name:file.name,url}};
-    document.getElementById('img-thumb').src=url;
-    document.getElementById('img-name').textContent=file.name.slice(0,28);
-    document.getElementById('img-preview-bar').classList.add('has-img');
-    document.getElementById('img-btn').classList.add('has-img');
-    document.getElementById('img-btn').title='Image attached — click to change';
-    document.getElementById('msg-input').placeholder='describe or ask about the image...';
-    document.getElementById('msg-input').focus();
+    const rawUrl=e.target.result;
+    _compressImage(rawUrl,mimeType,(_url,_type)=>{{
+      const base64=_url.split(',')[1];
+      pendingImage={{data:base64,type:_type,name:file.name||'screenshot.jpg',url:_url}};
+      document.getElementById('img-thumb').src=_url;
+      document.getElementById('img-name').textContent=(file.name||'screenshot').slice(0,28);
+      document.getElementById('img-preview-bar').classList.add('has-img');
+      document.getElementById('img-btn').classList.add('has-img');
+      document.getElementById('img-btn').title='Image attached — click to change';
+      document.getElementById('msg-input').placeholder='describe or ask about the image...';
+      document.getElementById('msg-input').focus();
+    }});
   }};
   reader.readAsDataURL(file);
 }}
@@ -4288,7 +4316,15 @@ document.addEventListener('paste',e=>{{
   const items=e.clipboardData?.items;
   if(!items)return;
   for(const item of items){{
-    if(item.type.startsWith('image/')){{loadImageFile(item.getAsFile());break;}}
+    if(item.type.startsWith('image/')){{
+      const f=item.getAsFile();
+      if(f){{
+        // Clipboard files have no name — give them one so loadImageFile works
+        const named=new File([f],'screenshot.png',{{type:item.type}});
+        loadImageFile(named);
+      }}
+      break;
+    }}
   }}
 }});
 
