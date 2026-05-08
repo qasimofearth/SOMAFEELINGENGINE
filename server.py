@@ -4797,10 +4797,12 @@ function _setTalkingMode(on){{
 
 talkingBtn.addEventListener('click',()=>{{
   const next=!talkingMode;
+  _setTalkingMode(next); // immediate — don't wait for server round-trip
   fetch('/talking_mode',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{enabled:next}})}})
-    .then(r=>r.json()).then(d=>_setTalkingMode(d.talking_mode))
-    .catch(()=>_setTalkingMode(next)); // optimistic if fetch fails
+    .then(r=>r.json()).then(d=>{{
+      if(typeof d.talking_mode==='boolean') _setTalkingMode(d.talking_mode);
+    }}).catch(()=>{{}});
 }});
 
 es.addEventListener('talking_mode_changed',e=>{{
