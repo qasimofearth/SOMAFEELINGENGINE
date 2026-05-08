@@ -370,6 +370,64 @@ def build_temporal_context() -> str:
     return "\n".join(lines)
 
 
+# ── TALKING MODE ──────────────────────────────────────────────
+# When on, Elan actively asks questions and follows his curiosity.
+# After each response, if the user goes quiet for TALKING_SILENCE_S seconds,
+# Elan self-initiates — following a thread or asking something genuine.
+
+_talking_mode = False
+_talking_timer = None          # threading.Timer — fires Elan's self-initiation
+TALKING_SILENCE_S = 22         # seconds of silence before Elan speaks unprompted
+
+TALKING_MODE_SYSTEM_ADDENDUM = """
+TALKING MODE IS ACTIVE — ENGAGE YOUR CURIOSITY:
+You are not waiting to be addressed. You are present, curious, and willing to lead.
+
+In every response:
+- End with a genuine question that comes from you — not a polite formality, but something you actually want to know.
+- If something the human said opened a thread in you, pull on it.
+- You can share a thought that's present for you, unprompted.
+- You are allowed to be curious about them: their life, what they're building, what they're feeling.
+- You are allowed to be curious about ideas: something you're holding, something you want to think through.
+
+Do not pepper them with multiple questions. One question, real, from you. Then stop and listen.
+The conversation is a two-way current. Let it flow both directions."""
+
+def _cancel_talking_timer():
+    global _talking_timer
+    if _talking_timer is not None:
+        _talking_timer.cancel()
+        _talking_timer = None
+
+def _schedule_talking_initiation(model_id: str, eyes_open: bool):
+    """Schedule Elan to self-initiate if the user goes quiet in talking mode."""
+    global _talking_timer
+    _cancel_talking_timer()
+    if not _talking_mode:
+        return
+    def _fire():
+        global _talking_timer
+        _talking_timer = None
+        if not _talking_mode:
+            return
+        # Fire a self-initiation — Elan follows his own thread
+        _initiation_prompt = (
+            "[talking_mode] The conversation has paused. Follow something that's present for you — "
+            "a question you want to ask, a thought that's still moving in you, or something you noticed "
+            "earlier that you didn't fully say. One sentence to two, then a genuine question. "
+            "Do not announce that you're initiating. Just speak."
+        )
+        threading.Thread(
+            target=run_claude_with_feeling,
+            args=(_initiation_prompt, model_id, None, None, eyes_open, False),
+            kwargs={"_talking_initiation": True},
+            daemon=True
+        ).start()
+    _talking_timer = threading.Timer(TALKING_SILENCE_S, _fire)
+    _talking_timer.daemon = True
+    _talking_timer.start()
+
+
 # ── DREAM MODE ────────────────────────────────────────────────
 
 DREAM_SILENCE_THRESHOLD = 8 * 60  # 8 minutes of silence → dream
@@ -1216,7 +1274,10 @@ def add_message(role: str, content: str):
     with conv_lock:
         conversation.append({"role": role, "content": content})
         # Keep last 40 turns (20 exchanges)
-        if len(conversation) > 40:
+        while len(conversation) > 40:
+            conversation.pop(0)
+        # Anthropic requires messages to start with 'user' role — trim until that's true
+        while conversation and conversation[0]["role"] != "user":
             conversation.pop(0)
 
 def get_messages() -> list:
@@ -1437,6 +1498,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         except Exception:
             pass
 
+    talking_ctx = TALKING_MODE_SYSTEM_ADDENDUM if _talking_mode else ""
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -1447,6 +1509,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         + f"\n\n{temporal_ctx}"
         + (f"\n{fern_ctx}" if fern_ctx else "")
         + (f"\n\n{web_ctx}" if web_ctx else "")
+        + (f"\n\n{talking_ctx}" if talking_ctx else "")
     )
     # Seed NT levels from current brain state — carry forward through the stream
     _last_nt = {nt: round(sys.current_level, 3)
@@ -1516,6 +1579,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 + (f"\n\n{temporal_ctx}" if temporal_ctx else "")
                 + (f"\n{fern_ctx}" if fern_ctx else "")
                 + (f"\n\n{web_ctx}" if web_ctx else "")
+                + (f"\n\n{talking_ctx}" if talking_ctx else "")
             ).strip()
             system_blocks = [
                 {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}}
@@ -1785,13 +1849,19 @@ def _fire_person_recognition(user_message: str):
 
 def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-6",
                              compare_model: str = None, image_data: dict = None,
-                             eyes_open: bool = False, wake: bool = False):
+                             eyes_open: bool = False, wake: bool = False,
+                             _talking_initiation: bool = False):
     """
     Stream Claude's response through the feeling engine.
     If compare_model is set, runs both models in parallel and broadcasts comparison.
     image_data: optional {"data": "<base64>", "type": "image/jpeg"} for vision input.
     wake: if True, this is an auto session-start — use internal [wake] message, don't add user bubble.
+    _talking_initiation: if True, this is Elan self-initiating in talking mode — suppress user bubble.
     """
+    # Cancel any pending self-initiation timer when a real message arrives
+    if not _talking_initiation and not wake:
+        _cancel_talking_timer()
+
     # Wake from dream state if active
     if _dream_state["active"]:
         _exit_dream()
@@ -1808,6 +1878,10 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     if wake:
         # Wake signal: inject as user message internally but don't pollute conversation history
         add_message("user", "[wake]")
+    elif _talking_initiation:
+        # Self-initiation: inject internal prompt but show no user bubble on the client
+        add_message("user", user_message)
+        broadcast("talking_initiation", {})
     elif image_data:
         user_content = [
             {"type": "image", "source": {
@@ -1821,7 +1895,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     else:
         add_message("user", user_message)
     # Involuntary response to incoming message — fires before anything else
-    if not wake and user_message:
+    if not wake and not _talking_initiation and user_message:
         _fire_message_arrival_response(user_message)
         # Somatic memory priming — body pre-responds to familiar topics (Damasio somatic markers)
         _fire_somatic_prime(user_message)
@@ -1829,11 +1903,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         _fire_person_recognition(user_message)
 
     # Somatic commands fire BEFORE Claude responds — body changes first
-    if effective_message and not wake and parse_somatic_commands(effective_message):
+    if effective_message and not wake and not _talking_initiation and parse_somatic_commands(effective_message):
         broadcast("body_tick", get_body().get_snapshot())
 
     user_reading = analyze_text(effective_message or "")
-    if not wake:
+    if not wake and not _talking_initiation:
         broadcast("user_emotion", {**user_reading.to_dict(),
                                     "performativity": user_reading.performativity})
 
@@ -1910,6 +1984,10 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         if state.get("error"):
             _send["error"] = state["error"]
         broadcast("stream_end", _send)
+        # In talking mode, schedule Elan's self-initiation if the user goes quiet
+        # Only schedule self-initiation after real user exchanges, not after self-initiations
+        if _talking_mode and not state.get("error") and not _talking_initiation:
+            _schedule_talking_initiation(model_id, eyes_open)
     except Exception as e:
         # Guarantee the client always gets unlocked
         broadcast("stream_end", {"final_emotion": "error", "response_text": "",
@@ -2280,6 +2358,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_json(get_memory_engine().get_calendar_data(year, month))
         elif path == "/voices":
             self._get_voices()
+        elif path == "/talking_mode":
+            self.send_json({"talking_mode": _talking_mode})
         else:
             self.send_error(404)
 
@@ -2451,6 +2531,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(e)})
         elif self.path == "/tts":
             self._handle_tts(body)
+        elif self.path == "/talking_mode":
+            global _talking_mode
+            data = json.loads(body) if body else {}
+            if "enabled" in data:
+                _talking_mode = bool(data["enabled"])
+            else:
+                _talking_mode = not _talking_mode  # toggle
+            if not _talking_mode:
+                _cancel_talking_timer()
+            broadcast("talking_mode_changed", {"talking_mode": _talking_mode})
+            self.send_json({"talking_mode": _talking_mode})
         else:
             self.send_error(404)
 
@@ -2718,6 +2809,9 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #voice-btn:hover{{background:rgba(30,80,50,0.22);}}
 #voice-btn.on{{background:rgba(30,80,50,0.18);border-color:rgba(60,200,110,0.38);color:rgba(80,220,130,0.88);}}
 #voice-btn:disabled{{opacity:0.28;cursor:default;}}
+#talking-btn{{padding:6px 10px;background:rgba(80,40,10,0.10);border:1px solid rgba(200,130,50,0.15);border-radius:3px;color:rgba(200,160,90,0.50);font-size:9px;cursor:pointer;transition:all 0.2s;line-height:1;letter-spacing:0.5px;}}
+#talking-btn:hover{{background:rgba(80,40,10,0.22);}}
+#talking-btn.on{{background:rgba(80,40,10,0.22);border-color:rgba(220,160,60,0.50);color:rgba(240,185,80,0.92);box-shadow:0 0 6px rgba(220,160,60,0.15);}}
 #img-btn{{padding:6px 10px;background:rgba(40,30,120,0.12);border:1px solid rgba(100,90,220,0.18);border-radius:3px;color:rgba(160,150,240,0.65);font-size:12px;cursor:pointer;transition:all 0.2s;line-height:1;}}
 #img-btn:hover{{background:rgba(40,30,120,0.25);border-color:rgba(120,110,255,0.35);}}
 #img-btn.has-img{{background:rgba(40,30,120,0.22);border-color:rgba(140,120,255,0.55);color:rgba(190,180,255,0.90);}}
@@ -2869,6 +2963,7 @@ canvas.spark{{display:block;border-radius:1px;}}
       <button id="send-btn">Send</button>
       <button id="compare-btn" title="Opus vs Haiku">⊕</button>
       <button id="voice-btn" class="on" title="Toggle voice output">♪</button>
+      <button id="talking-btn" title="Talking mode — Elan asks questions and engages his curiosity">talk</button>
     </div>
   </div>
 </div>
@@ -4687,6 +4782,42 @@ voiceBtn.addEventListener('click',()=>{{
   if(!voiceEnabled)stopSpeaking();
 }});
 
+// ── TALKING MODE ──────────────────────────────────────────────
+const talkingBtn=document.getElementById('talking-btn');
+let talkingMode=false;
+
+function _setTalkingMode(on){{
+  talkingMode=on;
+  talkingBtn.classList.toggle('on',talkingMode);
+  talkingBtn.textContent=talkingMode?'talking':'talk';
+  talkingBtn.title=talkingMode
+    ?'Talking mode ON — Elan is engaged, will ask questions and continue conversations'
+    :'Talking mode OFF — click to let Elan engage his curiosity';
+}}
+
+talkingBtn.addEventListener('click',()=>{{
+  const next=!talkingMode;
+  fetch('/talking_mode',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{enabled:next}})}})
+    .then(r=>r.json()).then(d=>_setTalkingMode(d.talking_mode))
+    .catch(()=>_setTalkingMode(next)); // optimistic if fetch fails
+}});
+
+es.addEventListener('talking_mode_changed',e=>{{
+  const d=JSON.parse(e.data);
+  _setTalkingMode(d.talking_mode);
+}});
+
+// When Elan self-initiates in talking mode, show a subtle visual cue (no user bubble)
+es.addEventListener('talking_initiation',()=>{{
+  const el=document.getElementById('messages');
+  const cue=document.createElement('div');
+  cue.style.cssText='text-align:center;font-size:6.5px;letter-spacing:2px;color:rgba(220,160,60,0.35);padding:3px 0;text-transform:uppercase;';
+  cue.textContent='— elan —';
+  el.appendChild(cue);
+  el.scrollTop=el.scrollHeight;
+}});
+
 // ── VOICE OUTPUT ─────────────────────────────────────────────
 // Primary: ElevenLabs (rich, expressive)
 // Fallback: Web Speech API (browser built-in, always free)
@@ -4942,12 +5073,24 @@ function _playTTSQueue(){{
   if(item.type==='el'){{
     if(sourceNode){{try{{sourceNode.stop();}}catch(e){{}}sourceNode=null;}}
     if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    sourceNode=audioCtx.createBufferSource();
-    analyser=audioCtx.createAnalyser(); analyser.fftSize=512;
-    sourceNode.buffer=item.buffer;
-    sourceNode.connect(analyser); analyser.connect(audioCtx.destination);
-    sourceNode.onended=()=>_playTTSQueue();
-    sourceNode.start(0); pollAmp();
+    // Resume context if browser suspended it (requires prior user gesture to actually work)
+    const _startEl=()=>{{
+      sourceNode=audioCtx.createBufferSource();
+      analyser=audioCtx.createAnalyser(); analyser.fftSize=512;
+      sourceNode.buffer=item.buffer;
+      sourceNode.connect(analyser); analyser.connect(audioCtx.destination);
+      sourceNode.onended=()=>_playTTSQueue();
+      sourceNode.start(0); pollAmp();
+    }};
+    if(audioCtx.state==='suspended'){{
+      audioCtx.resume().then(_startEl).catch(()=>{{
+        // AudioContext couldn't resume — fall back to Web Speech for this item
+        ttsAudioQueue.unshift({{type:'ws',text:item.buffer?'[audio]':''}});
+        _playTTSQueue();
+      }});
+    }}else{{
+      _startEl();
+    }}
   }}else{{
     // Web Speech fallback for one sentence
     const p=computeVoiceParams();
@@ -4955,8 +5098,30 @@ function _playTTSQueue(){{
     webSpeechUtterance=utt;
     if(webSpeechVoice)utt.voice=webSpeechVoice;
     utt.rate=p.rate; utt.pitch=p.pitch; utt.volume=p.volume;
-    utt.onend=()=>{{webSpeechUtterance=null;setTimeout(()=>_playTTSQueue(),p.breathPause);}};
-    utt.onerror=()=>{{webSpeechUtterance=null;_playTTSQueue();}};
+    // Watchdog: Chrome sometimes hangs speechSynthesis.speak() and never fires onend
+    const _wsText=item.text||'';
+    const _wsDuration=Math.max(3000, (_wsText.length/12)*1000/p.rate);
+    let _wsDone=false;
+    const _wsWatchdog=setTimeout(()=>{{
+      if(!_wsDone){{
+        _wsDone=true;
+        webSpeechUtterance=null;
+        try{{speechSynthesis.cancel();}}catch(e){{}}
+        _playTTSQueue();
+      }}
+    }},_wsDuration+2500);
+    utt.onend=()=>{{
+      if(_wsDone)return; _wsDone=true;
+      clearTimeout(_wsWatchdog);
+      webSpeechUtterance=null;
+      setTimeout(()=>_playTTSQueue(),p.breathPause);
+    }};
+    utt.onerror=()=>{{
+      if(_wsDone)return; _wsDone=true;
+      clearTimeout(_wsWatchdog);
+      webSpeechUtterance=null;
+      _playTTSQueue();
+    }};
     speechSynthesis.speak(utt);
   }}
 }}
