@@ -2531,6 +2531,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(e)})
         elif self.path == "/tts":
             self._handle_tts(body)
+        elif self.path == "/transcribe":
+            self._handle_transcribe(body)
         elif self.path == "/talking_mode":
             global _talking_mode
             data = json.loads(body) if body else {}
@@ -2596,6 +2598,32 @@ class FeelingHandler(BaseHTTPRequestHandler):
         except Exception as ex:
             print(f"[TTS] Error: {ex}")
             self.send_error(500)
+
+    def _handle_transcribe(self, body: bytes):
+        """Transcribe raw audio via Groq Whisper. Falls back to empty string if unavailable."""
+        groq_key = os.environ.get("GROQ_API_KEY", _RUNTIME_GROQ_KEY)
+        if not groq_key or not body:
+            self.send_json({"text": "", "error": "no groq key or empty audio"})
+            return
+        try:
+            import groq as _groq_mod
+            gclient = _groq_mod.Groq(api_key=groq_key)
+            ct = self.headers.get("Content-Type", "audio/webm")
+            if "ogg" in ct:   ext = "ogg"
+            elif "wav" in ct:  ext = "wav"
+            elif "mp4" in ct:  ext = "mp4"
+            else:              ext = "webm"
+            transcription = gclient.audio.transcriptions.create(
+                file=(f"speech.{ext}", body),
+                model="whisper-large-v3-turbo",
+                language="en",
+                response_format="json",
+            )
+            text = (transcription.text or "").strip()
+            self.send_json({"text": text})
+        except Exception as ex:
+            print(f"[TRANSCRIBE] Whisper error: {ex}")
+            self.send_json({"text": "", "error": str(ex)})
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -2798,6 +2826,7 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #mic-btn.open{{background:rgba(15,45,140,0.22);border-color:rgba(70,150,255,0.55);color:rgba(110,190,255,0.92);}}
 #mic-btn.user-speaking{{border-color:rgba(120,210,255,0.85)!important;color:rgba(180,230,255,1.0)!important;}}
 #mic-btn.pausing{{border-color:rgba(80,170,255,0.50);}}
+#mic-btn.ptt{{background:rgba(140,40,15,0.25)!important;border-color:rgba(255,120,60,0.80)!important;color:rgba(255,160,100,1.0)!important;box-shadow:0 0 10px rgba(255,100,40,0.30)!important;}}
 #mic-btn:disabled{{opacity:0.28;cursor:default;}}
 @keyframes mic-pulse{{0%,100%{{box-shadow:0 0 0 0 rgba(255,60,60,0.30);}}50%{{box-shadow:0 0 0 5px rgba(255,60,60,0);}}}}
 #vad-bar-wrap{{height:2px;background:rgba(255,255,255,0.04);border-radius:1px;margin-top:3px;overflow:hidden;display:none;}}
@@ -2943,7 +2972,7 @@ canvas.spark{{display:block;border-radius:1px;}}
     <div id="vad-bar-wrap"><div id="vad-bar"></div></div>
     <div id="vad-status"></div>
     <div id="input-row">
-      <button id="mic-btn" title="Open mic — always-on conversation">◎</button>
+      <button id="mic-btn" title="Click: open mic (always-on) · Hold SPACE: push-to-talk">◎</button>
       <input id="msg-input" placeholder="speak or type..." autocomplete="off"/>
       <button id="img-btn" title="Attach image · or paste · or drag-drop">⬡</button>
       <input id="img-input" type="file" accept="image/*" style="display:none"/>
@@ -4546,12 +4575,13 @@ let vadSilenceStart=null;
 let vadBargeStart=null;
 let userMicAmp=0;
 
-// Tuned thresholds
-const VAD_SPEECH_THRESH  =0.016;  // RMS floor — raised to reduce ambient noise false-triggers
-const VAD_PAUSE_MS       =1900;   // silence before send — longer = fewer mid-thought cuts
-const VAD_MIN_SPEECH_MS  =450;    // ignore short noise bursts (raised from 250ms)
-const VAD_BARGE_THRESH   =0.028;  // amplitude to interrupt Elan
-const VAD_BARGE_MS       =320;    // barge-in must persist this long
+// VAD thresholds — speech thresh is adaptive, set after ambient calibration
+let   VAD_SPEECH_THRESH  =0.016;  // updated by calibration on mic open
+const VAD_PAUSE_MS       =1900;
+const VAD_MIN_SPEECH_MS  =450;
+const VAD_BARGE_THRESH   =0.028;
+const VAD_BARGE_MS       =320;
+let   _whisperAvail      =null;   // null=unknown, true/false after first check
 
 const _vadBarWrap=document.getElementById('vad-bar-wrap');
 const _vadBar=document.getElementById('vad-bar');
@@ -4643,23 +4673,74 @@ function _vadRMS(analyser){{
   return Math.sqrt(sq/buf.length);
 }}
 
+// ── Whisper transcription via Groq ───────────────────────────
+let _speechRecorder=null, _speechChunks=[];
+
+async function _whisperTranscribe(audioBlob){{
+  try{{
+    const resp=await fetch('/transcribe',{{method:'POST',
+      headers:{{'Content-Type':audioBlob.type||'audio/webm'}},body:audioBlob}});
+    const d=await resp.json();
+    if(d.text){{ _whisperAvail=true; return d.text; }}
+    _whisperAvail=false; return '';
+  }}catch(e){{ _whisperAvail=false; return ''; }}
+}}
+
+function _startSpeechRecording(){{
+  if(!vadStream||_speechRecorder) return;
+  _speechChunks=[];
+  try{{
+    const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ?'audio/webm;codecs=opus'
+      :MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'';
+    _speechRecorder=new MediaRecorder(vadStream,mimeType?{{mimeType}}:{{}});
+    _speechRecorder.ondataavailable=e=>{{ if(e.data&&e.data.size>0)_speechChunks.push(e.data); }};
+    _speechRecorder.start(100); // collect every 100ms
+  }}catch(e){{ _speechRecorder=null; }}
+}}
+
+function _stopSpeechRecording(cb){{
+  if(!_speechRecorder){{ cb(null); return; }}
+  const rec=_speechRecorder; _speechRecorder=null;
+  rec.onstop=()=>{{
+    const blob=new Blob(_speechChunks,{{type:rec.mimeType||'audio/webm'}});
+    _speechChunks=[];
+    cb(blob.size>500?blob:null); // ignore tiny blobs (noise)
+  }};
+  try{{ if(rec.state==='recording') rec.stop(); else cb(null); }}
+  catch(e){{ cb(null); }}
+}}
+
 async function startOpenMic(){{
   if(openMicMode) return;
   openMicMode=true;
   micBtn.classList.add('open');
   micBtn.textContent='∿';
-  _setVadStatus('open · listening');
+  _setVadStatus('calibrating...');
   _setVadBar(0);
 
   try{{
     vadStream=await navigator.mediaDevices.getUserMedia({{
-      audio:{{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}
+      audio:{{echoCancellation:true,noiseSuppression:true,autoGainControl:true,
+              sampleRate:16000}}
     }});
     vadAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
     vadAnalyserNode=vadAudioCtx.createAnalyser();
     vadAnalyserNode.fftSize=512;
     vadSourceNode=vadAudioCtx.createMediaStreamSource(vadStream);
     vadSourceNode.connect(vadAnalyserNode);
+
+    // Calibrate ambient noise floor for 1.5s before starting VAD
+    const _calibSamples=[];
+    const _calibId=setInterval(()=>{{
+      _calibSamples.push(_vadRMS(vadAnalyserNode));
+      if(_calibSamples.length>=30){{
+        clearInterval(_calibId);
+        const avg=_calibSamples.reduce((a,b)=>a+b,0)/_calibSamples.length;
+        VAD_SPEECH_THRESH=Math.min(Math.max(avg*2.8,0.010),0.030);
+        _setVadStatus('open · listening');
+      }}
+    }},50);
 
     if(recognition&&!isListening){{
       try{{recognition.start();isListening=true;}}catch(e){{}}
@@ -4700,6 +4781,7 @@ async function startOpenMic(){{
           vadState='speaking'; vadSpeechStart=now; vadSilenceStart=null;
           micBtn.classList.add('user-speaking');
           _setVadStatus('you · speaking');
+          _startSpeechRecording(); // begin capturing audio for Whisper
         }} else if(vadState==='pausing'){{
           // Resumed — not a real pause yet
           vadState='speaking'; vadSilenceStart=null;
@@ -4717,25 +4799,36 @@ async function startOpenMic(){{
         }} else if(vadState==='pausing'){{
           const silMs=now-vadSilenceStart;
           const spkMs=vadSilenceStart-vadSpeechStart;
-          // Pause progress bar — fills as silence extends toward threshold
           _setVadBar(Math.min(1,silMs/VAD_PAUSE_MS)*0.7);
 
           if(silMs>VAD_PAUSE_MS&&spkMs>VAD_MIN_SPEECH_MS){{
-            // Natural end of turn — send to Elan
+            // End of turn — stop recording, transcribe, send
             vadState='idle'; vadSpeechStart=null; vadSilenceStart=null;
             micBtn.classList.remove('user-speaking','pausing');
             micBtn.style.boxShadow='';
             _setVadBar(0);
-            if(vadTranscript.trim()){{
-              if(!streaming&&!isSpeaking&&ttsFetchCount===0){{
-                _vadSend();
-              }} else {{
-                // Elan is still speaking/streaming — show transcript in input box
-                // so it's visible and will auto-send once Elan finishes
-                document.getElementById('msg-input').value=vadTranscript.trim();
-                _setVadStatus('queued · waiting for Elan...');
+            const _wsSnapshot=vadTranscript.trim(); // Web Speech fallback text
+            _stopSpeechRecording(async blob=>{{
+              let finalText=_wsSnapshot;
+              if(blob){{
+                _setVadStatus('processing...');
+                const whisperText=await _whisperTranscribe(blob);
+                if(whisperText) finalText=whisperText;
               }}
-            }}
+              _vadClearTranscript();
+              if(finalText){{
+                if(!streaming&&!isSpeaking&&ttsFetchCount===0){{
+                  document.getElementById('msg-input').value=finalText;
+                  _setVadStatus('open · listening');
+                  send();
+                }} else {{
+                  document.getElementById('msg-input').value=finalText;
+                  _setVadStatus('queued · waiting for Elan...');
+                }}
+              }} else {{
+                _setVadStatus('open · listening');
+              }}
+            }});
           }}
         }}
       }}
@@ -4772,12 +4865,13 @@ function stopOpenMic(){{
   vadState='idle'; vadSpeechStart=null; vadSilenceStart=null; vadBargeStart=null;
   userMicAmp=0;
   vadFinalText=''; vadInterimText=''; vadTranscript='';
+  if(_speechRecorder){{try{{_speechRecorder.stop();}}catch(e){{}} _speechRecorder=null; _speechChunks=[];}}
   if(vadInterval){{clearInterval(vadInterval);vadInterval=null;}}
   if(vadSourceNode){{try{{vadSourceNode.disconnect();}}catch(e){{}}vadSourceNode=null;}}
   if(vadAudioCtx){{try{{vadAudioCtx.close();}}catch(e){{}}vadAudioCtx=null;}}
   if(vadStream){{vadStream.getTracks().forEach(t=>t.stop());vadStream=null;}}
   if(recognition&&isListening){{try{{recognition.stop();}}catch(e){{}}isListening=false;}}
-  micBtn.classList.remove('open','user-speaking','pausing');
+  micBtn.classList.remove('open','user-speaking','pausing','ptt');
   micBtn.style.boxShadow='';
   micBtn.textContent='◎';
   _setVadStatus('');
@@ -4832,6 +4926,59 @@ es.addEventListener('talking_initiation',()=>{{
   cue.textContent='— elan —';
   el.appendChild(cue);
   el.scrollTop=el.scrollHeight;
+}});
+
+// ── SPACE BAR PUSH-TO-TALK ───────────────────────────────────
+// Hold space = record. Release = Whisper transcribe + send.
+// Works with or without open mic. Does not activate when typing in input.
+let _pttActive=false, _pttChunks=[], _pttRecorder=null, _pttStream=null;
+
+document.addEventListener('keydown',async e=>{{
+  if(e.code!=='Space') return;
+  if(document.activeElement===document.getElementById('msg-input')) return;
+  if(e.repeat||_pttActive||streaming) return;
+  e.preventDefault();
+  _pttActive=true;
+  micBtn.classList.add('ptt');
+  _setVadStatus('HOLD · speaking...');
+  try{{
+    _pttStream=vadStream||await navigator.mediaDevices.getUserMedia({{
+      audio:{{echoCancellation:true,noiseSuppression:true,autoGainControl:true}}
+    }});
+    _pttChunks=[];
+    const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ?'audio/webm;codecs=opus':'audio/webm';
+    _pttRecorder=new MediaRecorder(_pttStream,{{mimeType}});
+    _pttRecorder.ondataavailable=ev=>{{if(ev.data&&ev.data.size>0)_pttChunks.push(ev.data);}};
+    _pttRecorder.start(100);
+  }}catch(err){{
+    _pttActive=false; micBtn.classList.remove('ptt');
+    _setVadStatus('mic blocked');
+  }}
+}});
+
+document.addEventListener('keyup',async e=>{{
+  if(e.code!=='Space'||!_pttActive) return;
+  e.preventDefault();
+  _pttActive=false; micBtn.classList.remove('ptt');
+  if(!_pttRecorder) return;
+  const rec=_pttRecorder; _pttRecorder=null;
+  _setVadStatus('processing...');
+  rec.onstop=async()=>{{
+    const blob=new Blob(_pttChunks,{{type:rec.mimeType||'audio/webm'}});
+    _pttChunks=[];
+    if(!vadStream&&_pttStream){{_pttStream.getTracks().forEach(t=>t.stop());_pttStream=null;}}
+    if(blob.size<500){{_setVadStatus(openMicMode?'open · listening':'');return;}}
+    const text=await _whisperTranscribe(blob);
+    if(text){{
+      document.getElementById('msg-input').value=text;
+      _setVadStatus(openMicMode?'open · listening':'');
+      send();
+    }}else{{
+      _setVadStatus(openMicMode?'open · listening':'no speech detected');
+    }}
+  }};
+  try{{rec.stop();}}catch(e){{_setVadStatus(openMicMode?'open · listening':'');}}
 }});
 
 // ── VOICE OUTPUT ─────────────────────────────────────────────
