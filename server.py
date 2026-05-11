@@ -1329,7 +1329,32 @@ def broadcast(event: str, data: dict):
 conversation: list[dict] = []
 conv_lock = threading.Lock()
 
-def add_message(role: str, content: str):
+def _msg_is_empty(m: dict) -> bool:
+    """A message is empty if it has no text/blocks worth sending to Anthropic.
+    Empty messages cause 400 errors and break the whole conversation."""
+    c = m.get("content")
+    if isinstance(c, str):
+        return not c.strip()
+    if isinstance(c, list):
+        if not c:
+            return True
+        # at least one block must have non-empty text, image, or tool content
+        for b in c:
+            if not isinstance(b, dict):
+                # Pydantic block object from the SDK — assume non-empty
+                return False
+            t = b.get("type")
+            if t == "text" and (b.get("text") or "").strip():
+                return False
+            if t in ("image", "tool_use", "tool_result", "server_tool_use",
+                     "web_search_tool_result", "web_fetch_tool_result"):
+                return False
+        return True
+    return c is None
+
+def add_message(role: str, content):
+    if _msg_is_empty({"role": role, "content": content}):
+        return  # don't pollute history with empty turns — they 400 future API calls
     with conv_lock:
         conversation.append({"role": role, "content": content})
         # Keep last 40 turns (20 exchanges)
@@ -1340,8 +1365,22 @@ def add_message(role: str, content: str):
             conversation.pop(0)
 
 def get_messages() -> list:
+    """Return conversation history, filtered for non-empty messages.
+    The filter is defensive against any pre-existing pollution from old buggy code."""
     with conv_lock:
-        return list(conversation)
+        msgs = [m for m in conversation if not _msg_is_empty(m)]
+        # Anthropic requires the FIRST message to be user role
+        while msgs and msgs[0].get("role") != "user":
+            msgs.pop(0)
+        # And consecutive same-role messages should be merged or dropped — for now just dedup-adjacent
+        deduped = []
+        for m in msgs:
+            if deduped and deduped[-1]["role"] == m["role"]:
+                # consecutive same-role — keep the later one (drop earlier)
+                deduped[-1] = m
+            else:
+                deduped.append(m)
+        return deduped
 
 
 # ── CONVERSATION SESSION LIFECYCLE ────────────────────────────
