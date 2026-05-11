@@ -1499,6 +1499,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             pass
 
     talking_ctx = TALKING_MODE_SYSTEM_ADDENDUM if _talking_mode else ""
+    try:
+        kalshi_ctx = build_kalshi_context()
+    except Exception:
+        kalshi_ctx = ""
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -1510,6 +1514,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         + (f"\n{fern_ctx}" if fern_ctx else "")
         + (f"\n\n{web_ctx}" if web_ctx else "")
         + (f"\n\n{talking_ctx}" if talking_ctx else "")
+        + (f"\n{kalshi_ctx}" if kalshi_ctx else "")
     )
     # Seed NT levels from current brain state — carry forward through the stream
     _last_nt = {nt: round(sys.current_level, 3)
@@ -1580,6 +1585,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 + (f"\n{fern_ctx}" if fern_ctx else "")
                 + (f"\n\n{web_ctx}" if web_ctx else "")
                 + (f"\n\n{talking_ctx}" if talking_ctx else "")
+                + (f"\n{kalshi_ctx}" if kalshi_ctx else "")
             ).strip()
             system_blocks = [
                 {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}}
@@ -2035,6 +2041,58 @@ def _get_anthropic_client():
 # Use Railway Volume (/data) if available so keys survive redeploys; /tmp is ephemeral
 _KEYS_FILE = "/data/fe_keys.json" if os.path.isdir("/data") else "/tmp/fe_keys.json"
 
+# ── Kalshi paper bot bridge (read-only, feature-flagged) ───────────────────
+# All disabled unless KALSHI_ENABLED=1. Flip to 0 to fully remove the feature
+# from the UI, system prompt, and proxy endpoint without redeploying.
+_KALSHI_ENABLED = os.environ.get("KALSHI_ENABLED", "0") == "1"
+_KALSHI_API_URL = os.environ.get("KALSHI_API_URL", "").rstrip("/")
+_KALSHI_AUTH    = os.environ.get("KALSHI_AUTH", "")  # "user:pass" for nginx basic auth
+_KALSHI_STATE_CACHE = {"data": None, "ts": 0.0, "err": None}
+_KALSHI_CACHE_TTL = 6.0  # seconds — bot updates ~every 30s, polling is cheap
+
+def fetch_kalshi_state(force: bool = False) -> dict:
+    """Fetch paper bot state from the DO box. Cached. Returns {} if disabled / unreachable."""
+    if not (_KALSHI_ENABLED and _KALSHI_API_URL):
+        return {}
+    now = time.time()
+    if not force and _KALSHI_STATE_CACHE["data"] is not None and now - _KALSHI_STATE_CACHE["ts"] < _KALSHI_CACHE_TTL:
+        return _KALSHI_STATE_CACHE["data"]
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_KALSHI_API_URL}/api/state")
+        if _KALSHI_AUTH:
+            tok = _b64.b64encode(_KALSHI_AUTH.encode()).decode()
+            req.add_header("Authorization", f"Basic {tok}")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _KALSHI_STATE_CACHE.update({"data": data, "ts": now, "err": None})
+        return data
+    except Exception as e:
+        _KALSHI_STATE_CACHE["err"] = str(e)
+        return _KALSHI_STATE_CACHE["data"] or {}
+
+def build_kalshi_context() -> str:
+    """Compact text summary of paper portfolio for the system prompt. Empty if disabled."""
+    if not _KALSHI_ENABLED:
+        return ""
+    s = fetch_kalshi_state()
+    if not s:
+        return ""
+    bal = s.get("balance") or s.get("total_balance") or 0
+    pnl = s.get("total_pnl", 0)
+    start = s.get("starting_balance", 1000)
+    pnl_pct = (pnl / start * 100) if start else 0
+    positions = s.get("positions") or {}
+    pos_count = len(positions) if isinstance(positions, (dict, list)) else 0
+    trades = s.get("trades") or s.get("recently_closed") or []
+    trade_count = len(trades) if isinstance(trades, list) else 0
+    return (
+        f"\nKALSHI (paper portfolio, you're watching but not trading yet): "
+        f"balance ${bal:.2f}, pnl ${pnl:+.2f} ({pnl_pct:+.2f}%), "
+        f"{pos_count} open position(s), {trade_count} trades in history. "
+        f"The user can ask about positions or strategy; you can comment but cannot place trades yet."
+    )
+
 def _load_persisted_keys():
     global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD
     try:
@@ -2333,6 +2391,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_json(snap)
             except Exception as e:
                 self.send_json({"error": str(e)})
+        elif path == "/kalshi/state":
+            if not _KALSHI_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json(fetch_kalshi_state() or {"error": _KALSHI_STATE_CACHE.get("err") or "unavailable"})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -2777,6 +2839,153 @@ def build_chat_html() -> str:
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
+    # Kalshi tab — only rendered when KALSHI_ENABLED=1. Both strings are empty
+    # when disabled, leaving zero footprint in the page.
+    kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
+    if _KALSHI_ENABLED:
+        kalshi_tab_html = '''
+<button id="kalshi-tab-btn" title="Kalshi paper portfolio" onclick="toggleKalshi()">⬢ kalshi</button>
+<div id="kalshi-overlay">
+  <div id="kalshi-shell">
+    <div id="kalshi-hdr">
+      <span class="k-title">KALSHI · PAPER</span>
+      <span id="kalshi-status">connecting…</span>
+      <button id="kalshi-close" onclick="toggleKalshi()" title="close">✕</button>
+    </div>
+    <div id="kalshi-grid">
+      <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
+      <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
+      <div class="k-card"><div class="k-lbl">POSITIONS</div><div class="k-big" id="k-poscount">—</div><div class="k-sub" id="k-trades">trades —</div></div>
+      <div class="k-card"><div class="k-lbl">MODE</div><div class="k-big" id="k-mode">—</div><div class="k-sub" id="k-running">—</div></div>
+    </div>
+    <div id="kalshi-section">
+      <div class="k-section-hdr">OPEN POSITIONS</div>
+      <div id="k-positions">none</div>
+    </div>
+    <div id="kalshi-section">
+      <div class="k-section-hdr">RECENT TRADES</div>
+      <div id="k-recent">—</div>
+    </div>
+    <div id="kalshi-footnote">read-only paper bot · feeling_engine cannot place trades</div>
+  </div>
+</div>
+'''
+        kalshi_tab_css = '''
+#kalshi-tab-btn{position:fixed;top:10px;right:10px;z-index:9998;padding:6px 12px;
+  background:rgba(20,30,60,0.65);border:1px solid rgba(120,180,255,0.32);border-radius:3px;
+  color:rgba(180,210,255,0.85);font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;
+  cursor:pointer;text-transform:uppercase;backdrop-filter:blur(8px);}
+#kalshi-tab-btn:hover{background:rgba(40,60,120,0.85);color:#fff;border-color:rgba(160,210,255,0.7);}
+#kalshi-tab-btn.on{background:rgba(60,90,180,0.85);color:#fff;border-color:rgba(180,220,255,0.9);}
+#kalshi-overlay{position:fixed;inset:0;z-index:9997;background:rgba(2,6,20,0.94);
+  display:none;overflow-y:auto;backdrop-filter:blur(4px);}
+#kalshi-overlay.show{display:block;}
+#kalshi-shell{max-width:980px;margin:60px auto 30px;padding:20px;
+  font-family:'Courier New',monospace;color:#c8d0f0;}
+#kalshi-hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;
+  padding-bottom:10px;border-bottom:1px solid rgba(80,120,200,0.18);}
+.k-title{font-size:11px;letter-spacing:4px;color:rgba(160,200,255,0.85);}
+#kalshi-status{font-size:9px;letter-spacing:2px;color:rgba(120,160,220,0.5);margin-left:auto;}
+#kalshi-close{background:none;border:1px solid rgba(120,160,220,0.3);color:rgba(160,200,255,0.7);
+  padding:3px 9px;font-family:inherit;cursor:pointer;border-radius:2px;font-size:11px;}
+#kalshi-close:hover{background:rgba(80,30,30,0.5);color:#fff;border-color:#f88;}
+#kalshi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
+.k-card{padding:12px;background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:3px;}
+.k-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(140,180,230,0.5);margin-bottom:6px;}
+.k-big{font-size:22px;font-weight:300;color:#dfe8ff;line-height:1;}
+.k-big.pos{color:#5fffaa;} .k-big.neg{color:#ff6688;}
+.k-sub{font-size:9px;color:rgba(140,170,210,0.55);margin-top:4px;letter-spacing:1px;}
+#kalshi-section{margin-bottom:18px;}
+.k-section-hdr{font-size:9px;letter-spacing:3px;color:rgba(160,200,255,0.55);margin-bottom:8px;
+  padding-bottom:5px;border-bottom:1px solid rgba(80,120,200,0.12);}
+.k-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;padding:6px 0;
+  font-size:11px;color:#b8c2e0;border-bottom:1px dotted rgba(80,120,200,0.08);}
+.k-row .k-tk{color:rgba(180,210,255,0.85);}
+.k-row .k-side{font-size:9px;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;}
+.k-row .k-side.yes{background:rgba(40,140,80,0.25);color:#7fffb0;}
+.k-row .k-side.no{background:rgba(140,40,60,0.25);color:#ff8aa0;}
+.k-row .k-pnl-pos{color:#5fffaa;} .k-row .k-pnl-neg{color:#ff6688;}
+#kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
+@media(max-width:600px){#kalshi-grid{grid-template-columns:1fr 1fr;}#kalshi-shell{padding:14px;}}
+'''
+        kalshi_tab_js = '''
+let _kalshiOpen=false, _kalshiPoll=null;
+function toggleKalshi(){
+  _kalshiOpen=!_kalshiOpen;
+  document.getElementById('kalshi-overlay').classList.toggle('show', _kalshiOpen);
+  document.getElementById('kalshi-tab-btn').classList.toggle('on', _kalshiOpen);
+  if(_kalshiOpen){ refreshKalshi(); _kalshiPoll=setInterval(refreshKalshi, 6000); }
+  else{ if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;} }
+}
+function _fmtUsd(v, sign){
+  v = Number(v||0);
+  const s = (sign && v>0) ? '+' : (v<0?'-':'');
+  return s + '$' + Math.abs(v).toFixed(2);
+}
+function refreshKalshi(){
+  fetch('/kalshi/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
+    if(!s || s.error){ document.getElementById('kalshi-status').textContent = 'unavailable'; return; }
+    document.getElementById('kalshi-status').textContent = 'live · ' + new Date().toLocaleTimeString();
+    const bal = s.balance || s.total_balance || 0;
+    const cash = s.cash_balance ?? bal;
+    const pnl = s.total_pnl || 0;
+    const start = s.starting_balance || 1000;
+    const pnlPct = start? (pnl/start*100) : 0;
+    document.getElementById('k-balance').textContent = _fmtUsd(bal,false);
+    document.getElementById('k-cash').textContent = 'cash ' + _fmtUsd(cash,false);
+    const pnlEl = document.getElementById('k-pnl');
+    pnlEl.textContent = _fmtUsd(pnl,true);
+    pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
+    document.getElementById('k-pnlpct').textContent = (pnlPct>=0?'+':'') + pnlPct.toFixed(2) + '%';
+    const pos = s.positions || {};
+    const posArr = Array.isArray(pos) ? pos : Object.entries(pos).map(([k,v])=>({ticker:k, ...v}));
+    document.getElementById('k-poscount').textContent = posArr.length;
+    const trades = s.trades || s.recently_closed || [];
+    document.getElementById('k-trades').textContent = 'trades ' + (trades.length||0);
+    document.getElementById('k-mode').textContent = s.paper_mode===false ? 'LIVE' : 'PAPER';
+    document.getElementById('k-running').textContent = s.running ? 'running' : 'idle';
+    // positions
+    const posEl = document.getElementById('k-positions');
+    if(posArr.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
+    else{
+      posEl.innerHTML = posArr.slice(0,10).map(p=>{
+        const tk = (p.ticker||p.market||'?').substring(0,40);
+        const side = (p.side||p.position||'').toLowerCase();
+        const sideCls = side.startsWith('y') ? 'yes' : (side.startsWith('n') ? 'no' : '');
+        const val = p.current_value_usd ?? p.bet_usd ?? 0;
+        const pl = p.unrealized_pnl ?? p.pnl ?? 0;
+        const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        return `<div class="k-row"><span class="k-tk">${tk}</span>`
+             + `<span class="k-side ${sideCls}">${side||'-'}</span>`
+             + `<span>${_fmtUsd(val,false)}</span>`
+             + `<span class="${plCls}">${_fmtUsd(pl,true)}</span></div>`;
+      }).join('');
+    }
+    // recent trades
+    const rec = (trades||[]).slice(-8).reverse();
+    const recEl = document.getElementById('k-recent');
+    if(rec.length===0){ recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no trades yet</div>'; }
+    else{
+      recEl.innerHTML = rec.map(t=>{
+        const tk = (t.ticker||t.market||'?').substring(0,40);
+        const side = (t.side||'').toLowerCase();
+        const sideCls = side.startsWith('y') ? 'yes' : (side.startsWith('n') ? 'no' : '');
+        const pl = t.realized_pnl ?? t.pnl ?? 0;
+        const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        return `<div class="k-row"><span class="k-tk">${tk}</span>`
+             + `<span class="k-side ${sideCls}">${side||'-'}</span>`
+             + `<span>${t.outcome||t.reason||''}</span>`
+             + `<span class="${plCls}">${_fmtUsd(pl,true)}</span></div>`;
+      }).join('');
+    }
+  }).catch(()=>{ document.getElementById('kalshi-status').textContent = 'error'; });
+}
+'''
+    else:
+        kalshi_tab_html = ""
+        kalshi_tab_css  = ""
+        kalshi_tab_js   = ""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2938,9 +3147,11 @@ canvas.spark{{display:block;border-radius:1px;}}
   /* make input usable on mobile */
   #user-input{{font-size:14px;}}
 }}
+{kalshi_tab_css}
 </style>
 </head>
 <body>
+{kalshi_tab_html}
 <div id="left">
   <div id="brain-wrap">
     <canvas id="fractal-canvas"></canvas>
@@ -5826,6 +6037,7 @@ setTimeout(()=>{{
     }}).catch(()=>{{}});
   }},2500);
 }},110);
+{kalshi_tab_js}
 </script>
 </body>
 </html>"""
