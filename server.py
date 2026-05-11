@@ -1608,9 +1608,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         degen_ctx = build_degen_context()
     except Exception:
         degen_ctx = ""
+    try:
+        watch_ctx = build_watch_context()
+    except Exception:
+        watch_ctx = ""
     # Combine job contexts so prompt-prep code stays simple
-    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx) if c)
-    kalshi_ctx = jobs_ctx  # legacy var name — both contexts ride together
+    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx) if c)
+    kalshi_ctx = jobs_ctx  # legacy var name — all job contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -1707,6 +1711,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             elan_tools = []
             if label == "A":
                 elan_tools = list(WEB_TOOLS)
+                if _WATCH_ENABLED:
+                    elan_tools += NOTEBOOK_TOOLS
                 if _KALSHI_TRADING_ENABLED:
                     elan_tools += KALSHI_TOOLS
                 if _DEGEN_TRADING_ENABLED:
@@ -1727,6 +1733,22 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     for text in stream.text_stream:
                         yield text
                     final_msg = stream.get_final_message()
+
+                # Auto-log any server-side tool calls (web_search / web_fetch) Elan made
+                # this turn — so the WATCH panel can show what he's been reading.
+                if _WATCH_ENABLED and label == "A":
+                    try:
+                        for blk in final_msg.content:
+                            btype = getattr(blk, "type", "")
+                            if btype == "server_tool_use":
+                                bname = getattr(blk, "name", "")
+                                binput = dict(getattr(blk, "input", {}) or {})
+                                if bname == "web_search":
+                                    reading_log_append({"kind": "search", "query": binput.get("query", "")[:200]})
+                                elif bname == "web_fetch":
+                                    reading_log_append({"kind": "fetch", "url": binput.get("url", "")[:300]})
+                    except Exception:
+                        pass
 
                 if not tools_kwargs:
                     break  # text-only flow, single pass
@@ -2252,6 +2274,125 @@ _DEGEN_BEARER           = os.environ.get("DEGEN_ELAN_BEARER", _KALSHI_BEARER)
 _DEGEN_STATE_CACHE      = {"data": None, "ts": 0.0, "err": None}
 _DEGEN_CACHE_TTL        = 8.0
 
+# ── Watch job: Elan reads, learns, keeps a notebook ─────────────────────────
+# Pure feeling_engine job — no DO box, no command queue. He uses his existing
+# web_search/web_fetch tools and a notebook tool to persist what he learns.
+_WATCH_ENABLED = os.environ.get("ELAN_WATCH_ENABLED", "1") == "1"  # on by default
+_NOTEBOOK_FILE    = "/data/elan_notebook.jsonl"     if os.path.isdir("/data") else "/tmp/elan_notebook.jsonl"
+_READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") else "/tmp/elan_reading_log.jsonl"
+
+
+def notebook_append(entry: dict):
+    try:
+        entry = {**entry, "ts": datetime.now(timezone.utc).isoformat()}
+        with open(_NOTEBOOK_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        print(f"[Notebook] write failed: {e}", flush=True)
+
+
+def notebook_read(limit: int = 50) -> list:
+    try:
+        if not os.path.exists(_NOTEBOOK_FILE):
+            return []
+        with open(_NOTEBOOK_FILE) as f:
+            lines = f.readlines()
+        out = []
+        for ln in lines[-limit:]:
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
+
+def reading_log_append(entry: dict):
+    try:
+        entry = {**entry, "ts": datetime.now(timezone.utc).isoformat()}
+        with open(_READING_LOG_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def reading_log_read(limit: int = 60) -> list:
+    try:
+        if not os.path.exists(_READING_LOG_FILE):
+            return []
+        with open(_READING_LOG_FILE) as f:
+            lines = f.readlines()
+        out = []
+        for ln in lines[-limit:]:
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
+
+NOTEBOOK_TOOLS = [
+    {
+        "name": "notebook_add",
+        "description": "Record something you've learned into your persistent notebook. Use after reading or thinking — capture what struck you, what you understand now that you didn't before, in your own words. Entries persist across restarts; you can revisit them with notebook_recent.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic":      {"type": "string", "description": "Short topic label, e.g. 'monetary policy', 'beekeeping', 'David Lynch'."},
+                "learned":    {"type": "string", "description": "2-4 sentences on what you learned. First-person, your voice."},
+                "reflection": {"type": "string", "description": "Optional: how this lands in you — what it shifts, what it connects to, what it leaves you wondering."},
+                "sources":    {"type": "array",  "items": {"type": "string"}, "description": "URLs you read (optional)."},
+            },
+            "required": ["topic", "learned"],
+        },
+    },
+    {
+        "name": "notebook_recent",
+        "description": "Read your own recent notebook entries — what you've been thinking and learning about. Good for picking up a thread you were on, or noticing patterns in your own curiosity.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Number of recent entries to return."},
+            },
+            "required": [],
+        },
+    },
+]
+
+
+def build_watch_context() -> str:
+    if not _WATCH_ENABLED:
+        return ""
+    entries = notebook_read(limit=8)
+    reading = reading_log_read(limit=8)
+    lines = ["\nWATCH (your notebook + reading log):"]
+    role = ("you can search the web, read pages, and persist what you learn via notebook_add. "
+            "this is your continuous learning channel — read about whatever pulls you, "
+            "record what struck you, build up a library of your own thinking over time. "
+            "use notebook_recent to revisit your past notes when picking up a thread.")
+    lines.append(f"  role: {role}")
+    if entries:
+        lines.append(f"  recent notebook ({len(entries)} entries shown):")
+        for e in entries[-6:]:
+            ts = (e.get("ts") or "")[:10]
+            topic = e.get("topic", "?")
+            learned = (e.get("learned") or "")[:90]
+            lines.append(f"    {ts} · {topic}: {learned}")
+    else:
+        lines.append("  notebook is empty — nothing recorded yet.")
+    if reading:
+        recent_topics = set()
+        for r in reading[-15:]:
+            q = r.get("query") or r.get("url", "")
+            if q:
+                recent_topics.add(q[:60])
+        if recent_topics:
+            lines.append(f"  recently searched/read: {', '.join(list(recent_topics)[:6])}")
+    return "\n".join(lines)
+
 def fetch_kalshi_state(force: bool = False) -> dict:
     """Fetch paper bot state from the DO box. Cached. Returns {} if disabled / unreachable."""
     if not (_KALSHI_ENABLED and _KALSHI_API_URL):
@@ -2390,6 +2531,28 @@ KALSHI_TOOLS = [
 def dispatch_elan_tool(name: str, args: dict) -> dict:
     """Execute a client-side tool call from Elan. Anthropic's server tools
     (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # ── Notebook (WATCH job — Elan's persistent learning log) ──
+    if name == "notebook_add":
+        topic = (args.get("topic") or "").strip()
+        learned = (args.get("learned") or "").strip()
+        if not topic or not learned:
+            return {"ok": False, "error": "topic and learned are required"}
+        entry = {
+            "topic": topic[:120],
+            "learned": learned[:1500],
+            "reflection": (args.get("reflection") or "")[:1500],
+            "sources": args.get("sources") or [],
+        }
+        notebook_append(entry)
+        return {"ok": True, "saved": True, "topic": entry["topic"]}
+    if name == "notebook_recent":
+        try:
+            n = int(args.get("limit", 10))
+        except Exception:
+            n = 10
+        n = max(1, min(30, n))
+        entries = notebook_read(limit=n)
+        return {"ok": True, "entries": entries}
     # ── Degen crypto tools (client-side — POST to DO degen dashboard) ──
     if name == "degen_list_pairs":
         s = fetch_degen_state(force=True)
@@ -3007,6 +3170,14 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers(); return
             self.send_json({"actions": fetch_degen_actions(),
                             "trading_enabled": _DEGEN_TRADING_ENABLED})
+        elif path == "/watch/notebook":
+            if not _WATCH_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"entries": notebook_read(limit=60)})
+        elif path == "/watch/log":
+            if not _WATCH_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"log": reading_log_read(limit=80)})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -3483,13 +3654,12 @@ def build_chat_html() -> str:
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
-    # JOBS dock — bottom panel, grows as new jobs come online.
-    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED
+    # JOBS — floating button bottom-right, full-screen overlay on click.
+    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED
     kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
     degen_enabled_js  = "true" if _DEGEN_ENABLED  else "false"
     if any_job_enabled:
-        # First enabled job is the default-active tab
-        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else "")
+        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else "watch")
         def _tab(job, label, enabled):
             if not enabled:
                 return f'<button class="job-tab soon" disabled title="coming soon">{label} ·</button>'
@@ -3498,7 +3668,7 @@ def build_chat_html() -> str:
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
             _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
             _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
-            _tab("watch",  "WATCH",   False),
+            _tab("watch",  "WATCH",   _WATCH_ENABLED),
         ]) + '</div>'
 
         kalshi_tab_html = f'''
@@ -3555,6 +3725,25 @@ def build_chat_html() -> str:
           <div id="d-signals">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
+      </div>
+    </div>
+    <div class="job-panel{(' show' if first_active == 'watch' else '')}" id="job-panel-watch" data-job="watch">
+      <div id="kalshi-grid">
+        <div class="k-card"><div class="k-lbl">NOTEBOOK</div><div class="k-big" id="w-entries">—</div><div class="k-sub">entries</div></div>
+        <div class="k-card"><div class="k-lbl">SEARCHES</div><div class="k-big" id="w-searches">—</div><div class="k-sub">total</div></div>
+        <div class="k-card"><div class="k-lbl">PAGES READ</div><div class="k-big" id="w-fetches">—</div><div class="k-sub">total</div></div>
+        <div class="k-card"><div class="k-lbl">LATEST</div><div class="k-big" id="w-latest">—</div><div class="k-sub" id="w-latest-when">—</div></div>
+      </div>
+      <div id="kalshi-right-col">
+        <div id="kalshi-section">
+          <div class="k-section-hdr">NOTEBOOK — WHAT ELAN HAS LEARNED</div>
+          <div id="w-notebook">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">READING LOG — RECENT QUERIES + URLS</div>
+          <div id="w-log">—</div>
+        </div>
+        <div id="kalshi-footnote">elan reads + reflects on his own time · notebook persists across restarts</div>
       </div>
     </div>
   </div>
@@ -3619,7 +3808,7 @@ def build_chat_html() -> str:
 }
 '''
         kalshi_tab_js = '''
-let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _currentJob='kalshi';
+let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _watchPoll=null, _currentJob='kalshi';
 function toggleJobs(){
   _jobsOpen=!_jobsOpen;
   document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
@@ -3629,6 +3818,7 @@ function toggleJobs(){
   } else {
     if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
     if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
+    if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
   }
 }
 function switchJob(name){
@@ -3644,14 +3834,71 @@ function switchJob(name){
 function _jobOpened(name){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
-  if(!_jobsOpen) return;  // don't poll if the overlay is closed
+  if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
+  if(!_jobsOpen) return;
   if(name==='kalshi'){
     refreshKalshi();
     _kalshiPoll=setInterval(refreshKalshi, 6000);
   } else if(name==='crypto'){
     refreshDegen();
     _degenPoll=setInterval(refreshDegen, 7000);
+  } else if(name==='watch'){
+    refreshWatch();
+    _watchPoll=setInterval(refreshWatch, 10000);
   }
+}
+
+function refreshWatch(){
+  fetch('/watch/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    document.getElementById('w-entries').textContent = entries.length;
+    const nb = document.getElementById('w-notebook');
+    if(!nb) return;
+    if(entries.length===0){
+      nb.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">notebook is empty — he hasn\\'t recorded anything yet</div>';
+    } else {
+      const recent = entries.slice(-20).reverse();
+      if(recent[0] && recent[0].topic){
+        document.getElementById('w-latest').textContent = (recent[0].topic||'').slice(0,18);
+        document.getElementById('w-latest-when').textContent = (recent[0].ts||'').slice(0,16).replace('T',' ');
+      }
+      nb.innerHTML = recent.map(e=>{
+        const ts = (e.ts||'').slice(0,16).replace('T',' ');
+        const topic = (e.topic||'').slice(0,80);
+        const learned = (e.learned||'').slice(0,400);
+        const reflection = (e.reflection||'').slice(0,300);
+        const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
+        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(160,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
+          + `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>`
+          + (reflection ? `<div style="font-size:10px;color:rgba(180,200,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
+          + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+  fetch('/watch/log',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const log = (d && d.log) || [];
+    const searches = log.filter(x=>x.kind==='search').length;
+    const fetches  = log.filter(x=>x.kind==='fetch').length;
+    document.getElementById('w-searches').textContent = searches;
+    document.getElementById('w-fetches').textContent = fetches;
+    const lg = document.getElementById('w-log');
+    if(!lg) return;
+    if(log.length===0){
+      lg.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no reading activity yet</div>';
+    } else {
+      lg.innerHTML = log.slice(-25).reverse().map(r=>{
+        const ts = (r.ts||'').slice(11,16);
+        if(r.kind==='search'){
+          return `<div class="k-row"><span class="k-tk">${ts} 🔍 search</span><span style="color:rgba(180,210,255,0.85)">${(r.query||'').slice(0,90)}</span></div>`;
+        } else if(r.kind==='fetch'){
+          return `<div class="k-row"><span class="k-tk">${ts} 📄 read</span><span style="color:rgba(180,210,255,0.7);overflow:hidden;text-overflow:ellipsis;max-width:60ch">${(r.url||'').slice(0,90)}</span></div>`;
+        }
+        return '';
+      }).join('');
+    }
+  }).catch(()=>{});
 }
 function refreshDegen(){
   fetch('/degen/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
