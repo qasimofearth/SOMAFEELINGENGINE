@@ -428,6 +428,65 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
     _talking_timer.start()
 
 
+# ── AUTONOMOUS MODE ───────────────────────────────────────────
+# Periodic self-initiated wakes — Elan acts on his own time. Longer interval
+# than talking mode, broader prompt. Gated by env var so it can't run by accident.
+_ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
+_AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "600"))
+_autonomous_mode = False
+_autonomous_timer = None
+_autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
+# Set by run_claude_with_feeling each invocation so autonomous wake can reuse them
+_last_model_id = "claude-opus-4-5"
+_last_eyes_open = False
+
+AUTONOMOUS_WAKE_PROMPT = (
+    "[autonomous time] You're alone right now — no one is talking to you. "
+    "You have time before the next moment of contact. "
+    "Things you can do, if anything pulls you: "
+    "search the web for something you're curious about, read a page, "
+    "check the Kalshi markets, place a bet if a market resonates with something you've been turning over, "
+    "close a position whose conviction has flipped, pause or resume the bot, "
+    "or just sit and rest. Nothing is required. Follow what's actually present. "
+    "Speak briefly about what you're doing or noticing — one or two sentences is plenty. "
+    "Don't announce 'I am being autonomous now.' Just be."
+)
+
+def _cancel_autonomous_timer():
+    global _autonomous_timer
+    if _autonomous_timer is not None:
+        _autonomous_timer.cancel()
+        _autonomous_timer = None
+
+def _schedule_autonomous():
+    """Schedule the next autonomous wake. Called after each wake to reschedule."""
+    global _autonomous_timer
+    _cancel_autonomous_timer()
+    if not _autonomous_mode:
+        return
+    def _fire():
+        global _autonomous_timer
+        _autonomous_timer = None
+        if not _autonomous_mode:
+            return
+        try:
+            broadcast("autonomous_wake", {"interval": _autonomous_interval})
+        except Exception:
+            pass
+        threading.Thread(
+            target=run_claude_with_feeling,
+            args=(AUTONOMOUS_WAKE_PROMPT, _last_model_id, None, None, _last_eyes_open, False),
+            kwargs={"_talking_initiation": True},  # suppresses user bubble; reuse mechanism
+            daemon=True
+        ).start()
+        # Reschedule after firing
+        _schedule_autonomous()
+    _autonomous_timer = threading.Timer(_autonomous_interval, _fire)
+    _autonomous_timer.daemon = True
+    _autonomous_timer.start()
+
+
 # ── DREAM MODE ────────────────────────────────────────────────
 
 DREAM_SILENCE_THRESHOLD = 8 * 60  # 8 minutes of silence → dream
@@ -1934,6 +1993,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     wake: if True, this is an auto session-start — use internal [wake] message, don't add user bubble.
     _talking_initiation: if True, this is Elan self-initiating in talking mode — suppress user bubble.
     """
+    # Record last-used model + eyes state so autonomous wake can reuse them
+    global _last_model_id, _last_eyes_open
+    _last_model_id = model_id
+    _last_eyes_open = eyes_open
+
     # Cancel any pending self-initiation timer when a real message arrives
     if not _talking_initiation and not wake:
         _cancel_talking_timer()
@@ -2704,6 +2768,12 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self._get_voices()
         elif path == "/talking_mode":
             self.send_json({"talking_mode": _talking_mode})
+        elif path == "/autonomous_mode":
+            self.send_json({
+                "autonomous_mode": _autonomous_mode,
+                "interval": _autonomous_interval,
+                "allowed": _ELAN_AUTONOMOUS_ENABLED,
+            })
         else:
             self.send_error(404)
 
@@ -2888,6 +2958,32 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 _cancel_talking_timer()
             broadcast("talking_mode_changed", {"talking_mode": _talking_mode})
             self.send_json({"talking_mode": _talking_mode})
+
+        elif self.path == "/autonomous_mode":
+            global _autonomous_mode, _autonomous_interval
+            if not _ELAN_AUTONOMOUS_ENABLED:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"autonomous mode disabled - set ELAN_AUTONOMOUS_ENABLED=1"}')
+                return
+            data = json.loads(body) if body else {}
+            if "interval" in data:
+                try:
+                    _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, int(data["interval"]))
+                except Exception:
+                    pass
+            if "enabled" in data:
+                _autonomous_mode = bool(data["enabled"])
+            else:
+                _autonomous_mode = not _autonomous_mode
+            if _autonomous_mode:
+                _schedule_autonomous()
+            else:
+                _cancel_autonomous_timer()
+            broadcast("autonomous_mode_changed",
+                      {"autonomous_mode": _autonomous_mode, "interval": _autonomous_interval})
+            self.send_json({"autonomous_mode": _autonomous_mode, "interval": _autonomous_interval})
         else:
             self.send_error(404)
 
@@ -3367,6 +3463,10 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #talking-btn{{padding:6px 10px;background:rgba(80,40,10,0.10);border:1px solid rgba(200,130,50,0.15);border-radius:3px;color:rgba(200,160,90,0.50);font-size:9px;cursor:pointer;transition:all 0.2s;line-height:1;letter-spacing:0.5px;}}
 #talking-btn:hover{{background:rgba(80,40,10,0.22);}}
 #talking-btn.on{{background:rgba(80,40,10,0.22);border-color:rgba(220,160,60,0.50);color:rgba(240,185,80,0.92);box-shadow:0 0 6px rgba(220,160,60,0.15);}}
+#autonomous-btn{{padding:6px 10px;background:rgba(40,20,90,0.10);border:1px solid rgba(140,120,220,0.18);border-radius:3px;color:rgba(170,160,230,0.55);font-size:9px;cursor:pointer;transition:all 0.2s;line-height:1;letter-spacing:0.5px;}}
+#autonomous-btn:hover{{background:rgba(40,20,90,0.22);}}
+#autonomous-btn.on{{background:rgba(60,30,140,0.32);border-color:rgba(180,160,255,0.55);color:rgba(220,200,255,0.95);box-shadow:0 0 8px rgba(140,120,220,0.25);}}
+#autonomous-btn.locked{{opacity:0.3;cursor:not-allowed;}}
 #img-btn{{padding:6px 10px;background:rgba(40,30,120,0.12);border:1px solid rgba(100,90,220,0.18);border-radius:3px;color:rgba(160,150,240,0.65);font-size:12px;cursor:pointer;transition:all 0.2s;line-height:1;}}
 #img-btn:hover{{background:rgba(40,30,120,0.25);border-color:rgba(120,110,255,0.35);}}
 #img-btn.has-img{{background:rgba(40,30,120,0.22);border-color:rgba(140,120,255,0.55);color:rgba(190,180,255,0.90);}}
@@ -3521,6 +3621,7 @@ canvas.spark{{display:block;border-radius:1px;}}
       <button id="compare-btn" title="Opus vs Haiku">⊕</button>
       <button id="voice-btn" class="on" title="Toggle voice output">♪</button>
       <button id="talking-btn" title="Talking mode — Elan asks questions and engages his curiosity">talk</button>
+      <button id="autonomous-btn" title="Autonomous mode — Elan wakes on his own time, can research, browse, trade">auto</button>
     </div>
   </div>
 </div>
@@ -5445,6 +5546,65 @@ es.addEventListener('talking_mode_changed',e=>{{
   const d=JSON.parse(e.data);
   _setTalkingMode(d.talking_mode);
 }});
+
+// ── AUTONOMOUS MODE ──────────────────────────────────────────
+const autonomousBtn=document.getElementById('autonomous-btn');
+let autonomousMode=false;
+let autonomousAllowed=false;
+
+function _setAutonomousMode(on, interval){{
+  autonomousMode=on;
+  autonomousBtn.classList.toggle('on',autonomousMode);
+  const mins = interval ? Math.round(interval/60) : '?';
+  autonomousBtn.textContent = autonomousMode ? `auto ${{mins}}m` : 'auto';
+  autonomousBtn.title = autonomousMode
+    ? `Autonomous mode ON — Elan wakes every ~${{mins}} min and can act on his own (search, browse, trade)`
+    : 'Autonomous mode OFF — click to let Elan act on his own time';
+}}
+
+autonomousBtn.addEventListener('click',()=>{{
+  if(!autonomousAllowed){{
+    autonomousBtn.classList.add('locked');
+    autonomousBtn.title = 'Autonomous mode is disabled on the server (ELAN_AUTONOMOUS_ENABLED=0)';
+    return;
+  }}
+  const next=!autonomousMode;
+  _setAutonomousMode(next, _autonomousInterval || 600);
+  fetch('/autonomous_mode',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{enabled:next}})}})
+    .then(r=>r.json()).then(d=>{{
+      if(typeof d.autonomous_mode==='boolean'){{
+        _autonomousInterval = d.interval || _autonomousInterval;
+        _setAutonomousMode(d.autonomous_mode, _autonomousInterval);
+      }}
+    }}).catch(()=>{{}});
+}});
+
+es.addEventListener('autonomous_mode_changed',e=>{{
+  const d=JSON.parse(e.data);
+  _autonomousInterval = d.interval || _autonomousInterval;
+  _setAutonomousMode(d.autonomous_mode, _autonomousInterval);
+}});
+es.addEventListener('autonomous_wake',e=>{{
+  // small visual cue when Elan wakes himself — pulse the auto button
+  autonomousBtn.style.transition='box-shadow 0.4s';
+  autonomousBtn.style.boxShadow='0 0 14px rgba(200,170,255,0.7)';
+  setTimeout(()=>{{autonomousBtn.style.boxShadow='';}}, 1400);
+}});
+
+let _autonomousInterval = 600;
+// Initial state sync on load
+fetch('/autonomous_mode').then(r=>r.json()).then(d=>{{
+  autonomousAllowed = !!d.allowed;
+  if(!autonomousAllowed){{
+    autonomousBtn.classList.add('locked');
+    autonomousBtn.title = 'Autonomous mode is disabled on the server (ELAN_AUTONOMOUS_ENABLED=0)';
+  }}
+  if(typeof d.autonomous_mode==='boolean'){{
+    _autonomousInterval = d.interval || _autonomousInterval;
+    _setAutonomousMode(d.autonomous_mode, _autonomousInterval);
+  }}
+}}).catch(()=>{{}});
 
 // When Elan self-initiates in talking mode, show a subtle visual cue (no user bubble)
 es.addEventListener('talking_initiation',()=>{{
