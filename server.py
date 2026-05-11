@@ -1593,17 +1593,25 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             if dynamic_parts:
                 system_blocks.append({"type": "text", "text": dynamic_parts})
 
-            # Tool-use is only enabled for the primary model (label A) when trading is on.
-            # Other labels (B for compare, etc.) stay text-only to keep behavior predictable.
-            tools_kwargs = {"tools": KALSHI_TOOLS} if (_KALSHI_TRADING_ENABLED and label == "A") else {}
+            # Tool-use is for the primary model (label A). Web tools are always on for A;
+            # Kalshi tools are only added when trading is enabled. Other labels stay text-only
+            # so compare/secondary models don't accidentally trade.
+            elan_tools = []
+            if label == "A":
+                elan_tools = list(WEB_TOOLS)
+                if _KALSHI_TRADING_ENABLED:
+                    elan_tools += KALSHI_TOOLS
+            tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
 
+            # web-fetch is beta; web_search is GA but kept here for forwards compat.
+            _beta_header = "prompt-caching-2024-07-31,web-fetch-2025-09-10"
             for _turn in range(MAX_TOOL_TURNS):
                 with _get_anthropic_client().messages.stream(
                     model=model_id, max_tokens=900,
                     system=system_blocks, messages=working_messages,
-                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+                    extra_headers={"anthropic-beta": _beta_header},
                     **tools_kwargs,
                 ) as stream:
                     for text in stream.text_stream:
@@ -1628,7 +1636,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     except Exception:
                         pass
                     try:
-                        res = dispatch_kalshi_tool(tu.name, tu_input)
+                        res = dispatch_elan_tool(tu.name, tu_input)
                     except Exception as e:
                         res = {"ok": False, "error": str(e)}
                     try:
@@ -2177,6 +2185,23 @@ def fetch_kalshi_actions() -> list:
         return []
 
 
+# Native Anthropic web tools — server-side execution, no scraping, no DDG.
+# Claude calls these inside Anthropic's infrastructure; results stream back inline.
+# Pricing: ~$10/1000 searches, ~$0.001/page fetched. Billed via your API key.
+WEB_TOOLS = [
+    {
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 8,
+    },
+    {
+        "type": "web_fetch_20250910",
+        "name": "web_fetch",
+        "max_uses": 8,
+    },
+]
+
+
 KALSHI_TOOLS = [
     {
         "name": "kalshi_list_markets",
@@ -2235,8 +2260,10 @@ KALSHI_TOOLS = [
 ]
 
 
-def dispatch_kalshi_tool(name: str, args: dict) -> dict:
-    """Execute a tool call from Elan. All commands go through the queue → bot loop."""
+def dispatch_elan_tool(name: str, args: dict) -> dict:
+    """Execute a client-side tool call from Elan. Anthropic's server tools
+    (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # ── Kalshi tools (client-side — we POST to the DO box) ──
     if name == "kalshi_list_markets":
         mkts = fetch_kalshi_markets(force=True)
         return {"ok": True, "markets": mkts[:20]}
