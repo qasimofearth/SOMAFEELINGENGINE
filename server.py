@@ -1604,6 +1604,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         kalshi_ctx = build_kalshi_context()
     except Exception:
         kalshi_ctx = ""
+    try:
+        degen_ctx = build_degen_context()
+    except Exception:
+        degen_ctx = ""
+    # Combine job contexts so prompt-prep code stays simple
+    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx) if c)
+    kalshi_ctx = jobs_ctx  # legacy var name — both contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -1702,6 +1709,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 elan_tools = list(WEB_TOOLS)
                 if _KALSHI_TRADING_ENABLED:
                     elan_tools += KALSHI_TOOLS
+                if _DEGEN_TRADING_ENABLED:
+                    elan_tools += DEGEN_TOOLS
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
@@ -2231,6 +2240,18 @@ _KALSHI_MARKETS_CACHE = {"data": None, "ts": 0.0}
 _KALSHI_CACHE_TTL = 6.0  # seconds — bot updates ~every 30s, polling is cheap
 _KALSHI_MARKETS_TTL = 25.0
 
+# ── Degen crypto bot bridge ─────────────────────────────────────────────────
+# Same pattern as Kalshi: read-only when DEGEN_ENABLED=1, full trading when
+# DEGEN_TRADING_ENABLED=1. Auth/bearer fall back to Kalshi's values since both
+# bots share nginx Basic Auth + the same Elan bearer token.
+_DEGEN_ENABLED          = os.environ.get("DEGEN_ENABLED", "0") == "1"
+_DEGEN_TRADING_ENABLED  = os.environ.get("DEGEN_TRADING_ENABLED", "0") == "1"
+_DEGEN_API_URL          = os.environ.get("DEGEN_API_URL", "").rstrip("/")
+_DEGEN_AUTH             = os.environ.get("DEGEN_AUTH", _KALSHI_AUTH)
+_DEGEN_BEARER           = os.environ.get("DEGEN_ELAN_BEARER", _KALSHI_BEARER)
+_DEGEN_STATE_CACHE      = {"data": None, "ts": 0.0, "err": None}
+_DEGEN_CACHE_TTL        = 8.0
+
 def fetch_kalshi_state(force: bool = False) -> dict:
     """Fetch paper bot state from the DO box. Cached. Returns {} if disabled / unreachable."""
     if not (_KALSHI_ENABLED and _KALSHI_API_URL):
@@ -2369,6 +2390,35 @@ KALSHI_TOOLS = [
 def dispatch_elan_tool(name: str, args: dict) -> dict:
     """Execute a client-side tool call from Elan. Anthropic's server tools
     (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # ── Degen crypto tools (client-side — POST to DO degen dashboard) ──
+    if name == "degen_list_pairs":
+        s = fetch_degen_state(force=True)
+        pairs = s.get("pairs") or {}
+        positions = s.get("positions") or {}
+        out = {
+            "ok": True,
+            "balance": s.get("total_balance") or s.get("balance"),
+            "cash": s.get("cash_balance"),
+            "open_positions": list(positions.keys()) if isinstance(positions, dict) else [],
+            "pairs": pairs,
+        }
+        return out
+    if name == "degen_open_position":
+        return degen_post_command("open_position",
+                                   pair=args.get("pair"),
+                                   side=args.get("side"),
+                                   conviction=float(args.get("conviction", 0.7)),
+                                   reason=args.get("reason", ""))
+    if name == "degen_close_position":
+        return degen_post_command("close_position",
+                                   pair=args.get("pair"),
+                                   reason=args.get("reason", ""))
+    if name == "degen_pause_bot":
+        return degen_post_command("pause")
+    if name == "degen_resume_bot":
+        return degen_post_command("resume")
+    if name == "degen_tune_param":
+        return degen_post_command("tune", param=args.get("param"), value=args.get("value"))
     # ── Kalshi tools (client-side — we POST to the DO box) ──
     if name == "kalshi_list_markets":
         mkts = fetch_kalshi_markets(force=True)
@@ -2416,6 +2466,171 @@ def kalshi_post_command(action: str, **params) -> dict:
             return json.loads(r.read().decode("utf-8"))
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── Degen fetchers + tools ──────────────────────────────────────────────────
+def fetch_degen_state(force: bool = False) -> dict:
+    if not (_DEGEN_ENABLED and _DEGEN_API_URL):
+        return {}
+    now = time.time()
+    if not force and _DEGEN_STATE_CACHE["data"] is not None and now - _DEGEN_STATE_CACHE["ts"] < _DEGEN_CACHE_TTL:
+        return _DEGEN_STATE_CACHE["data"]
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_DEGEN_API_URL}/api/state")
+        if _DEGEN_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_DEGEN_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _DEGEN_STATE_CACHE.update({"data": data, "ts": now, "err": None})
+        return data
+    except Exception as e:
+        _DEGEN_STATE_CACHE["err"] = str(e)
+        return _DEGEN_STATE_CACHE["data"] or {}
+
+
+def fetch_degen_actions() -> list:
+    if not (_DEGEN_ENABLED and _DEGEN_API_URL):
+        return []
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_DEGEN_API_URL}/api/actions")
+        if _DEGEN_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_DEGEN_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return data.get("actions", []) if isinstance(data, dict) else []
+    except Exception:
+        return []
+
+
+def degen_post_command(action: str, **params) -> dict:
+    if not _DEGEN_TRADING_ENABLED:
+        return {"ok": False, "error": "degen trading disabled (DEGEN_TRADING_ENABLED=0)"}
+    if not (_DEGEN_API_URL and _DEGEN_BEARER):
+        return {"ok": False, "error": "DEGEN_API_URL or bearer not set"}
+    try:
+        import urllib.request, base64 as _b64
+        body = {"action": action, **params}
+        req = urllib.request.Request(
+            f"{_DEGEN_API_URL}/api/command",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-Elan-Bearer", _DEGEN_BEARER)
+        if _DEGEN_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_DEGEN_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+DEGEN_TOOLS = [
+    {
+        "name": "degen_list_pairs",
+        "description": "Show the crypto pairs the degen bot is currently scanning + their signals/RSI/ADX. Use before opening a position so you know which pairs are tradeable and what the algorithmic bot's read is.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_open_position",
+        "description": "Open a leveraged paper position on the degen bot. Conviction determines leverage (5x base, 8x for >=0.80). The bot's stop/take-profit logic will manage it once open.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pair":       {"type": "string", "description": "Pair like BTC/USDT, ETH/USDT, SOL/USDT (USDT is added automatically if you give just 'BTC')."},
+                "side":       {"type": "string", "enum": ["long", "short"]},
+                "conviction": {"type": "number", "description": "Your conviction 0.10..1.0. Higher = more leverage + larger stake."},
+                "reason":     {"type": "string", "description": "1-2 sentence read of the trade."},
+            },
+            "required": ["pair", "side", "conviction", "reason"],
+        },
+    },
+    {
+        "name": "degen_close_position",
+        "description": "Manually close an open degen position at current market price.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pair":   {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["pair", "reason"],
+        },
+    },
+    {
+        "name": "degen_pause_bot",
+        "description": "Pause degen bot's auto-scanning. Existing positions still get stop-checked; no new auto-trades. Use when you want to take over.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_resume_bot",
+        "description": "Resume degen bot's auto-scanning.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_tune_param",
+        "description": "Adjust a degen strategy parameter at runtime. Numeric only, within safe ranges.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "param": {"type": "string", "enum": ["max_open_trades", "max_same_dir", "base_risk_pct", "max_risk_pct"]},
+                "value": {"type": "number"},
+            },
+            "required": ["param", "value"],
+        },
+    },
+]
+
+
+def build_degen_context() -> str:
+    if not _DEGEN_ENABLED:
+        return ""
+    s = fetch_degen_state()
+    if not s:
+        return ""
+    bal   = s.get("total_balance") or s.get("balance") or 0
+    cash  = s.get("cash_balance") or 0
+    pnl   = s.get("total_pnl", 0)
+    start = s.get("starting_balance", 500)
+    pnl_pct = (pnl / start * 100) if start else 0
+    positions = s.get("positions") or {}
+    pos_items = list(positions.items()) if isinstance(positions, dict) else []
+    trades = s.get("trades") or []
+    paused = s.get("paused", False)
+
+    role = ("you have full control of this paper crypto bot — open + close + pause + resume + tune. "
+            "the algorithmic bot trades in parallel on its own logic; you are a second trader. "
+            "leverage is 5-8x; positions auto-close on stops/take-profits. paper only.") \
+           if _DEGEN_TRADING_ENABLED else \
+           "you can comment on positions and strategy; you cannot trade yet."
+
+    lines = [
+        f"\nDEGEN CRYPTO (paper, ${start:.0f} starting):",
+        f"  total ${bal:.2f} · cash ${cash:.2f} · pnl ${pnl:+.2f} ({pnl_pct:+.2f}%) · "
+        f"{len(pos_items)} open · {len(trades)} closed · {'PAUSED' if paused else 'live'}",
+        f"  role: {role}",
+    ]
+    if pos_items:
+        lines.append("  open positions:")
+        for pair, p in pos_items[:8]:
+            side = p.get("side", "?").upper()
+            pnl_p = p.get("pnl", 0); pct = p.get("pct", 0)
+            src   = p.get("source", "bot")
+            lines.append(f"    [{src}] {pair} {side} {p.get('leverage','?')}x · entry {p.get('entry_price','?')} · pnl {pnl_p:+.2f} ({pct:+.1f}%)")
+    pairs = s.get("pairs") or {}
+    if _DEGEN_TRADING_ENABLED and pairs:
+        lines.append("  pair signals (top by conviction):")
+        signal_rows = sorted(
+            [(pair, d) for pair, d in pairs.items() if d.get("signal") in ("buy", "sell")],
+            key=lambda kv: kv[1].get("conviction", 0), reverse=True,
+        )[:8]
+        for pair, d in signal_rows:
+            sig = d.get("signal"); side = d.get("side", "?"); conv = d.get("conviction", 0)
+            price = d.get("price", "?")
+            lines.append(f"    {pair} {sig.upper()} {side} @ {price} · conv {conv:.0%}")
+    return "\n".join(lines)
 
 
 def build_kalshi_context() -> str:
@@ -2783,6 +2998,15 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _KALSHI_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"markets": fetch_kalshi_markets()})
+        elif path == "/degen/state":
+            if not _DEGEN_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json(fetch_degen_state() or {"error": _DEGEN_STATE_CACHE.get("err") or "unavailable"})
+        elif path == "/degen/actions":
+            if not _DEGEN_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"actions": fetch_degen_actions(),
+                            "trading_enabled": _DEGEN_TRADING_ENABLED})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -3259,21 +3483,23 @@ def build_chat_html() -> str:
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
-    # JOBS overlay — currently houses just Kalshi, designed to grow.
-    # Future jobs (crypto-degen, watch/alerts) get added as new panels +
-    # new tabs in the #jobs-tabs strip. The whole thing is hidden when no
-    # job is enabled.
-    any_job_enabled = _KALSHI_ENABLED   # | _CRYPTO_ENABLED | _WATCH_ENABLED later
+    # JOBS dock — bottom panel, grows as new jobs come online.
+    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED
     kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
+    degen_enabled_js  = "true" if _DEGEN_ENABLED  else "false"
     if any_job_enabled:
-        # Tab strip — enabled jobs are clickable, planned jobs are dimmed
-        job_tab_buttons = []
-        if _KALSHI_ENABLED:
-            job_tab_buttons.append('<button class="job-tab on" data-job="kalshi" onclick="switchJob(\'kalshi\')">KALSHI</button>')
-        # Placeholders for planned jobs — visually present so users see the structure growing
-        job_tab_buttons.append('<button class="job-tab soon" disabled title="coming soon — crypto degen bot">CRYPTO ·</button>')
-        job_tab_buttons.append('<button class="job-tab soon" disabled title="coming soon — news / price watch">WATCH ·</button>')
-        jobs_tabs_html = '<div id="jobs-tabs">' + ''.join(job_tab_buttons) + '</div>'
+        # First enabled job is the default-active tab
+        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else "")
+        def _tab(job, label, enabled):
+            if not enabled:
+                return f'<button class="job-tab soon" disabled title="coming soon">{label} ·</button>'
+            on = " on" if job == first_active else ""
+            return f'<button class="job-tab{on}" data-job="{job}" onclick="switchJob(\'{job}\')">{label}</button>'
+        jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
+            _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
+            _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
+            _tab("watch",  "WATCH",   False),
+        ]) + '</div>'
 
         kalshi_tab_html = f'''
 <section id="jobs-dock" aria-label="Elan&#39;s jobs">
@@ -3284,7 +3510,7 @@ def build_chat_html() -> str:
     <button id="jobs-dock-toggle" title="Collapse / expand jobs dock" onclick="toggleJobsDock()">▾</button>
   </div>
   <div id="jobs-dock-body">
-    <div class="job-panel show" id="job-panel-kalshi" data-job="kalshi">
+    <div class="job-panel{(' show' if first_active == 'kalshi' else '')}" id="job-panel-kalshi" data-job="kalshi">
       <div id="kalshi-grid">
         <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
         <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
@@ -3303,6 +3529,29 @@ def build_chat_html() -> str:
         <div id="kalshi-section">
           <div class="k-section-hdr">RECENT TRADES</div>
           <div id="k-recent">—</div>
+        </div>
+        <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
+      </div>
+    </div>
+    <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
+      <div id="kalshi-grid">
+        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-cash">cash —</div></div>
+        <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
+        <div class="k-card"><div class="k-lbl">POSITIONS</div><div class="k-big" id="d-poscount">—</div><div class="k-sub" id="d-trades">trades —</div></div>
+        <div class="k-card"><div class="k-lbl">FEAR/GREED</div><div class="k-big" id="d-fg">—</div><div class="k-sub" id="d-running">—</div></div>
+      </div>
+      <div id="kalshi-right-col">
+        <div id="kalshi-section">
+          <div class="k-section-hdr">OPEN POSITIONS</div>
+          <div id="d-positions">none</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">ELAN ACTIONS</div>
+          <div id="d-actions">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">SIGNALS</div>
+          <div id="d-signals">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
       </div>
@@ -3369,7 +3618,7 @@ body.jobs-collapsed #jobs-dock-toggle{transform:rotate(180deg);}
 }
 '''
         kalshi_tab_js = '''
-let _kalshiPoll=null, _currentJob='kalshi';
+let _kalshiPoll=null, _degenPoll=null, _currentJob='kalshi';
 function switchJob(name){
   _currentJob=name;
   document.querySelectorAll('.job-tab').forEach(b=>{
@@ -3386,17 +3635,105 @@ function toggleJobsDock(){
 }
 function _jobOpened(name){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
+  if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
   if(name==='kalshi'){
     refreshKalshi();
     _kalshiPoll=setInterval(refreshKalshi, 6000);
+  } else if(name==='crypto'){
+    refreshDegen();
+    _degenPoll=setInterval(refreshDegen, 7000);
   }
-  // crypto/watch pollers will go here as those jobs land
 }
-// Start kalshi polling immediately — dock is always visible
+function refreshDegen(){
+  fetch('/degen/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
+    const fn = document.querySelector('#job-panel-crypto #kalshi-footnote');
+    if(fn && a && a.trading_enabled){
+      fn.textContent = 'autonomous · Elan has full degen control';
+      fn.setAttribute('data-trading','on');
+    }
+    const actions = (a && a.actions) || [];
+    const aEl = document.getElementById('d-actions');
+    if(!aEl) return;
+    if(actions.length===0){ aEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no actions yet</div>'; }
+    else{
+      aEl.innerHTML = actions.slice(-12).reverse().map(ac=>{
+        const ts = (ac.ts||'').slice(11,19);
+        const act = ac.action || '?';
+        const p = ac.params || {};
+        const ok = ac.ok ? '✓' : '✗';
+        const okCls = ac.ok ? 'k-pnl-pos' : 'k-pnl-neg';
+        let detail = '';
+        if(act==='open_position') detail = `${p.pair||''} ${(p.side||'').toUpperCase()} conv=${p.conviction||''}`;
+        else if(act==='close_position') detail = `${p.pair||''}`;
+        else if(act==='tune') detail = `${p.param}=${p.value}`;
+        const reason = p.reason ? ` — ${(p.reason||'').slice(0,60)}` : '';
+        const err = ac.error ? ` · ${ac.error.slice(0,50)}` : '';
+        return `<div class="k-row"><span class="k-tk">${ts} ${act} ${detail}${reason}</span>`
+             + `<span class="${okCls}">${ok}${err}</span></div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+  fetch('/degen/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
+    if(!s || s.error) return;
+    const total = s.total_balance || s.balance || 0;
+    const cash  = s.cash_balance || 0;
+    const pnl   = s.total_pnl || 0;
+    const start = s.starting_balance || 500;
+    const pnlPct = start? (pnl/start*100) : 0;
+    document.getElementById('d-total').textContent = '$' + total.toFixed(2);
+    document.getElementById('d-cash').textContent = 'cash $' + cash.toFixed(2);
+    const pnlEl = document.getElementById('d-pnl');
+    pnlEl.textContent = (pnl>=0?'+':'') + '$' + Math.abs(pnl).toFixed(2);
+    pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
+    document.getElementById('d-pnlpct').textContent = (pnlPct>=0?'+':'') + pnlPct.toFixed(2) + '%';
+    const positions = s.positions || {};
+    const posKeys = Object.keys(positions);
+    document.getElementById('d-poscount').textContent = posKeys.length;
+    document.getElementById('d-trades').textContent = 'trades ' + ((s.trades||[]).length);
+    document.getElementById('d-fg').textContent = s.fear_greed != null ? s.fear_greed : '—';
+    document.getElementById('d-running').textContent = s.paused ? 'paused' : (s.running ? 'running' : 'idle');
+    const pos = posKeys.slice(0,8).map(k => Object.assign({pair:k}, positions[k]));
+    const posEl = document.getElementById('d-positions');
+    if(pos.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
+    else{
+      posEl.innerHTML = pos.map(p=>{
+        const side = (p.side||'').toLowerCase();
+        const sideCls = side==='long' ? 'yes' : (side==='short' ? 'no' : '');
+        const pl = p.pnl || 0;
+        const pct = p.pct || 0;
+        const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        return `<div class="k-row"><span class="k-tk">${p.pair} ${p.leverage||''}x</span>`
+             + `<span class="k-side ${sideCls}">${side||'-'}</span>`
+             + `<span>${p.current_price ? '$'+p.current_price : ''}</span>`
+             + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(1)}%)</span></div>`;
+      }).join('');
+    }
+    // top signals
+    const pairs = s.pairs || {};
+    const sigs = Object.entries(pairs)
+      .filter(([_,d])=>d.signal==='buy'||d.signal==='sell')
+      .sort((a,b)=>(b[1].conviction||0)-(a[1].conviction||0))
+      .slice(0,6);
+    const sigEl = document.getElementById('d-signals');
+    if(sigs.length===0){ sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no signals</div>'; }
+    else{
+      sigEl.innerHTML = sigs.map(([pair, d])=>{
+        const side = (d.side||'').toLowerCase();
+        const sideCls = side==='long' ? 'yes' : (side==='short' ? 'no' : '');
+        return `<div class="k-row"><span class="k-tk">${pair}</span>`
+             + `<span class="k-side ${sideCls}">${d.signal}</span>`
+             + `<span>$${d.price}</span>`
+             + `<span>conv ${Math.round((d.conviction||0)*100)}%</span></div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+}
+// Start polling for whichever job loads first
 try{
   if(localStorage.getItem('jobs_dock_collapsed') === '1') document.body.classList.add('jobs-collapsed');
 }catch(e){}
-_jobOpened('kalshi');
+const _firstActiveTab = document.querySelector('.job-tab.on');
+_jobOpened(_firstActiveTab ? _firstActiveTab.dataset.job : 'kalshi');
 function _fmtUsd(v, sign){
   v = Number(v||0);
   const s = (sign && v>0) ? '+' : (v<0?'-':'');
