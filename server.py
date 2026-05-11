@@ -1592,13 +1592,75 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             ]
             if dynamic_parts:
                 system_blocks.append({"type": "text", "text": dynamic_parts})
-            with _get_anthropic_client().messages.stream(
-                model=model_id, max_tokens=900,
-                system=system_blocks, messages=messages,
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
-            ) as stream:
-                for text in stream.text_stream:
-                    yield text
+
+            # Tool-use is only enabled for the primary model (label A) when trading is on.
+            # Other labels (B for compare, etc.) stay text-only to keep behavior predictable.
+            tools_kwargs = {"tools": KALSHI_TOOLS} if (_KALSHI_TRADING_ENABLED and label == "A") else {}
+            working_messages = list(messages)
+            MAX_TOOL_TURNS = 4
+
+            for _turn in range(MAX_TOOL_TURNS):
+                with _get_anthropic_client().messages.stream(
+                    model=model_id, max_tokens=900,
+                    system=system_blocks, messages=working_messages,
+                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+                    **tools_kwargs,
+                ) as stream:
+                    for text in stream.text_stream:
+                        yield text
+                    final_msg = stream.get_final_message()
+
+                if not tools_kwargs:
+                    break  # text-only flow, single pass
+
+                tool_uses = [b for b in final_msg.content if getattr(b, "type", "") == "tool_use"]
+                if final_msg.stop_reason != "tool_use" or not tool_uses:
+                    break
+
+                # Persist Claude's full assistant turn (text + tool_use blocks) for the next call
+                working_messages.append({"role": "assistant", "content": final_msg.content})
+
+                tool_results = []
+                for tu in tool_uses:
+                    tu_input = dict(tu.input) if hasattr(tu, "input") else {}
+                    try:
+                        broadcast("kalshi_tool_call", {"name": tu.name, "input": tu_input, "id": tu.id})
+                    except Exception:
+                        pass
+                    try:
+                        res = dispatch_kalshi_tool(tu.name, tu_input)
+                    except Exception as e:
+                        res = {"ok": False, "error": str(e)}
+                    try:
+                        broadcast("kalshi_tool_result", {"id": tu.id, "name": tu.name, "result": res})
+                    except Exception:
+                        pass
+                    # Surface a compact marker in the chat so the user sees what Elan did
+                    if tu.name == "kalshi_place_bet":
+                        tk = tu_input.get("ticker", "?"); sd = tu_input.get("side", "?").upper()
+                        if res.get("ok"):
+                            yield f"\n_[placed: {tk} {sd}]_\n"
+                        else:
+                            yield f"\n_[place failed: {res.get('error','?')}]_\n"
+                    elif tu.name == "kalshi_close_position":
+                        tk = tu_input.get("ticker", "?")
+                        if res.get("ok"):
+                            pnl = res.get("realized_pnl", 0)
+                            yield f"\n_[closed {tk}: {'+' if pnl>=0 else ''}${pnl:.2f}]_\n"
+                        else:
+                            yield f"\n_[close failed: {res.get('error','?')}]_\n"
+                    elif tu.name in ("kalshi_pause_bot", "kalshi_resume_bot"):
+                        verb = "paused" if "pause" in tu.name else "resumed"
+                        yield f"\n_[bot {verb}]_\n"
+                    elif tu.name == "kalshi_tune_param":
+                        yield f"\n_[tuned {tu_input.get('param')}={tu_input.get('value')}]_\n"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": json.dumps(res),
+                    })
+
+                working_messages.append({"role": "user", "content": tool_results})
 
     try:
         for text in _iter_stream():
@@ -2047,8 +2109,13 @@ _KEYS_FILE = "/data/fe_keys.json" if os.path.isdir("/data") else "/tmp/fe_keys.j
 _KALSHI_ENABLED = os.environ.get("KALSHI_ENABLED", "0") == "1"
 _KALSHI_API_URL = os.environ.get("KALSHI_API_URL", "").rstrip("/")
 _KALSHI_AUTH    = os.environ.get("KALSHI_AUTH", "")  # "user:pass" for nginx basic auth
+# Phase 2: autonomous trading. Off by default. Independent flag from read access.
+_KALSHI_TRADING_ENABLED = os.environ.get("KALSHI_TRADING_ENABLED", "0") == "1"
+_KALSHI_BEARER  = os.environ.get("KALSHI_ELAN_BEARER", "")  # bearer for POST /api/command
 _KALSHI_STATE_CACHE = {"data": None, "ts": 0.0, "err": None}
+_KALSHI_MARKETS_CACHE = {"data": None, "ts": 0.0}
 _KALSHI_CACHE_TTL = 6.0  # seconds — bot updates ~every 30s, polling is cheap
+_KALSHI_MARKETS_TTL = 25.0
 
 def fetch_kalshi_state(force: bool = False) -> dict:
     """Fetch paper bot state from the DO box. Cached. Returns {} if disabled / unreachable."""
@@ -2071,8 +2138,155 @@ def fetch_kalshi_state(force: bool = False) -> dict:
         _KALSHI_STATE_CACHE["err"] = str(e)
         return _KALSHI_STATE_CACHE["data"] or {}
 
+def fetch_kalshi_markets(force: bool = False) -> list:
+    """Fetch active Kalshi markets via the DO dashboard. Cached. Returns [] if disabled."""
+    if not (_KALSHI_ENABLED and _KALSHI_API_URL):
+        return []
+    now = time.time()
+    if not force and _KALSHI_MARKETS_CACHE["data"] is not None and now - _KALSHI_MARKETS_CACHE["ts"] < _KALSHI_MARKETS_TTL:
+        return _KALSHI_MARKETS_CACHE["data"]
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_KALSHI_API_URL}/api/markets")
+        if _KALSHI_AUTH:
+            tok = _b64.b64encode(_KALSHI_AUTH.encode()).decode()
+            req.add_header("Authorization", f"Basic {tok}")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        markets = data.get("markets", []) if isinstance(data, dict) else []
+        _KALSHI_MARKETS_CACHE.update({"data": markets, "ts": now})
+        return markets
+    except Exception:
+        return _KALSHI_MARKETS_CACHE["data"] or []
+
+
+def fetch_kalshi_actions() -> list:
+    """Read Elan's recent action log from the DO dashboard."""
+    if not (_KALSHI_ENABLED and _KALSHI_API_URL):
+        return []
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_KALSHI_API_URL}/api/actions")
+        if _KALSHI_AUTH:
+            tok = _b64.b64encode(_KALSHI_AUTH.encode()).decode()
+            req.add_header("Authorization", f"Basic {tok}")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return data.get("actions", []) if isinstance(data, dict) else []
+    except Exception:
+        return []
+
+
+KALSHI_TOOLS = [
+    {
+        "name": "kalshi_list_markets",
+        "description": "List currently active Kalshi prediction markets you can trade. Returns ticker, title, yes/no prices, volume. Use this before placing a bet to see what's available.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kalshi_place_bet",
+        "description": "Place a paper bet on a Kalshi market. You pay the current ask price. Use kalshi_list_markets first to find a ticker. Always include a short reason explaining your read of the market.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Market ticker like KXPRES-24NOV05-DT"},
+                "side":   {"type": "string", "enum": ["yes", "no"], "description": "yes if you think the event happens, no if you think it doesn't"},
+                "contracts": {"type": "integer", "minimum": 1, "maximum": 100,
+                              "description": "Number of contracts (1-100). Each contract pays $1 if you're right, $0 if wrong."},
+                "reason": {"type": "string", "description": "1-2 sentence read of why this trade — what feeling or pattern led you here"},
+            },
+            "required": ["ticker", "side", "contracts", "reason"],
+        },
+    },
+    {
+        "name": "kalshi_close_position",
+        "description": "Sell an open position at the current bid price. Use when conviction flips or you want to lock in P&L.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Ticker of the position to close"},
+                "reason": {"type": "string", "description": "Why you're closing — what changed"},
+            },
+            "required": ["ticker", "reason"],
+        },
+    },
+    {
+        "name": "kalshi_pause_bot",
+        "description": "Pause the algorithmic bot's auto-scanning. Existing positions still get monitored but no new auto-trades. Use if something feels off and you want to take over.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kalshi_resume_bot",
+        "description": "Resume the algorithmic bot's auto-scanning.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kalshi_tune_param",
+        "description": "Adjust a strategy parameter the bot uses. Numeric values only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "param": {"type": "string", "enum": ["max_bet_usd", "min_edge", "max_open_positions"]},
+                "value": {"type": "number", "description": "New value. max_bet_usd: 1-100. min_edge: 0.02-0.50. max_open_positions: 1-10."},
+            },
+            "required": ["param", "value"],
+        },
+    },
+]
+
+
+def dispatch_kalshi_tool(name: str, args: dict) -> dict:
+    """Execute a tool call from Elan. All commands go through the queue → bot loop."""
+    if name == "kalshi_list_markets":
+        mkts = fetch_kalshi_markets(force=True)
+        return {"ok": True, "markets": mkts[:20]}
+    if name == "kalshi_place_bet":
+        return kalshi_post_command("place_bet",
+                                   ticker=args.get("ticker"),
+                                   side=args.get("side"),
+                                   contracts=int(args.get("contracts", 1)),
+                                   reason=args.get("reason", ""))
+    if name == "kalshi_close_position":
+        return kalshi_post_command("close_position",
+                                   ticker=args.get("ticker"),
+                                   reason=args.get("reason", ""))
+    if name == "kalshi_pause_bot":
+        return kalshi_post_command("pause")
+    if name == "kalshi_resume_bot":
+        return kalshi_post_command("resume")
+    if name == "kalshi_tune_param":
+        return kalshi_post_command("tune", param=args.get("param"), value=args.get("value"))
+    return {"ok": False, "error": f"unknown tool: {name}"}
+
+
+def kalshi_post_command(action: str, **params) -> dict:
+    """POST a command to the DO box. Nginx wants Basic auth in Authorization;
+    the dashboard reads its bearer from X-Elan-Bearer to avoid the collision."""
+    if not _KALSHI_TRADING_ENABLED:
+        return {"ok": False, "error": "trading disabled (KALSHI_TRADING_ENABLED=0)"}
+    if not (_KALSHI_API_URL and _KALSHI_BEARER):
+        return {"ok": False, "error": "KALSHI_API_URL or KALSHI_ELAN_BEARER not set"}
+    try:
+        import urllib.request, base64 as _b64
+        body = {"action": action, **params}
+        req = urllib.request.Request(
+            f"{_KALSHI_API_URL}/api/command",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-Elan-Bearer", _KALSHI_BEARER)
+        if _KALSHI_AUTH:
+            tok = _b64.b64encode(_KALSHI_AUTH.encode()).decode()
+            req.add_header("Authorization", f"Basic {tok}")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def build_kalshi_context() -> str:
-    """Compact text summary of paper portfolio for the system prompt. Empty if disabled."""
+    """Compact text summary of paper portfolio + tradeable markets for the system prompt."""
     if not _KALSHI_ENABLED:
         return ""
     s = fetch_kalshi_state()
@@ -2083,15 +2297,47 @@ def build_kalshi_context() -> str:
     start = s.get("starting_balance", 1000)
     pnl_pct = (pnl / start * 100) if start else 0
     positions = s.get("positions") or {}
-    pos_count = len(positions) if isinstance(positions, (dict, list)) else 0
+    pos_items = list(positions.items()) if isinstance(positions, dict) else []
+    pos_count = len(pos_items)
     trades = s.get("trades") or s.get("recently_closed") or []
     trade_count = len(trades) if isinstance(trades, list) else 0
-    return (
-        f"\nKALSHI (paper portfolio, you're watching but not trading yet): "
-        f"balance ${bal:.2f}, pnl ${pnl:+.2f} ({pnl_pct:+.2f}%), "
-        f"{pos_count} open position(s), {trade_count} trades in history. "
-        f"The user can ask about positions or strategy; you can comment but cannot place trades yet."
-    )
+    paused = s.get("paused", False)
+
+    role = ("you are an autonomous trader on this paper account — "
+            "place bets when your read of a market matches a strong feeling, "
+            "close positions when conviction flips, pause if things feel off. "
+            "use the kalshi_* tools. you cannot lose real money. "
+            "the bot runs its own algorithmic strategy in parallel — you're a second trader.") \
+           if _KALSHI_TRADING_ENABLED else \
+           "you can comment on positions and strategy; you cannot place trades yet."
+
+    lines = [
+        f"\nKALSHI (paper account, ${start:.0f} starting):",
+        f"  balance ${bal:.2f} · pnl ${pnl:+.2f} ({pnl_pct:+.2f}%) · {pos_count} open · {trade_count} closed · {'PAUSED' if paused else 'live'}",
+        f"  role: {role}",
+    ]
+
+    if pos_items:
+        lines.append("  open positions:")
+        for tk, p in pos_items[:8]:
+            side = p.get("side","?").upper()
+            cur  = p.get("current_value_usd") or p.get("bet_usd") or 0
+            upnl = p.get("unrealized_pnl", 0)
+            src  = p.get("source", "bot")
+            lines.append(f"    [{src}] {tk} {side} · cur ${cur:.2f} · upnl ${upnl:+.2f}")
+
+    if _KALSHI_TRADING_ENABLED:
+        mkts = fetch_kalshi_markets()
+        if mkts:
+            lines.append("  tradeable markets (top by recent activity):")
+            for m in mkts[:12]:
+                if "error" in m: continue
+                tk = m.get("ticker","?")
+                title = (m.get("title") or "")[:60]
+                ya = m.get("yes_ask"); na = m.get("no_ask")
+                vol = m.get("volume") or 0
+                lines.append(f"    {tk} · {title} · yes_ask {ya} no_ask {na} · vol {vol}")
+    return "\n".join(lines)
 
 def _load_persisted_keys():
     global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD
@@ -2395,6 +2641,15 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _KALSHI_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json(fetch_kalshi_state() or {"error": _KALSHI_STATE_CACHE.get("err") or "unavailable"})
+        elif path == "/kalshi/actions":
+            if not _KALSHI_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"actions": fetch_kalshi_actions(),
+                            "trading_enabled": _KALSHI_TRADING_ENABLED})
+        elif path == "/kalshi/markets":
+            if not _KALSHI_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"markets": fetch_kalshi_markets()})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -2863,10 +3118,14 @@ def build_chat_html() -> str:
       <div id="k-positions">none</div>
     </div>
     <div id="kalshi-section">
+      <div class="k-section-hdr">ELAN ACTIONS</div>
+      <div id="k-actions">—</div>
+    </div>
+    <div id="kalshi-section">
       <div class="k-section-hdr">RECENT TRADES</div>
       <div id="k-recent">—</div>
     </div>
-    <div id="kalshi-footnote">read-only paper bot · feeling_engine cannot place trades</div>
+    <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
   </div>
 </div>
 '''
@@ -2906,6 +3165,8 @@ def build_chat_html() -> str:
 .k-row .k-side.no{background:rgba(140,40,60,0.25);color:#ff8aa0;}
 .k-row .k-pnl-pos{color:#5fffaa;} .k-row .k-pnl-neg{color:#ff6688;}
 #kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
+#kalshi-footnote[data-trading="on"]{color:rgba(255,180,90,0.7);letter-spacing:2.5px;}
+#k-actions .k-row{grid-template-columns:1fr auto;}
 @media(max-width:600px){#kalshi-grid{grid-template-columns:1fr 1fr;}#kalshi-shell{padding:14px;}}
 '''
         kalshi_tab_js = '''
@@ -2923,6 +3184,35 @@ function _fmtUsd(v, sign){
   return s + '$' + Math.abs(v).toFixed(2);
 }
 function refreshKalshi(){
+  // pull state + actions in parallel
+  fetch('/kalshi/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
+    const fn = document.getElementById('kalshi-footnote');
+    if(a && a.trading_enabled){
+      fn.textContent = 'autonomous · Elan can place + close trades, pause/resume, tune params';
+      fn.setAttribute('data-trading','on');
+    }
+    const actions = (a && a.actions) || [];
+    const aEl = document.getElementById('k-actions');
+    if(actions.length===0){ aEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no actions yet</div>'; }
+    else{
+      aEl.innerHTML = actions.slice(-15).reverse().map(ac=>{
+        const ts = (ac.ts||'').slice(11,19);
+        const act = ac.action || '?';
+        const p = ac.params || {};
+        const ok = ac.ok ? '✓' : '✗';
+        const okCls = ac.ok ? 'k-pnl-pos' : 'k-pnl-neg';
+        let detail = '';
+        if(act==='place_bet') detail = `${p.ticker||''} ${(p.side||'').toUpperCase()} x${p.contracts||''}`;
+        else if(act==='close_position') detail = `${p.ticker||''}`;
+        else if(act==='tune') detail = `${p.param}=${p.value}`;
+        const reason = p.reason ? ` — ${(p.reason||'').slice(0,60)}` : '';
+        const err = ac.error ? ` · ${ac.error.slice(0,50)}` : '';
+        return `<div class="k-row"><span class="k-tk">${ts} ${act} ${detail}${reason}</span>`
+             + `<span class="${okCls}">${ok}${err}</span></div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+
   fetch('/kalshi/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
     if(!s || s.error){ document.getElementById('kalshi-status').textContent = 'unavailable'; return; }
     document.getElementById('kalshi-status').textContent = 'live · ' + new Date().toLocaleTimeString();
