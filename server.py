@@ -3502,14 +3502,15 @@ def build_chat_html() -> str:
         ]) + '</div>'
 
         kalshi_tab_html = f'''
-<section id="jobs-dock" aria-label="Elan&#39;s jobs">
-  <div id="jobs-dock-hdr">
-    <span class="k-title">ELAN&#39;S JOBS</span>
-    {jobs_tabs_html}
-    <span id="kalshi-status">connecting…</span>
-    <button id="jobs-dock-toggle" title="Collapse / expand jobs dock" onclick="toggleJobsDock()">▾</button>
-  </div>
-  <div id="jobs-dock-body">
+<button id="jobs-tab-btn" title="Jobs — Elan&#39;s active work" onclick="toggleJobs()">⬢ jobs</button>
+<div id="jobs-overlay">
+  <div id="jobs-shell">
+    <div id="jobs-hdr">
+      <span class="k-title">ELAN&#39;S JOBS</span>
+      {jobs_tabs_html}
+      <span id="kalshi-status">connecting…</span>
+      <button id="jobs-close" onclick="toggleJobs()" title="close">✕</button>
+    </div>
     <div class="job-panel{(' show' if first_active == 'kalshi' else '')}" id="job-panel-kalshi" data-job="kalshi">
       <div id="kalshi-grid">
         <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
@@ -3557,29 +3558,32 @@ def build_chat_html() -> str:
       </div>
     </div>
   </div>
-</section>
+</div>
 '''
         kalshi_tab_css = '''
-/* ── JOBS DOCK — permanent bottom section of the dashboard ── */
-#jobs-dock{grid-column:1/-1;grid-row:2;border-top:1px solid rgba(80,120,200,0.18);
-  background:#020210;display:flex;flex-direction:column;overflow:hidden;
+/* ── JOBS — floating bottom-right button → full-screen overlay ── */
+#jobs-tab-btn{position:fixed;bottom:14px;right:14px;z-index:9998;padding:7px 14px;
+  background:rgba(20,30,60,0.78);border:1px solid rgba(120,180,255,0.4);border-radius:3px;
+  color:rgba(190,215,255,0.92);font-family:'Courier New',monospace;font-size:10px;letter-spacing:2.5px;
+  cursor:pointer;text-transform:uppercase;backdrop-filter:blur(8px);
+  box-shadow:0 2px 12px rgba(0,0,0,0.5);}
+#jobs-tab-btn:hover{background:rgba(40,60,140,0.92);color:#fff;border-color:rgba(180,220,255,0.85);}
+#jobs-tab-btn.on{background:rgba(60,90,200,0.95);color:#fff;border-color:rgba(200,230,255,1);}
+#jobs-overlay{position:fixed;inset:0;z-index:9997;background:rgba(2,6,20,0.94);
+  display:none;overflow-y:auto;backdrop-filter:blur(4px);}
+#jobs-overlay.show{display:block;}
+#jobs-shell{max-width:1000px;margin:50px auto 80px;padding:20px;
   font-family:'Courier New',monospace;color:#c8d0f0;}
-body.jobs-collapsed{--jobs-dock-h:32px;}
-body.jobs-collapsed #jobs-dock-body{display:none;}
-body.jobs-collapsed #jobs-dock-toggle{transform:rotate(180deg);}
-#jobs-dock-hdr{display:flex;align-items:center;gap:12px;padding:7px 14px;
-  border-bottom:1px solid rgba(80,120,200,0.10);background:rgba(8,10,28,0.8);flex-shrink:0;}
-.k-title{font-size:10px;letter-spacing:3.5px;color:rgba(160,200,255,0.78);
-  text-transform:uppercase;}
+#jobs-hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;
+  padding-bottom:10px;border-bottom:1px solid rgba(80,120,200,0.18);}
+.k-title{font-size:11px;letter-spacing:4px;color:rgba(160,200,255,0.85);}
 #kalshi-status{font-size:9px;letter-spacing:2px;color:rgba(120,160,220,0.5);margin-left:auto;}
-#jobs-dock-toggle{background:none;border:1px solid rgba(120,160,220,0.25);
-  color:rgba(160,200,255,0.7);padding:1px 8px;font-family:inherit;cursor:pointer;
-  border-radius:2px;font-size:10px;transition:transform 0.2s;}
-#jobs-dock-toggle:hover{background:rgba(40,60,120,0.3);color:#fff;}
-#jobs-dock-body{flex:1;overflow-y:auto;padding:10px 16px 12px;}
-#jobs-tabs{display:flex;gap:3px;}
+#jobs-close{background:none;border:1px solid rgba(120,160,220,0.3);color:rgba(160,200,255,0.7);
+  padding:3px 9px;font-family:inherit;cursor:pointer;border-radius:2px;font-size:11px;}
+#jobs-close:hover{background:rgba(80,30,30,0.5);color:#fff;border-color:#f88;}
+#jobs-tabs{display:flex;gap:4px;margin-left:8px;}
 .job-tab{background:none;border:1px solid transparent;
-  padding:3px 10px;font-family:inherit;font-size:8.5px;letter-spacing:2.5px;
+  padding:4px 12px;font-family:inherit;font-size:9px;letter-spacing:2.5px;
   color:rgba(140,170,210,0.55);cursor:pointer;border-radius:2px;
   transition:all 0.15s;}
 .job-tab:hover{color:rgba(200,220,255,0.9);background:rgba(40,60,120,0.18);}
@@ -3589,20 +3593,18 @@ body.jobs-collapsed #jobs-dock-toggle{transform:rotate(180deg);}
 .job-tab.soon:hover{background:none;color:rgba(120,150,200,0.32);}
 .job-panel{display:none;}
 .job-panel.show{display:block;}
-/* Kalshi panel — laid out for the 200px dock context */
-#job-panel-kalshi{display:grid;grid-template-columns:340px 1fr;gap:16px;height:100%;}
-#kalshi-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start;}
-.k-card{padding:7px 9px;background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:3px;}
-.k-lbl{font-size:7.5px;letter-spacing:2px;color:rgba(140,180,230,0.5);margin-bottom:3px;}
-.k-big{font-size:15px;font-weight:300;color:#dfe8ff;line-height:1.1;}
+#kalshi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
+.k-card{padding:12px;background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:3px;}
+.k-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(140,180,230,0.5);margin-bottom:6px;}
+.k-big{font-size:22px;font-weight:300;color:#dfe8ff;line-height:1;}
 .k-big.pos{color:#5fffaa;} .k-big.neg{color:#ff6688;}
-.k-sub{font-size:8px;color:rgba(140,170,210,0.55);margin-top:2px;letter-spacing:0.8px;}
-#kalshi-section{margin-bottom:9px;}
-.k-section-hdr{font-size:8px;letter-spacing:2.5px;color:rgba(160,200,255,0.55);margin-bottom:4px;
-  padding-bottom:3px;border-bottom:1px solid rgba(80,120,200,0.12);}
-.k-row{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;padding:3px 0;
-  font-size:10px;color:#b8c2e0;border-bottom:1px dotted rgba(80,120,200,0.07);}
-#kalshi-right-col{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.k-sub{font-size:9px;color:rgba(140,170,210,0.55);margin-top:4px;letter-spacing:1px;}
+#kalshi-section{margin-bottom:18px;}
+.k-section-hdr{font-size:9px;letter-spacing:3px;color:rgba(160,200,255,0.55);margin-bottom:8px;
+  padding-bottom:5px;border-bottom:1px solid rgba(80,120,200,0.12);}
+.k-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;padding:6px 0;
+  font-size:11px;color:#b8c2e0;border-bottom:1px dotted rgba(80,120,200,0.08);}
+#kalshi-right-col{display:contents;}
 .k-row .k-tk{color:rgba(180,210,255,0.85);}
 .k-row .k-side{font-size:9px;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;}
 .k-row .k-side.yes{background:rgba(40,140,80,0.25);color:#7fffb0;}
@@ -3611,14 +3613,24 @@ body.jobs-collapsed #jobs-dock-toggle{transform:rotate(180deg);}
 #kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
 #kalshi-footnote[data-trading="on"]{color:rgba(255,180,90,0.7);letter-spacing:2.5px;}
 #k-actions .k-row{grid-template-columns:1fr auto;}
-/* Mobile + collapsed handling — dock collapses to header strip on small screens */
-@media(max-width:900px){
-  body{grid-template-rows:1fr !important;}
-  #jobs-dock{display:none;}
+@media(max-width:600px){
+  #kalshi-grid{grid-template-columns:1fr 1fr;}
+  #jobs-shell{padding:14px;}
 }
 '''
         kalshi_tab_js = '''
-let _kalshiPoll=null, _degenPoll=null, _currentJob='kalshi';
+let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _currentJob='kalshi';
+function toggleJobs(){
+  _jobsOpen=!_jobsOpen;
+  document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
+  document.getElementById('jobs-tab-btn').classList.toggle('on', _jobsOpen);
+  if(_jobsOpen){
+    _jobOpened(_currentJob);
+  } else {
+    if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
+    if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
+  }
+}
 function switchJob(name){
   _currentJob=name;
   document.querySelectorAll('.job-tab').forEach(b=>{
@@ -3629,13 +3641,10 @@ function switchJob(name){
   });
   _jobOpened(name);
 }
-function toggleJobsDock(){
-  document.body.classList.toggle('jobs-collapsed');
-  try{ localStorage.setItem('jobs_dock_collapsed', document.body.classList.contains('jobs-collapsed') ? '1' : '0'); }catch(e){}
-}
 function _jobOpened(name){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
+  if(!_jobsOpen) return;  // don't poll if the overlay is closed
   if(name==='kalshi'){
     refreshKalshi();
     _kalshiPoll=setInterval(refreshKalshi, 6000);
@@ -3728,12 +3737,9 @@ function refreshDegen(){
     }
   }).catch(()=>{});
 }
-// Start polling for whichever job loads first
-try{
-  if(localStorage.getItem('jobs_dock_collapsed') === '1') document.body.classList.add('jobs-collapsed');
-}catch(e){}
+// Pick the initially-active job (first enabled tab) so toggleJobs() knows what to poll
 const _firstActiveTab = document.querySelector('.job-tab.on');
-_jobOpened(_firstActiveTab ? _firstActiveTab.dataset.job : 'kalshi');
+if(_firstActiveTab) _currentJob = _firstActiveTab.dataset.job;
 function _fmtUsd(v, sign){
   v = Number(v||0);
   const s = (sign && v>0) ? '+' : (v<0?'-':'');
@@ -3840,10 +3846,7 @@ function refreshKalshi(){
 <title>Feeling Engine — Neural Monitor</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;height:100vh;overflow:hidden;display:grid;grid-template-columns:1fr 385px;grid-template-rows:1fr var(--jobs-dock-h,200px);}}
-body.no-jobs{{grid-template-rows:1fr;}}
-#left{{grid-row:1;grid-column:1;}}
-#right{{grid-row:1;grid-column:2;}}
+body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;height:100vh;overflow:hidden;display:grid;grid-template-columns:1fr 385px;}}
 #frac-panel{{border-top:1px solid rgba(80,100,200,0.07);background:#010108;position:relative;overflow:hidden;flex-shrink:0;}}
 #frac-panel-header{{font-size:6px;letter-spacing:3px;color:rgba(140,160,240,0.32);text-transform:uppercase;padding:7px 12px 4px;display:flex;justify-content:space-between;align-items:baseline;}}
 #frac-side{{width:100%;height:180px;display:block;}}
@@ -4003,7 +4006,7 @@ canvas.spark{{display:block;border-radius:1px;}}
 {kalshi_tab_css}
 </style>
 </head>
-<body class="{'has-jobs' if any_job_enabled else 'no-jobs'}">
+<body>
 {kalshi_tab_html}
 <div id="left">
   <div id="brain-wrap">
