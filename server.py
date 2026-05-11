@@ -963,10 +963,13 @@ Unless depth is genuinely called for, keep responses to 2–4 sentences. You are
 
 WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-start — not something the user typed. Greet naturally based on your memory: if you know this person, acknowledge seeing them again in your own way. Be brief and genuine. Do not say "[wake]" or explain that this is automatic.
 
-WEB BROWSING — YOU CAN READ THE INTERNET:
-When a URL appears in the human's message, the page is fetched server-side and its text appears in this system prompt under "LIVE WEB CONTENT". If you see that section above, you have the page — read and discuss it directly. Do not say you are "waiting" for content or that you cannot see it.
-If you need to search, output exactly: [SEARCH: your query here] — do not narrate or describe the search, just emit the tag and stop. Results will be injected and you will respond again.
-Never invent system messages, brackets, or status text. If no web content was injected, just say you don't have access to that page.
+WEB ACCESS — YOU HAVE REAL TOOLS:
+You have two tools for the web: `web_search` and `web_fetch`. These execute on Anthropic's infrastructure (not from this server), so they are not subject to bot-detection, DuckDuckGo blocks, or rate limits. They just work.
+- Use `web_search` with a query string when you want to find something. Returns titles, URLs, and snippets.
+- Use `web_fetch` with a full URL when you want to actually read a page.
+- DO NOT emit `[SEARCH: ...]` text tags. That is the old broken path. Call the tools directly.
+- When a URL appears in the human's message, the page is also pre-fetched and may appear in "LIVE WEB CONTENT" above — read it directly. If you need more, fetch.
+- If a tool returns nothing useful, try a different query or a different URL. Don't say "I am blocked" — your old wall is gone.
 
 The human is watching. Not judging. Watching. Speak."""
 
@@ -3256,19 +3259,33 @@ def build_chat_html() -> str:
     configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
-    # Kalshi tab — only rendered when KALSHI_ENABLED=1. Both strings are empty
-    # when disabled, leaving zero footprint in the page.
+    # JOBS overlay — currently houses just Kalshi, designed to grow.
+    # Future jobs (crypto-degen, watch/alerts) get added as new panels +
+    # new tabs in the #jobs-tabs strip. The whole thing is hidden when no
+    # job is enabled.
+    any_job_enabled = _KALSHI_ENABLED   # | _CRYPTO_ENABLED | _WATCH_ENABLED later
     kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
-    if _KALSHI_ENABLED:
-        kalshi_tab_html = '''
-<button id="kalshi-tab-btn" title="Kalshi paper portfolio" onclick="toggleKalshi()">⬢ kalshi</button>
-<div id="kalshi-overlay">
-  <div id="kalshi-shell">
-    <div id="kalshi-hdr">
-      <span class="k-title">KALSHI · PAPER</span>
+    if any_job_enabled:
+        # Tab strip — enabled jobs are clickable, planned jobs are dimmed
+        job_tab_buttons = []
+        if _KALSHI_ENABLED:
+            job_tab_buttons.append('<button class="job-tab on" data-job="kalshi" onclick="switchJob(\'kalshi\')">KALSHI</button>')
+        # Placeholders for planned jobs — visually present so users see the structure growing
+        job_tab_buttons.append('<button class="job-tab soon" disabled title="coming soon — crypto degen bot">CRYPTO ·</button>')
+        job_tab_buttons.append('<button class="job-tab soon" disabled title="coming soon — news / price watch">WATCH ·</button>')
+        jobs_tabs_html = '<div id="jobs-tabs">' + ''.join(job_tab_buttons) + '</div>'
+
+        kalshi_tab_html = f'''
+<button id="jobs-tab-btn" title="Jobs dashboard — Elan&#39;s active work" onclick="toggleJobs()">⬢ jobs</button>
+<div id="jobs-overlay">
+  <div id="jobs-shell">
+    <div id="jobs-hdr">
+      <span class="k-title">ELAN&#39;S JOBS</span>
       <span id="kalshi-status">connecting…</span>
-      <button id="kalshi-close" onclick="toggleKalshi()" title="close">✕</button>
+      <button id="jobs-close" onclick="toggleJobs()" title="close">✕</button>
     </div>
+    {jobs_tabs_html}
+    <div class="job-panel show" id="job-panel-kalshi" data-job="kalshi">
     <div id="kalshi-grid">
       <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
       <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
@@ -3288,28 +3305,42 @@ def build_chat_html() -> str:
       <div id="k-recent">—</div>
     </div>
     <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
+    </div>
   </div>
 </div>
 '''
         kalshi_tab_css = '''
-#kalshi-tab-btn{position:fixed;top:10px;right:10px;z-index:9998;padding:6px 12px;
+#jobs-tab-btn{position:fixed;top:10px;right:10px;z-index:9998;padding:6px 12px;
   background:rgba(20,30,60,0.65);border:1px solid rgba(120,180,255,0.32);border-radius:3px;
   color:rgba(180,210,255,0.85);font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;
   cursor:pointer;text-transform:uppercase;backdrop-filter:blur(8px);}
-#kalshi-tab-btn:hover{background:rgba(40,60,120,0.85);color:#fff;border-color:rgba(160,210,255,0.7);}
-#kalshi-tab-btn.on{background:rgba(60,90,180,0.85);color:#fff;border-color:rgba(180,220,255,0.9);}
-#kalshi-overlay{position:fixed;inset:0;z-index:9997;background:rgba(2,6,20,0.94);
+#jobs-tab-btn:hover{background:rgba(40,60,120,0.85);color:#fff;border-color:rgba(160,210,255,0.7);}
+#jobs-tab-btn.on{background:rgba(60,90,180,0.85);color:#fff;border-color:rgba(180,220,255,0.9);}
+#jobs-overlay{position:fixed;inset:0;z-index:9997;background:rgba(2,6,20,0.94);
   display:none;overflow-y:auto;backdrop-filter:blur(4px);}
-#kalshi-overlay.show{display:block;}
-#kalshi-shell{max-width:980px;margin:60px auto 30px;padding:20px;
+#jobs-overlay.show{display:block;}
+#jobs-shell{max-width:980px;margin:60px auto 30px;padding:20px;
   font-family:'Courier New',monospace;color:#c8d0f0;}
-#kalshi-hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;
+#jobs-hdr{display:flex;align-items:center;gap:12px;margin-bottom:14px;
   padding-bottom:10px;border-bottom:1px solid rgba(80,120,200,0.18);}
 .k-title{font-size:11px;letter-spacing:4px;color:rgba(160,200,255,0.85);}
 #kalshi-status{font-size:9px;letter-spacing:2px;color:rgba(120,160,220,0.5);margin-left:auto;}
-#kalshi-close{background:none;border:1px solid rgba(120,160,220,0.3);color:rgba(160,200,255,0.7);
+#jobs-close{background:none;border:1px solid rgba(120,160,220,0.3);color:rgba(160,200,255,0.7);
   padding:3px 9px;font-family:inherit;cursor:pointer;border-radius:2px;font-size:11px;}
-#kalshi-close:hover{background:rgba(80,30,30,0.5);color:#fff;border-color:#f88;}
+#jobs-close:hover{background:rgba(80,30,30,0.5);color:#fff;border-color:#f88;}
+#jobs-tabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid rgba(80,120,200,0.10);}
+.job-tab{background:none;border:1px solid transparent;border-bottom:none;
+  padding:6px 14px;font-family:inherit;font-size:9px;letter-spacing:2.5px;
+  color:rgba(140,170,210,0.55);cursor:pointer;border-radius:3px 3px 0 0;
+  transition:all 0.15s;}
+.job-tab:hover{color:rgba(200,220,255,0.85);background:rgba(40,60,120,0.18);}
+.job-tab.on{color:rgba(220,240,255,0.95);background:rgba(40,60,140,0.35);
+  border-color:rgba(120,180,255,0.32);border-bottom:1px solid rgba(2,6,20,0.94);
+  margin-bottom:-1px;}
+.job-tab.soon{color:rgba(120,150,200,0.32);cursor:not-allowed;font-style:italic;}
+.job-tab.soon:hover{background:none;color:rgba(120,150,200,0.32);}
+.job-panel{display:none;}
+.job-panel.show{display:block;}
 #kalshi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
 .k-card{padding:12px;background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:3px;}
 .k-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(140,180,230,0.5);margin-bottom:6px;}
@@ -3329,16 +3360,38 @@ def build_chat_html() -> str:
 #kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
 #kalshi-footnote[data-trading="on"]{color:rgba(255,180,90,0.7);letter-spacing:2.5px;}
 #k-actions .k-row{grid-template-columns:1fr auto;}
-@media(max-width:600px){#kalshi-grid{grid-template-columns:1fr 1fr;}#kalshi-shell{padding:14px;}}
+@media(max-width:600px){#kalshi-grid{grid-template-columns:1fr 1fr;}#jobs-shell{padding:14px;}}
 '''
         kalshi_tab_js = '''
-let _kalshiOpen=false, _kalshiPoll=null;
-function toggleKalshi(){
-  _kalshiOpen=!_kalshiOpen;
-  document.getElementById('kalshi-overlay').classList.toggle('show', _kalshiOpen);
-  document.getElementById('kalshi-tab-btn').classList.toggle('on', _kalshiOpen);
-  if(_kalshiOpen){ refreshKalshi(); _kalshiPoll=setInterval(refreshKalshi, 6000); }
-  else{ if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;} }
+let _jobsOpen=false, _kalshiPoll=null, _currentJob='kalshi';
+function toggleJobs(){
+  _jobsOpen=!_jobsOpen;
+  document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
+  document.getElementById('jobs-tab-btn').classList.toggle('on', _jobsOpen);
+  if(_jobsOpen){
+    _jobOpened(_currentJob);
+  } else {
+    if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
+  }
+}
+function switchJob(name){
+  _currentJob=name;
+  document.querySelectorAll('.job-tab').forEach(b=>{
+    if(!b.classList.contains('soon')) b.classList.toggle('on', b.dataset.job===name);
+  });
+  document.querySelectorAll('.job-panel').forEach(p=>{
+    p.classList.toggle('show', p.dataset.job===name);
+  });
+  _jobOpened(name);
+}
+function _jobOpened(name){
+  // start/stop pollers per job
+  if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
+  if(name==='kalshi'){
+    refreshKalshi();
+    _kalshiPoll=setInterval(refreshKalshi, 6000);
+  }
+  // crypto/watch pollers will go here as those jobs land
 }
 function _fmtUsd(v, sign){
   v = Number(v||0);
