@@ -434,10 +434,14 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
 _AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "600"))
+# Autonomous wakes default to Sonnet — 5x cheaper than Opus, plenty smart for
+# routine "should I do something" decisions. Opus stays reserved for user-
+# initiated conversation where the depth of reflection matters.
+_AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
 _autonomous_mode = False
 _autonomous_timer = None
 _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
-# Set by run_claude_with_feeling each invocation so autonomous wake can reuse them
+# Set by run_claude_with_feeling each invocation so autonomous wake can reuse eyes state
 _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
@@ -476,7 +480,7 @@ def _schedule_autonomous():
             pass
         threading.Thread(
             target=run_claude_with_feeling,
-            args=(AUTONOMOUS_WAKE_PROMPT, _last_model_id, None, None, _last_eyes_open, False),
+            args=(AUTONOMOUS_WAKE_PROMPT, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
             kwargs={"_talking_initiation": True},  # suppresses user bubble; reuse mechanism
             daemon=True
         ).start()
@@ -1360,8 +1364,10 @@ def add_message(role: str, content):
         return  # don't pollute history with empty turns — they 400 future API calls
     with conv_lock:
         conversation.append({"role": role, "content": content})
-        # Keep last 40 turns (20 exchanges)
-        while len(conversation) > 40:
+        # Keep last 20 turns (10 exchanges) — older context lives in Fern + memory_engine.
+        # Smaller history means cheaper input tokens per turn at the cost of a slightly
+        # shorter raw lookback. Long-term continuity is handled by the memory layer.
+        while len(conversation) > 20:
             conversation.pop(0)
         # Anthropic requires messages to start with 'user' role — trim until that's true
         while conversation and conversation[0]["role"] != "user":
@@ -1600,20 +1606,18 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             pass
 
     talking_ctx = TALKING_MODE_SYSTEM_ADDENDUM if _talking_mode else ""
-    try:
-        kalshi_ctx = build_kalshi_context()
-    except Exception:
-        kalshi_ctx = ""
-    try:
-        degen_ctx = build_degen_context()
-    except Exception:
-        degen_ctx = ""
-    try:
-        watch_ctx = build_watch_context()
-    except Exception:
-        watch_ctx = ""
-    # Combine job contexts so prompt-prep code stays simple
-    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx) if c)
+    # Decide which job contexts are relevant THIS TURN to keep prompts lean.
+    # Autonomous wakes (talking_initiation or [wake]) always get the full
+    # picture; user-driven turns only pull in jobs whose keywords appear in
+    # the message. Saves ~800-1200 input tokens on the typical chat turn.
+    _is_autonomous_wake = (user_message or "").startswith("[autonomous time]") or \
+                          (user_message or "").startswith("[wake]") or \
+                          (user_message or "").startswith("[talking_mode]")
+    _active_jobs = _relevant_jobs(user_message, is_autonomous=_is_autonomous_wake)
+    kalshi_ctx = build_kalshi_context() if "kalshi" in _active_jobs else ""
+    degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
+    watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
+    jobs_ctx   = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all job contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -1708,14 +1712,18 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # Tool-use is for the primary model (label A). Web tools are always on for A;
             # Kalshi tools are only added when trading is enabled. Other labels stay text-only
             # so compare/secondary models don't accidentally trade.
+            # Always-on tools: web (cheap + broadly useful) + notebook (small).
+            # Trading tools only ship when the conversation suggests trading is
+            # relevant — saves ~600-900 input tokens of tool definitions on
+            # normal chat turns. Autonomous wakes get all tools available.
             elan_tools = []
             if label == "A":
                 elan_tools = list(WEB_TOOLS)
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
-                if _KALSHI_TRADING_ENABLED:
+                if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
                     elan_tools += KALSHI_TOOLS
-                if _DEGEN_TRADING_ENABLED:
+                if _DEGEN_TRADING_ENABLED and "degen" in _active_jobs:
                     elan_tools += DEGEN_TOOLS
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
@@ -2361,6 +2369,45 @@ NOTEBOOK_TOOLS = [
         },
     },
 ]
+
+
+# ── Lazy job loading ────────────────────────────────────────────────────────
+# Keywords that suggest each job is currently relevant to the conversation.
+# Kept loose — false positives are cheap (extra context); false negatives just
+# mean Elan asks "what job are you talking about?" and the next turn picks it up.
+_KALSHI_KEYWORDS = (
+    "kalshi", "market", "markets", "bet", "wager", "prediction", "ticker",
+    "yes side", "no side", "contract", "election market", "poll", "odds",
+)
+_DEGEN_KEYWORDS = (
+    "crypto", "btc", "eth", "sol", "bitcoin", "ethereum", "solana", "xrp",
+    "doge", "dogecoin", "ada", "cardano", "ltc", "litecoin", "avax", "link",
+    "chainlink", "coin", "leverage", " long ", " short ", "pair ", "/usdt",
+    "degen", "trade", "trading", "stake", "stop loss", "take profit",
+)
+_WATCH_KEYWORDS = (
+    "notebook", "note ", " read ", "reading", "research", "looked up", "look up",
+    "learn", "learning", "studying", "studied", "article", "news",
+    "wrote down", "reflect", "find anything", "found anything", "anything interesting",
+    "discover", "browse", "browsed",
+)
+# Job-keyword aliases — single tokens that strongly signal a job
+def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
+    """Return which jobs' context+tools should ship this turn. Autonomous wakes
+    always get everything. Otherwise keyword-match on the user message."""
+    if is_autonomous:
+        return {"kalshi", "degen", "watch"}
+    msg = (user_message or "").lower()
+    if not msg:
+        return set()
+    out = set()
+    if any(k in msg for k in _KALSHI_KEYWORDS):
+        out.add("kalshi")
+    if any(k in msg for k in _DEGEN_KEYWORDS):
+        out.add("degen")
+    if any(k in msg for k in _WATCH_KEYWORDS):
+        out.add("watch")
+    return out
 
 
 def build_watch_context() -> str:
