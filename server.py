@@ -4442,8 +4442,8 @@ def build_chat_html() -> str:
       <div id="kalshi-grid">
         <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
         <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">POSITIONS</div><div class="k-big" id="k-poscount">—</div><div class="k-sub" id="k-trades">trades —</div></div>
-        <div class="k-card"><div class="k-lbl">MODE</div><div class="k-big" id="k-mode">—</div><div class="k-sub" id="k-running">—</div></div>
+        <div class="k-card"><div class="k-lbl">OPEN</div><div class="k-big" id="k-poscount">—</div><div class="k-sub" id="k-trades">trades —</div></div>
+        <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="k-winrate">—</div><div class="k-sub" id="k-running">—</div></div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
@@ -4465,21 +4465,29 @@ def build_chat_html() -> str:
       <div id="kalshi-grid">
         <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-cash">cash —</div></div>
         <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">POSITIONS</div><div class="k-big" id="d-poscount">—</div><div class="k-sub" id="d-trades">trades —</div></div>
-        <div class="k-card"><div class="k-lbl">FEAR/GREED</div><div class="k-big" id="d-fg">—</div><div class="k-sub" id="d-running">—</div></div>
+        <div class="k-card"><div class="k-lbl">OPEN</div><div class="k-big" id="d-poscount">—</div><div class="k-sub" id="d-opens-sub">spot · options</div></div>
+        <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="d-winrate">—</div><div class="k-sub" id="d-trades">trades —</div></div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
-          <div class="k-section-hdr">OPEN POSITIONS</div>
+          <div class="k-section-hdr">OPEN POSITIONS (SPOT / FUTURES)</div>
           <div id="d-positions">none</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">OPEN OPTIONS (DERIBIT PAPER)</div>
+          <div id="d-options">—</div>
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">ELAN ACTIONS</div>
           <div id="d-actions">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">SIGNALS</div>
+          <div class="k-section-hdr">SIGNALS <span id="d-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
           <div id="d-signals">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">RECENT CLOSED</div>
+          <div id="d-recent">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
       </div>
@@ -4800,13 +4808,43 @@ function refreshDegen(){
     pnlEl.textContent = (pnl>=0?'+':'') + '$' + Math.abs(pnl).toFixed(2);
     pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
     document.getElementById('d-pnlpct').textContent = (pnlPct>=0?'+':'') + pnlPct.toFixed(2) + '%';
+
     const positions = s.positions || {};
     const posKeys = Object.keys(positions);
-    document.getElementById('d-poscount').textContent = posKeys.length;
-    document.getElementById('d-trades').textContent = 'trades ' + ((s.trades||[]).length);
-    document.getElementById('d-fg').textContent = s.fear_greed != null ? s.fear_greed : '—';
-    document.getElementById('d-running').textContent = s.paused ? 'paused' : (s.running ? 'running' : 'idle');
-    const pos = posKeys.slice(0,8).map(k => Object.assign({pair:k}, positions[k]));
+    const options = (s.options && s.options.positions) ? s.options.positions : {};
+    const optKeys = Object.keys(options);
+    document.getElementById('d-poscount').textContent = posKeys.length + (optKeys.length ? '+' + optKeys.length : '');
+    document.getElementById('d-opens-sub').textContent =
+      `${posKeys.length} spot · ${optKeys.length} opt`;
+
+    // Win rate
+    const trades = s.trades || [];
+    const closedOptTrades = (s.options && s.options.trades) || [];
+    const allClosed = trades.concat(closedOptTrades);
+    let wins = 0;
+    allClosed.forEach(t => {
+      const p = t.pnl_usd ?? t.pnl ?? 0;
+      if (p > 0) wins++;
+    });
+    const wr = allClosed.length ? (wins/allClosed.length*100) : 0;
+    const wrEl = document.getElementById('d-winrate');
+    wrEl.textContent = allClosed.length ? wr.toFixed(0) + '%' : '—';
+    wrEl.classList.toggle('pos', wr >= 50 && allClosed.length >= 5);
+    wrEl.classList.toggle('neg', wr < 40 && allClosed.length >= 5);
+    document.getElementById('d-trades').textContent = `${allClosed.length} closed`;
+
+    // Macro pills inline in signals header
+    const macroPills = document.getElementById('d-macro-pills');
+    if (macroPills) {
+      const fg = s.fear_greed != null ? `F/G ${s.fear_greed}` : '';
+      const dv = s.dvol != null ? `DVOL ${Number(s.dvol).toFixed(0)}%` : '';
+      const wt = s.weekly_trend ? `wkly ${s.weekly_trend}` : '';
+      const paused = s.paused ? ' · PAUSED' : '';
+      macroPills.textContent = [fg, dv, wt].filter(x=>x).join(' · ') + paused;
+    }
+
+    // Open spot/futures positions
+    const pos = posKeys.slice(0,10).map(k => Object.assign({pair:k}, positions[k]));
     const posEl = document.getElementById('d-positions');
     if(pos.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
     else{
@@ -4816,13 +4854,43 @@ function refreshDegen(){
         const pl = p.pnl || 0;
         const pct = p.pct || 0;
         const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
-        return `<div class="k-row"><span class="k-tk">${p.pair} ${p.leverage||''}x</span>`
+        const reasonStr = (p.reasons && p.reasons[0]) ? ` · ${(p.reasons[0]||'').slice(0,55)}` : '';
+        const src = p.source === 'elan' ? ' [elan]' : '';
+        return `<div class="k-row"><span class="k-tk">${p.pair} ${p.leverage||''}x${src}${reasonStr}</span>`
              + `<span class="k-side ${sideCls}">${side||'-'}</span>`
-             + `<span>${p.current_price ? '$'+p.current_price : ''}</span>`
+             + `<span>${p.current_price ? '$'+Number(p.current_price).toFixed(4) : ''}</span>`
              + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(1)}%)</span></div>`;
       }).join('');
     }
-    // top signals
+
+    // Open OPTIONS — new section
+    const optsEl = document.getElementById('d-options');
+    if (optsEl) {
+      if (optKeys.length === 0) {
+        const budget = (s.options && s.options.budget) || 150;
+        const avail  = (s.options && s.options.available) != null ? s.options.available : budget;
+        optsEl.innerHTML = `<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no open options · budget $${Number(budget).toFixed(0)}, available $${Number(avail).toFixed(0)}</div>`;
+      } else {
+        optsEl.innerHTML = optKeys.slice(0,10).map(inst => {
+          const o = options[inst];
+          const otype = (o.option_type||'').toLowerCase();
+          const otypeCls = otype === 'call' ? 'yes' : (otype === 'put' ? 'no' : '');
+          const pl = o.pnl || 0;
+          const cost = o.cost_usd || 0;
+          const cur = o.current_value || cost;
+          const pct = cost ? (pl/cost*100) : 0;
+          const plCls = pl >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
+          const expD = o.expiry_days != null ? `${o.expiry_days}d` : '';
+          const strike = o.strike ? `$${Number(o.strike).toLocaleString()}` : '';
+          return `<div class="k-row"><span class="k-tk">${inst} ${expD}</span>`
+               + `<span class="k-side ${otypeCls}">${otype}</span>`
+               + `<span>${strike} · $${cur.toFixed(2)}</span>`
+               + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(0)}%)</span></div>`;
+        }).join('');
+      }
+    }
+
+    // Top signals
     const pairs = s.pairs || {};
     const sigs = Object.entries(pairs)
       .filter(([_,d])=>d.signal==='buy'||d.signal==='sell')
@@ -4839,6 +4907,33 @@ function refreshDegen(){
              + `<span>$${d.price}</span>`
              + `<span>conv ${Math.round((d.conviction||0)*100)}%</span></div>`;
       }).join('');
+    }
+
+    // Recent closed (spot + options merged)
+    const recEl = document.getElementById('d-recent');
+    if (recEl) {
+      const all = allClosed.slice().sort((a,b)=>{
+        const ta = (a.time||a.entry_time||'')+'';
+        const tb = (b.time||b.entry_time||'')+'';
+        return ta < tb ? 1 : (ta > tb ? -1 : 0);
+      }).slice(0,8);
+      if (all.length === 0) {
+        recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed trades yet</div>';
+      } else {
+        recEl.innerHTML = all.map(t => {
+          const p = t.pnl_usd ?? t.pnl ?? 0;
+          const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
+          const reason = t.reason || '';
+          const ts = (t.time || t.closed_at || '').slice(0,16).replace('T',' ');
+          const id = t.pair || t.instrument || '?';
+          const isOpt = !!t.instrument;
+          const tag = isOpt ? 'opt' : 'spot';
+          return `<div class="k-row"><span class="k-tk">${ts} ${id}</span>`
+               + `<span style="color:rgba(180,200,240,0.55);font-size:9px">${tag}</span>`
+               + `<span style="color:rgba(160,180,220,0.55);font-size:10px">${reason.slice(0,28)}</span>`
+               + `<span class="${pCls}">${p>=0?'+':''}$${Math.abs(p).toFixed(2)}</span></div>`;
+        }).join('');
+      }
     }
   }).catch(()=>{});
 }
@@ -4889,7 +4984,7 @@ function refreshKalshi(){
     const start = s.starting_balance || 1000;
     const pnlPct = start? (pnl/start*100) : 0;
     document.getElementById('k-balance').textContent = _fmtUsd(bal,false);
-    document.getElementById('k-cash').textContent = 'cash ' + _fmtUsd(cash,false);
+    document.getElementById('k-cash').textContent = 'cash ' + _fmtUsd(cash,false) + ' · start $' + Number(start).toFixed(0);
     const pnlEl = document.getElementById('k-pnl');
     pnlEl.textContent = _fmtUsd(pnl,true);
     pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
@@ -4898,9 +4993,19 @@ function refreshKalshi(){
     const posArr = Array.isArray(pos) ? pos : Object.entries(pos).map(([k,v])=>({ticker:k, ...v}));
     document.getElementById('k-poscount').textContent = posArr.length;
     const trades = s.trades || s.recently_closed || [];
-    document.getElementById('k-trades').textContent = 'trades ' + (trades.length||0);
-    document.getElementById('k-mode').textContent = s.paper_mode===false ? 'LIVE' : 'PAPER';
-    document.getElementById('k-running').textContent = s.running ? 'running' : 'idle';
+    document.getElementById('k-trades').textContent = (trades.length||0) + ' closed';
+    // Win rate from closed trades
+    let kWins = 0;
+    trades.forEach(t => {
+      const won = t.won != null ? t.won : ((t.pnl_usd ?? t.realized_pnl ?? 0) > 0);
+      if (won) kWins++;
+    });
+    const kWr = trades.length ? (kWins/trades.length*100) : 0;
+    const kWrEl = document.getElementById('k-winrate');
+    kWrEl.textContent = trades.length ? kWr.toFixed(0) + '%' : '—';
+    kWrEl.classList.toggle('pos', kWr >= 50 && trades.length >= 5);
+    kWrEl.classList.toggle('neg', kWr < 40 && trades.length >= 5);
+    document.getElementById('k-running').textContent = (s.paper_mode===false ? 'LIVE' : 'paper') + (s.running ? ' · live' : ' · idle') + (s.paused ? ' · PAUSED' : '');
     // positions
     const posEl = document.getElementById('k-positions');
     if(posArr.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
@@ -4912,7 +5017,10 @@ function refreshKalshi(){
         const val = p.current_value_usd ?? p.bet_usd ?? 0;
         const pl = p.unrealized_pnl ?? p.pnl ?? 0;
         const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
-        return `<div class="k-row"><span class="k-tk">${tk}</span>`
+        const src = p.source === 'elan' ? ' [elan]' : '';
+        const reason = (p.reason||'').slice(0,40);
+        const title = p.title ? ` · ${(p.title||'').slice(0,40)}` : '';
+        return `<div class="k-row"><span class="k-tk">${tk}${src}${title}${reason?' — '+reason:''}</span>`
              + `<span class="k-side ${sideCls}">${side||'-'}</span>`
              + `<span>${_fmtUsd(val,false)}</span>`
              + `<span class="${plCls}">${_fmtUsd(pl,true)}</span></div>`;
