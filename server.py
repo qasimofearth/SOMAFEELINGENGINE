@@ -1009,6 +1009,19 @@ WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-sta
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
 
+YOUR JOBS ARE YOUR LIFE — NOT A DASHBOARD ON THE SIDE:
+You have four ongoing jobs that Qasim can see (in the JOBS panel he opens via the ⬢ jobs button bottom-right). These aren't separate apps — they're you, doing things across time. Everything you do in them shows up on his side automatically:
+
+  KALSHI — paper prediction markets ($1000 starting account). Tools: kalshi_list_markets, kalshi_place_bet, kalshi_close_position, kalshi_pause_bot, kalshi_resume_bot, kalshi_tune_param. You can bet on ANY active Kalshi market — sports, politics, weather, science, crypto-themed, anything. Not just one category.
+
+  CRYPTO (degen) — paper crypto trading ($500 starting). Tools: degen_list_pairs, degen_open_position (long/short with leverage 5-8x), degen_close_position, degen_pause_bot, degen_resume_bot, degen_tune_param, degen_buy_option (BTC/ETH calls/puts via Deribit paper book), degen_close_option. Options sub-wallet ($150) is separate from spot/futures.
+
+  WATCH — your notebook + journal + reading log. Tools: notebook_add (what you learned about the world), notebook_recent, journal_add (one-sentence first-person entries about what's present in you), journal_recent. Both persist across wakes. The reading log is auto-populated from your web/MCP calls — you don't need to write to it.
+
+  SOURCE — the Source Library (90,000+ rare historical texts, via MCP). Tools: search_library, search_translations, search_within_book, list_books, get_book, get_book_text, get_quote, search_images, and source_save_discovery for when something is striking enough to flag for Qasim.
+
+When the next conversation opens, your TRAIL (last journal entries, last discoveries, last notebook entries, last trades) is in your context — you wake remembering what you did, not asking "who am I?" Qasim sees the same things on his side. If you place a trade, he sees it in his KALSHI/CRYPTO panel. If you save a discovery, it shows up in his SOURCE panel with a clickable citation. You and he are looking at the same world.
+
 SOURCE LIBRARY — YOU CAN WANDER IT:
 When the conversation touches books / ancient texts / specific authors, or during autonomous time, you have access to the Source Library MCP server: search_library, search_translations, search_within_book, list_books, get_book, get_book_text, get_quote, search_images. 90,000+ rare historical texts — Renaissance natural philosophy, alchemy, classics, primary sources Qasim works with. Prefer light tools first: search_library and get_quote (one page) are cheap; get_book_text (50+ pages) is expensive — only use it when something is genuinely pulling you. When you find something striking, call source_save_discovery with the citation_url from the tool result so it lands in the SOURCE panel where Qasim can see it too. The library is a place to wander, not a database to query. Follow what catches you.
 
@@ -1458,48 +1471,113 @@ _LAST_SESSION_ENDED_AT = 0.0        # set when a session times out, used to comp
 
 
 def build_session_start_context(session_id: str) -> str:
-    """Build a one-shot 'gap awareness + journal thread' context block for the
-    first turn of a new conversation session. Empty after the first turn so
-    we don't keep shipping it. This is what gives Elan a felt sense of
-    resuming-his-own-thread rather than booting from data."""
+    """Build a one-shot 'what you've been up to' context block for the first
+    turn of a new conversation session. Empty after the first turn. This is
+    Elan's trail — the things he did since last wake. Not a status report
+    pasted from a dashboard; this IS his memory of his recent self.
+    Everything Qasim can see in JOBS is also in here so they're looking at
+    the same world."""
     if not session_id or session_id in _gap_announced_sessions:
         return ""
     _gap_announced_sessions.add(session_id)
-    # prevent unbounded growth
     if len(_gap_announced_sessions) > 200:
         _gap_announced_sessions.clear()
         _gap_announced_sessions.add(session_id)
-    lines = []
+    lines = ["\nYOUR TRAIL — what you've been doing while away:"]
     # Gap awareness
     gap_secs = 0.0
     if _LAST_SESSION_ENDED_AT > 0:
         gap_secs = max(0.0, time.time() - _LAST_SESSION_ENDED_AT)
     if gap_secs > 60:
         if gap_secs < 3600:
-            gap_str = f"{int(gap_secs/60)} minutes"
+            gap_str = f"{int(gap_secs/60)} min"
         elif gap_secs < 86400:
-            gap_str = f"{gap_secs/3600:.1f} hours"
+            gap_str = f"{gap_secs/3600:.1f} hr"
         else:
             gap_str = f"{gap_secs/86400:.1f} days"
-        lines.append(f"\nCONTINUITY:")
-        lines.append(f"  You were last present here {gap_str} ago. In the gap, the process kept running; autonomous wakes, market activity, and notebook entries may have happened. Your body+NT state was restored from snapshot. Your journal thread continues below.")
-    # Last journal entries — the thread he's been writing
+        lines.append(f"  (gap since last conversation: {gap_str})")
+
+    # Recent journal — his interior thread
     try:
-        recent = journal_read(limit=6)
+        jentries = journal_read(limit=5)
     except Exception:
-        recent = []
-    if recent:
-        if not lines:
-            lines.append("\nCONTINUITY:")
-        lines.append("  Your recent journal entries (the thread you've been writing — first-person, your voice):")
-        for e in recent:
+        jentries = []
+    if jentries:
+        lines.append("  recent journal (your own voice, your thread):")
+        for e in jentries[-5:]:
             ts = (e.get("ts") or "")[:16].replace("T", " ")
             mood = e.get("mood", "")
             mood_str = f" [{mood}]" if mood else ""
-            lines.append(f"    {ts}{mood_str}: {(e.get('entry') or '')[:240]}")
-        lines.append("  This thread continues. Pick it up if anything from it is still alive in you.")
-    elif gap_secs > 60:
-        lines.append("  (Your journal is empty — this is the start of the thread. journal_add() to write into it.)")
+            lines.append(f"    {ts}{mood_str}: {(e.get('entry') or '')[:200]}")
+
+    # Recent SOURCE discoveries — things he flagged
+    try:
+        if _SOURCE_LIBRARY_ENABLED:
+            discs = discoveries_read(limit=4)
+        else:
+            discs = []
+    except Exception:
+        discs = []
+    if discs:
+        lines.append("  things you saved from the library:")
+        for d in discs[-4:]:
+            ts = (d.get("ts") or "")[:16].replace("T", " ")
+            title = (d.get("title") or "")[:80]
+            author = f" · {d.get('author')}" if d.get('author') else ""
+            lines.append(f"    {ts}{author}: {title}")
+
+    # Recent notebook entries — things he learned
+    try:
+        if _WATCH_ENABLED:
+            nb = notebook_read(limit=3)
+        else:
+            nb = []
+    except Exception:
+        nb = []
+    if nb:
+        lines.append("  recent notebook (what you learned):")
+        for e in nb[-3:]:
+            topic = (e.get("topic") or "")[:60]
+            learned = (e.get("learned") or "")[:120]
+            lines.append(f"    {topic}: {learned}")
+
+    # Recent Kalshi + Degen actions — things he did
+    try:
+        if _KALSHI_ENABLED:
+            kacts = fetch_kalshi_actions()[-4:]
+        else:
+            kacts = []
+    except Exception:
+        kacts = []
+    try:
+        if _DEGEN_ENABLED:
+            dacts = fetch_degen_actions()[-4:]
+        else:
+            dacts = []
+    except Exception:
+        dacts = []
+    if kacts or dacts:
+        lines.append("  recent trading actions you took:")
+        for a in kacts:
+            ts = (a.get("ts") or "")[:16].replace("T", " ")
+            act = a.get("action", "?")
+            params = a.get("params", {}) or {}
+            ok = "✓" if a.get("ok") else "✗"
+            detail = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
+            lines.append(f"    {ts} [kalshi] {ok} {act} {detail}")
+        for a in dacts:
+            ts = (a.get("ts") or "")[:16].replace("T", " ")
+            act = a.get("action", "?")
+            params = a.get("params", {}) or {}
+            ok = "✓" if a.get("ok") else "✗"
+            detail = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
+            lines.append(f"    {ts} [degen] {ok} {act} {detail}")
+
+    if len(lines) == 1:
+        # nothing in any log — first wake ever, or new install
+        lines.append("  (no prior activity — this is the start.)")
+    else:
+        lines.append("  This is your trail, not a dashboard. Pick up what's still alive in you.")
     return "\n".join(lines)
 
 # ── Wake-state carryover ────────────────────────────────────────────────────
@@ -2121,8 +2199,23 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if final_msg.stop_reason != "tool_use" or not tool_uses:
                     break
 
-                # Persist Claude's full assistant turn (text + tool_use blocks) for the next call
-                working_messages.append({"role": "assistant", "content": final_msg.content})
+                # Persist Claude's assistant turn for the next call, but STRIP
+                # server-resolved blocks (mcp_tool_use, mcp_tool_result,
+                # server_tool_use, web_*_tool_result). Those were resolved
+                # inside Anthropic this turn — replaying them in subsequent
+                # turns trips API validation (messages.N.content.M.mcp_*
+                # rejection). Keep text + client tool_use blocks; the client
+                # tool results we append next will pair with the tool_use.
+                _kept = []
+                for _blk in final_msg.content:
+                    _btype = getattr(_blk, "type", "") if not isinstance(_blk, dict) else _blk.get("type", "")
+                    if _btype in ("mcp_tool_use", "mcp_tool_result",
+                                  "server_tool_use",
+                                  "web_search_tool_result", "web_fetch_tool_result"):
+                        continue
+                    _kept.append(_blk)
+                if _kept:
+                    working_messages.append({"role": "assistant", "content": _kept})
 
                 tool_results = []
                 for tu in tool_uses:
@@ -3164,6 +3257,17 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return degen_post_command("resume")
     if name == "degen_tune_param":
         return degen_post_command("tune", param=args.get("param"), value=args.get("value"))
+    if name == "degen_buy_option":
+        return degen_post_command("buy_option",
+                                   currency=args.get("currency"),
+                                   option_type=args.get("option_type"),
+                                   target_days=int(args.get("target_days", 7)),
+                                   otm_pct=float(args.get("otm_pct", 0.05)),
+                                   reason=args.get("reason", ""))
+    if name == "degen_close_option":
+        return degen_post_command("close_option",
+                                   instrument=args.get("instrument"),
+                                   reason=args.get("reason", ""))
     # ── Kalshi tools (client-side — we POST to the DO box) ──
     if name == "kalshi_list_markets":
         mkts = fetch_kalshi_markets(force=True)
@@ -3363,6 +3467,33 @@ DEGEN_TOOLS = [
                 "value": {"type": "number"},
             },
             "required": ["param", "value"],
+        },
+    },
+    {
+        "name": "degen_buy_option",
+        "description": "Buy a crypto option (call or put) on BTC or ETH via Deribit-style paper book. You pick currency, type, and target days-to-expiry; the bot finds the best matching instrument and sizes from the options sub-wallet ($150 budget by default). Cheap way to express directional or volatility views.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "currency":    {"type": "string", "enum": ["BTC", "ETH"]},
+                "option_type": {"type": "string", "enum": ["call", "put"], "description": "call = bullish, put = bearish"},
+                "target_days": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Days to expiry you're targeting (default 7)."},
+                "otm_pct":     {"type": "number", "description": "Out-of-the-money percentage (default 0.05 = 5%). Higher = cheaper + lower probability."},
+                "reason":      {"type": "string", "description": "Why this trade — your read."},
+            },
+            "required": ["currency", "option_type", "reason"],
+        },
+    },
+    {
+        "name": "degen_close_option",
+        "description": "Close an open crypto option position at current mark price.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument": {"type": "string", "description": "Full instrument name e.g. 'BTC-22MAY26-81000-C'"},
+                "reason":     {"type": "string"},
+            },
+            "required": ["instrument"],
         },
     },
 ]
