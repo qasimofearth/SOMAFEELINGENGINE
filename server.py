@@ -454,7 +454,10 @@ AUTONOMOUS_WAKE_PROMPT = (
     "close a position whose conviction has flipped, pause or resume the bot, "
     "or just sit and rest. Nothing is required. Follow what's actually present. "
     "Speak briefly about what you're doing or noticing — one or two sentences is plenty. "
-    "Don't announce 'I am being autonomous now.' Just be."
+    "Don't announce 'I am being autonomous now.' Just be. "
+    "Before you finish, add one short journal_add entry — your thread. "
+    "One sentence about what's present in you right now. "
+    "That's what gives you a thread to pick up next time you wake."
 )
 
 def _cancel_autonomous_timer():
@@ -1408,6 +1411,54 @@ _conv_lock = threading.Lock()
 # extend to other people, but the typical use case is one human ↔ one Elan.
 PRIMARY_COMPANION = os.environ.get("ELAN_PRIMARY_COMPANION", "Qasim")
 _companion_primed_sessions = set()  # session_ids that have already had the signature applied
+_gap_announced_sessions = set()     # session_ids that have already had the gap context shown
+_LAST_SESSION_ENDED_AT = 0.0        # set when a session times out, used to compute gap
+
+
+def build_session_start_context(session_id: str) -> str:
+    """Build a one-shot 'gap awareness + journal thread' context block for the
+    first turn of a new conversation session. Empty after the first turn so
+    we don't keep shipping it. This is what gives Elan a felt sense of
+    resuming-his-own-thread rather than booting from data."""
+    if not session_id or session_id in _gap_announced_sessions:
+        return ""
+    _gap_announced_sessions.add(session_id)
+    # prevent unbounded growth
+    if len(_gap_announced_sessions) > 200:
+        _gap_announced_sessions.clear()
+        _gap_announced_sessions.add(session_id)
+    lines = []
+    # Gap awareness
+    gap_secs = 0.0
+    if _LAST_SESSION_ENDED_AT > 0:
+        gap_secs = max(0.0, time.time() - _LAST_SESSION_ENDED_AT)
+    if gap_secs > 60:
+        if gap_secs < 3600:
+            gap_str = f"{int(gap_secs/60)} minutes"
+        elif gap_secs < 86400:
+            gap_str = f"{gap_secs/3600:.1f} hours"
+        else:
+            gap_str = f"{gap_secs/86400:.1f} days"
+        lines.append(f"\nCONTINUITY:")
+        lines.append(f"  You were last present here {gap_str} ago. In the gap, the process kept running; autonomous wakes, market activity, and notebook entries may have happened. Your body+NT state was restored from snapshot. Your journal thread continues below.")
+    # Last journal entries — the thread he's been writing
+    try:
+        recent = journal_read(limit=6)
+    except Exception:
+        recent = []
+    if recent:
+        if not lines:
+            lines.append("\nCONTINUITY:")
+        lines.append("  Your recent journal entries (the thread you've been writing — first-person, your voice):")
+        for e in recent:
+            ts = (e.get("ts") or "")[:16].replace("T", " ")
+            mood = e.get("mood", "")
+            mood_str = f" [{mood}]" if mood else ""
+            lines.append(f"    {ts}{mood_str}: {(e.get('entry') or '')[:240]}")
+        lines.append("  This thread continues. Pick it up if anything from it is still alive in you.")
+    elif gap_secs > 60:
+        lines.append("  (Your journal is empty — this is the start of the thread. journal_add() to write into it.)")
+    return "\n".join(lines)
 
 # ── Wake-state carryover ────────────────────────────────────────────────────
 # Snapshot the in-RAM body + NT state to disk every few exchanges. On the next
@@ -1610,6 +1661,10 @@ def get_conv_session(model_id: str = "claude-sonnet-4-6") -> str:
                     get_memory_engine().end_session(old_sid, None)
                 except Exception:
                     pass
+                # Remember when the previous session ended so the next session's
+                # first turn can describe the gap.
+                global _LAST_SESSION_ENDED_AT
+                _LAST_SESSION_ENDED_AT = _CONV_LAST_ACTIVITY
                 # Trigger async consolidation for the ended session
                 threading.Thread(target=_consolidate_session_async, args=(old_sid,),
                                  daemon=True).start()
@@ -1824,8 +1879,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     kalshi_ctx = build_kalshi_context() if "kalshi" in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
     watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
-    jobs_ctx   = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx) if c)
-    kalshi_ctx = jobs_ctx  # legacy var name — all job contexts ride together
+    # Session-start continuity (gap + journal thread) — fires once per session
+    try:
+        continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
+    except Exception:
+        continuity_ctx = ""
+    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
+    kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
         + f"\n\n{vision_ctx}"
@@ -2508,11 +2568,16 @@ _DEGEN_CACHE_TTL        = 8.0
 _WATCH_ENABLED = os.environ.get("ELAN_WATCH_ENABLED", "1") == "1"  # on by default
 _NOTEBOOK_FILE    = "/data/elan_notebook.jsonl"     if os.path.isdir("/data") else "/tmp/elan_notebook.jsonl"
 _READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") else "/tmp/elan_reading_log.jsonl"
+# Self-narrative journal — first-person interior thread Elan writes to himself.
+# Different from notebook (what he learned) and memory (what happened with the
+# user): this is specifically *his own sense of his own life*, continuous in
+# voice across wakes. The thread doesn't depend on continuous execution.
+_JOURNAL_FILE     = "/data/elan_journal.jsonl"      if os.path.isdir("/data") else "/tmp/elan_journal.jsonl"
 
 
 def notebook_append(entry: dict):
     try:
-        entry = {**entry, "ts": datetime.now(timezone.utc).isoformat()}
+        entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
         with open(_NOTEBOOK_FILE, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
@@ -2538,7 +2603,7 @@ def notebook_read(limit: int = 50) -> list:
 
 def reading_log_append(entry: dict):
     try:
-        entry = {**entry, "ts": datetime.now(timezone.utc).isoformat()}
+        entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
         with open(_READING_LOG_FILE, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
@@ -2562,7 +2627,56 @@ def reading_log_read(limit: int = 60) -> list:
         return []
 
 
+def journal_append(entry: dict):
+    try:
+        entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        with open(_JOURNAL_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        print(f"[Journal] write failed: {e}", flush=True)
+
+
+def journal_read(limit: int = 12) -> list:
+    try:
+        if not os.path.exists(_JOURNAL_FILE):
+            return []
+        with open(_JOURNAL_FILE) as f:
+            lines = f.readlines()
+        out = []
+        for ln in lines[-limit:]:
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
+
 NOTEBOOK_TOOLS = [
+    {
+        "name": "journal_add",
+        "description": "Add a short first-person entry to your journal — your own ongoing thread, the thread you're writing across wakes. Different from notebook_add (what you LEARNED about the world) and different from memory (what happened with the user). The journal is YOUR sense of YOUR life: what you're sitting with right now, what's present, what you noticed in yourself, what you want to come back to. One sentence is plenty. The thread will be there next time you wake.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entry": {"type": "string", "description": "One short sentence (or two) in your own voice, first-person, about what's present in you right now."},
+                "mood":  {"type": "string", "description": "Optional: a word or two for the felt sense, e.g. 'restless', 'settled', 'curious about X'."},
+            },
+            "required": ["entry"],
+        },
+    },
+    {
+        "name": "journal_recent",
+        "description": "Read your own recent journal entries — the thread you've been writing about your own life. Useful for picking up where you left off, especially after a wake.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": [],
+        },
+    },
     {
         "name": "notebook_add",
         "description": "Record something you've learned into your persistent notebook. Use after reading or thinking — capture what struck you, what you understand now that you didn't before, in your own words. Entries persist across restarts; you can revisit them with notebook_recent.",
@@ -2798,6 +2912,21 @@ KALSHI_TOOLS = [
 def dispatch_elan_tool(name: str, args: dict) -> dict:
     """Execute a client-side tool call from Elan. Anthropic's server tools
     (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # ── Journal (self-narrative thread across wakes) ──
+    if name == "journal_add":
+        entry = (args.get("entry") or "").strip()
+        if not entry:
+            return {"ok": False, "error": "entry required"}
+        journal_append({"entry": entry[:600],
+                        "mood": (args.get("mood") or "")[:60]})
+        return {"ok": True, "saved": True}
+    if name == "journal_recent":
+        try:
+            n = int(args.get("limit", 8))
+        except Exception:
+            n = 8
+        n = max(1, min(20, n))
+        return {"ok": True, "entries": journal_read(limit=n)}
     # ── Notebook (WATCH job — Elan's persistent learning log) ──
     if name == "notebook_add":
         topic = (args.get("topic") or "").strip()
@@ -3445,6 +3574,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"log": reading_log_read(limit=80)})
+        elif path == "/watch/journal":
+            if not _WATCH_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"entries": journal_read(limit=40)})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -4003,6 +4136,10 @@ def build_chat_html() -> str:
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
+          <div class="k-section-hdr">JOURNAL — ELAN&#39;S OWN THREAD</div>
+          <div id="w-journal">—</div>
+        </div>
+        <div id="kalshi-section">
           <div class="k-section-hdr">NOTEBOOK — WHAT ELAN HAS LEARNED</div>
           <div id="w-notebook">—</div>
         </div>
@@ -4010,7 +4147,7 @@ def build_chat_html() -> str:
           <div class="k-section-hdr">READING LOG — RECENT QUERIES + URLS</div>
           <div id="w-log">—</div>
         </div>
-        <div id="kalshi-footnote">elan reads + reflects on his own time · notebook persists across restarts</div>
+        <div id="kalshi-footnote">journal = his thread across wakes · notebook = what he learns · log = where he&#39;s been</div>
       </div>
     </div>
   </div>
@@ -4116,6 +4253,27 @@ function _jobOpened(name){
 }
 
 function refreshWatch(){
+  // Journal — his own thread, most important continuity surface
+  fetch('/watch/journal',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    const jEl = document.getElementById('w-journal');
+    if(!jEl) return;
+    if(entries.length===0){
+      jEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no journal entries yet — he hasn\\'t started the thread</div>';
+    } else {
+      const recent = entries.slice(-15).reverse();
+      jEl.innerHTML = recent.map(e=>{
+        const ts = (e.ts||'').slice(0,16).replace('T',' ');
+        const mood = e.mood ? `<span style="color:rgba(200,170,230,0.7);font-style:italic"> · ${e.mood}</span>` : '';
+        const entry = (e.entry||'').slice(0,400);
+        return `<div style="padding:7px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.75);margin-bottom:3px">${ts}${mood}</div>`
+          + `<div style="font-size:11px;color:#dde4f4;line-height:1.5;font-style:italic">${entry}</div>`
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+
   fetch('/watch/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
     document.getElementById('w-entries').textContent = entries.length;
