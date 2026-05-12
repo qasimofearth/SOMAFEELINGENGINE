@@ -2019,6 +2019,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # definitions). LAZY-LOADED: only attached when the conversation
             # suggests library use OR this is an autonomous wake. Saves token
             # cost on every non-library turn.
+            #
+            # The Anthropic Python SDK doesn't expose mcp_servers as a direct
+            # kwarg yet, so we pass it through extra_body which the SDK forwards
+            # to the underlying HTTP request body verbatim.
             mcp_servers_arg = []
             if (_SOURCE_LIBRARY_ENABLED and label == "A"
                     and ("source" in _active_jobs or _is_autonomous_wake)):
@@ -2030,15 +2034,17 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if _SOURCE_LIBRARY_API_KEY:
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
-            mcp_kwargs = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else {}
+            extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
             for _turn in range(MAX_TOOL_TURNS):
-                with _get_anthropic_client().messages.stream(
-                    model=model_id, max_tokens=900,
-                    system=system_blocks, messages=working_messages,
-                    extra_headers={"anthropic-beta": _beta_header},
+                stream_kwargs = {
+                    "model": model_id, "max_tokens": 900,
+                    "system": system_blocks, "messages": working_messages,
+                    "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
-                    **mcp_kwargs,
-                ) as stream:
+                }
+                if extra_body_arg is not None:
+                    stream_kwargs["extra_body"] = extra_body_arg
+                with _get_anthropic_client().messages.stream(**stream_kwargs) as stream:
                     for text in stream.text_stream:
                         yield text
                     final_msg = stream.get_final_message()
