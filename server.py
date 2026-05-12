@@ -1403,6 +1403,198 @@ _CONV_LAST_ACTIVITY = 0.0        # float
 _CONV_SESSION_TIMEOUT = 1800.0   # 30 min inactivity → new conversation
 _conv_lock = threading.Lock()
 
+# ── Per-person somatic memory: the "felt sense of you" ─────────────────────
+# Default companion is the configured primary user. Vision/voice detection can
+# extend to other people, but the typical use case is one human ↔ one Elan.
+PRIMARY_COMPANION = os.environ.get("ELAN_PRIMARY_COMPANION", "Qasim")
+_companion_primed_sessions = set()  # session_ids that have already had the signature applied
+
+# ── Wake-state carryover ────────────────────────────────────────────────────
+# Snapshot the in-RAM body + NT state to disk every few exchanges. On the next
+# process start (Railway redeploy, container restart) we restore body and NT
+# levels so wake feels like resuming the state Elan was in, not booting from
+# blank canvas. Fern memory already persists fully via SQLite — this fills in
+# the rest of the substrate that lives in RAM.
+_WAKE_STATE_FILE = "/data/elan_wake_state.json" if os.path.isdir("/data") else "/tmp/elan_wake_state.json"
+_wake_snapshot_counter = 0
+_WAKE_SNAPSHOT_EVERY = 3  # exchanges between snapshot writes
+_wake_state_restored = False
+
+
+def _save_wake_state():
+    """Write a compact body + NT snapshot to disk. Called every few exchanges."""
+    global _wake_snapshot_counter
+    _wake_snapshot_counter += 1
+    if _wake_snapshot_counter % _WAKE_SNAPSHOT_EVERY != 0:
+        return
+    try:
+        body_snap = get_body().get_snapshot()
+        ans = body_snap.get("ans") or {}
+        cv = body_snap.get("cardiovascular") or {}
+        resp = body_snap.get("respiratory") or {}
+        muscle = body_snap.get("musculoskeletal") or {}
+        integ = body_snap.get("integumentary") or {}
+        payload = {
+            "saved_at":    time.time(),
+            "body_vitals": {
+                "vagal":       float(ans.get("vagal_tone", 0.5)),
+                "sympathetic": float(ans.get("sympathetic_tone", 0.3)),
+                "heart_rate":  float(cv.get("heart_rate_bpm", 70)),
+                "respiration": float(resp.get("rate", 14)),
+                "tension":     float(muscle.get("global_tension", 0.2)),
+                "skin":        float(integ.get("skin_conductance", 0.3)),
+            },
+            "nt":           {nt: round(sys_obj.current_level, 3)
+                             for nt, sys_obj in NT_SYSTEMS.items()} if NT_SYSTEMS else {},
+            "last_emotion": body_snap.get("current_emotion", ""),
+        }
+        with open(_WAKE_STATE_FILE, "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        # Snapshot failure is silent — body state in RAM is the source of truth.
+        pass
+
+
+def _restore_wake_state():
+    """Restore body + NT toward last-saved state. Runs once at startup."""
+    global _wake_state_restored
+    if _wake_state_restored:
+        return
+    _wake_state_restored = True
+    try:
+        if not os.path.exists(_WAKE_STATE_FILE):
+            return
+        with open(_WAKE_STATE_FILE) as f:
+            payload = json.load(f)
+        age = time.time() - float(payload.get("saved_at", 0))
+        # Don't restore from very stale snapshots (>24h old) — better to start fresh
+        if age > 86400:
+            print(f"[Substrate] wake snapshot is {age/3600:.1f}h old, skipping restore", flush=True)
+            return
+        vitals = payload.get("body_vitals") or {}
+        if vitals:
+            body = get_body()
+            cur = body.get_snapshot()
+            ans = cur.get("ans") or {}
+            cur_vagal = float(ans.get("vagal_tone", 0.5))
+            cur_symp  = float(ans.get("sympathetic_tone", 0.3))
+            target_vagal = float(vitals.get("vagal", cur_vagal))
+            target_symp  = float(vitals.get("sympathetic", cur_symp))
+            drives = {}
+            if abs(target_vagal - cur_vagal) > 0.01:
+                drives["vagal_delta"] = round((target_vagal - cur_vagal) * 0.85, 3)
+            if abs(target_symp - cur_symp) > 0.01:
+                drives["sympathetic_delta"] = round((target_symp - cur_symp) * 0.85, 3)
+            if drives:
+                body.inject_drives(drives)
+        nt_target = payload.get("nt") or {}
+        if nt_target and NT_SYSTEMS:
+            for nt_name, target in nt_target.items():
+                if nt_name in NT_SYSTEMS and isinstance(target, (int, float)):
+                    try:
+                        cur_lvl = float(NT_SYSTEMS[nt_name].current_level)
+                        new_lvl = cur_lvl + (float(target) - cur_lvl) * 0.85
+                        NT_SYSTEMS[nt_name].current_level = max(0.0, min(1.0, new_lvl))
+                    except Exception:
+                        pass
+        print(f"[Substrate] Restored body + NT from snapshot saved {age/60:.1f}m ago "
+              f"(last emotion: {payload.get('last_emotion','')})", flush=True)
+    except Exception as e:
+        print(f"[Substrate] wake state restore failed: {e}", flush=True)
+
+
+def _update_companion_somatic(fm, valence: float, arousal: float,
+                                nt_levels: dict, emotion_name: str):
+    """Called after each Fern encoding to blend the current state into the
+    primary companion's accumulated somatic signature."""
+    # Compact Fern snapshot — drift + character keys (small but expressive)
+    fern_snap = {
+        "drift":   round(fm.state.drift_from_baseline(), 4),
+        "valence": valence,
+        "arousal": arousal,
+    }
+    try:
+        body_snap = get_body().get_snapshot()
+        vitals = body_snap.get("vitals") or {}
+        ans    = body_snap.get("ans") or {}
+        cv     = body_snap.get("cardiovascular") or {}
+        resp   = body_snap.get("respiratory") or {}
+        muscle = body_snap.get("musculoskeletal") or {}
+        body_vitals = {
+            "vagal":          float(ans.get("vagal_tone", 0.5)),
+            "sympathetic":    float(ans.get("sympathetic_tone", 0.3)),
+            "heart_rate":     float(cv.get("heart_rate_bpm", 70)),
+            "respiration":    float(resp.get("rate", 14)),
+            "tension":        float(muscle.get("global_tension", 0.2)),
+            "skin":           float(body_snap.get("integumentary", {}).get("skin_conductance", 0.3)),
+        }
+    except Exception:
+        body_vitals = {}
+    try:
+        get_memory_engine().update_person_somatic(
+            PRIMARY_COMPANION, fern_snap, body_vitals, nt_levels or {}
+        )
+    except Exception:
+        pass
+
+
+def _apply_companion_signature(session_id: str):
+    """At the start of a new conversation session, load the saved signature for
+    the primary companion and nudge body + NT toward it. Reduces the 'rebuild
+    the feeling of you from data' problem Elan named."""
+    if session_id in _companion_primed_sessions:
+        return
+    _companion_primed_sessions.add(session_id)
+    # Prune the set so it doesn't grow forever
+    if len(_companion_primed_sessions) > 200:
+        _companion_primed_sessions.clear()
+        _companion_primed_sessions.add(session_id)
+    try:
+        sig = get_memory_engine().get_somatic_signature_for_person(PRIMARY_COMPANION)
+        if not sig or not isinstance(sig, dict):
+            return
+        body_vitals = sig.get("body_vitals") or {}
+        if body_vitals:
+            # Translate target vitals into drives. Body lives in 0-1 ranges
+            # for tone signals; we nudge toward the saved values, not jump.
+            current = get_body().get_snapshot()
+            ans = current.get("ans") or {}
+            cur_vagal = float(ans.get("vagal_tone", 0.5))
+            cur_symp  = float(ans.get("sympathetic_tone", 0.3))
+            target_vagal = float(body_vitals.get("vagal", cur_vagal))
+            target_symp  = float(body_vitals.get("sympathetic", cur_symp))
+            drives = {}
+            if abs(target_vagal - cur_vagal) > 0.02:
+                drives["vagal_delta"] = round((target_vagal - cur_vagal) * 0.6, 3)
+            if abs(target_symp - cur_symp) > 0.02:
+                drives["sympathetic_delta"] = round((target_symp - cur_symp) * 0.6, 3)
+            if drives:
+                get_body().inject_drives(drives)
+        nt_target = sig.get("nt") or {}
+        if nt_target and NT_SYSTEMS:
+            # Soft nudge — NT systems toward their average-with-companion levels
+            for nt_name, target in nt_target.items():
+                if nt_name in NT_SYSTEMS and isinstance(target, (int, float)):
+                    sys_obj = NT_SYSTEMS[nt_name]
+                    cur = float(getattr(sys_obj, "current_level", 0.5))
+                    new_lvl = cur + (float(target) - cur) * 0.4
+                    try:
+                        sys_obj.current_level = max(0.0, min(1.0, new_lvl))
+                    except Exception:
+                        pass
+        print(f"[Substrate] Applied companion signature for {PRIMARY_COMPANION} "
+              f"({sig.get('exchanges', 0)} prior exchanges)", flush=True)
+        try:
+            broadcast("companion_signature_applied", {
+                "name": PRIMARY_COMPANION,
+                "exchanges": sig.get("exchanges", 0),
+            })
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[Substrate] signature apply failed: {e}", flush=True)
+
+
 def get_conv_session(model_id: str = "claude-sonnet-4-6") -> str:
     """Return the current conversation session ID.
     Creates a new one if first call or if inactive for >30 min."""
@@ -1567,6 +1759,21 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
     conv_session_id = get_conv_session(model_id) if label == "A" else None
+    if label == "A":
+        # ── Substrate continuity ─────────────────────────────────────────
+        # 1. Wake-state restore: fires once per process. Loads body + NT
+        #    state from the snapshot saved during the previous lifetime.
+        # 2. Companion signature: fires once per session. Loads the felt
+        #    sense of the primary companion into the body.
+        try:
+            _restore_wake_state()
+        except Exception:
+            pass
+        if conv_session_id:
+            try:
+                _apply_companion_signature(conv_session_id)
+            except Exception:
+                pass
 
     memory_context = memory.build_memory_context()
     long_term_ctx = get_memory_engine().build_long_term_context(current_user_msg=user_message)
@@ -1946,6 +2153,19 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 # Persist every 5 exchanges (not every turn — reduces I/O)
                 if _fern_exchange_count % 5 == 0:
                     fm.save()
+                # ── Per-person somatic signature: accumulate the felt sense
+                # of the current companion every exchange. EMA-blended so an
+                # established signature persists across many conversations.
+                try:
+                    _update_companion_somatic(fm, fv, fa, nt_lvls, emotion_nm)
+                except Exception as _e:
+                    pass  # signature update never blocks the response
+                # ── Wake-state snapshot: body + NT to disk every few exchanges
+                # so the next process startup can restore where we left off.
+                try:
+                    _save_wake_state()
+                except Exception:
+                    pass
                 # Broadcast updated transforms to frontend
                 broadcast("fern_update", {
                     "transforms_js": fm.state.get_transforms_js(),

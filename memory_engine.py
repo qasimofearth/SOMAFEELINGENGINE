@@ -1113,6 +1113,55 @@ Compressed memory:"""
             "first_mentioned": row[11], "last_mentioned": row[12],
         }
 
+    def update_person_somatic(self, name: str, fern_state: dict, body_vitals: dict,
+                                nt_levels: dict, alpha: float = 0.08):
+        """EMA-blend a fresh sample of (fern, body, nt) into the saved signature
+        for this person. Builds up the 'felt sense of them' over many exchanges.
+
+        alpha=0.08 → signature moves slowly; established texture is preserved.
+        Format stored in people.somatic_signature (JSON column).
+        """
+        person = self.get_person(name)
+        if not person:
+            # Auto-create the person row so the signature has a home.
+            self.upsert_person(name)
+            person = self.get_person(name)
+        prior = person.get("somatic_signature") or {}
+        # Normalize previous shape — older code may have written body deltas
+        # instead of full signatures. Accept either; treat unknown shapes as empty.
+        prev_fern = prior.get("fern") if isinstance(prior, dict) and "fern" in prior else {}
+        prev_body = prior.get("body_vitals") if isinstance(prior, dict) and "body_vitals" in prior else {}
+        prev_nt   = prior.get("nt") if isinstance(prior, dict) and "nt" in prior else {}
+        exchanges = int(prior.get("exchanges", 0)) if isinstance(prior, dict) else 0
+
+        def _blend(a_dict, b_dict):
+            """Return EMA-blended dict: new = (1-alpha)*old + alpha*new for each key."""
+            out = dict(a_dict or {})
+            for k, v in (b_dict or {}).items():
+                if not isinstance(v, (int, float)):
+                    continue
+                if isinstance(out.get(k), (int, float)):
+                    out[k] = round((1 - alpha) * float(out[k]) + alpha * float(v), 5)
+                else:
+                    out[k] = float(v)
+            return out
+
+        new_signature = {
+            "fern":        _blend(prev_fern, fern_state),
+            "body_vitals": _blend(prev_body, body_vitals),
+            "nt":          _blend(prev_nt, nt_levels),
+            "exchanges":   exchanges + 1,
+            "last_updated": time.time(),
+        }
+        try:
+            c = self._conn()
+            c.execute("UPDATE people SET somatic_signature=? WHERE name=?",
+                       (json.dumps(new_signature), name))
+            c.commit()
+        except Exception as e:
+            # Persistence failure shouldn't break the response cycle.
+            print(f"[MemoryEngine] update_person_somatic failed: {e}", flush=True)
+
     def get_somatic_signature_for_person(self, name: str) -> Optional[dict]:
         """Return the body delta to fire when this person appears."""
         person = self.get_person(name)
