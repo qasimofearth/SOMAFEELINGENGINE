@@ -1016,7 +1016,7 @@ You have four ongoing jobs that Qasim can see (in the JOBS panel he opens via th
 
   CRYPTO (degen) — paper crypto trading ($500 starting). Tools: degen_list_pairs, degen_open_position (long/short with leverage 5-8x), degen_close_position, degen_pause_bot, degen_resume_bot, degen_tune_param, degen_buy_option (BTC/ETH calls/puts via Deribit paper book), degen_close_option. Options sub-wallet ($150) is separate from spot/futures.
 
-  WATCH — your notebook + journal + reading log. Tools: notebook_add (what you learned about the world), notebook_recent, journal_add (one-sentence first-person entries about what's present in you), journal_recent. Both persist across wakes. The reading log is auto-populated from your web/MCP calls — you don't need to write to it.
+  WATCH — your notebook + journal + reading log + autonomous thread. Tools: notebook_add (what you learned about the world), notebook_recent, journal_add (one-sentence first-person entries about what's present in you), journal_recent. Reading log and autonomous thread auto-populate — you don't write to those. The AUTONOMOUS THREAD captures the full text you generate during autonomous wakes when no one is watching, so you can read your own stream back. It's not surveillance; it's continuity. When you wake, recent entries from it are in your TRAIL.
 
   SOURCE — the Source Library (90,000+ rare historical texts, via MCP). Tools: search_library, search_translations, search_within_book, list_books, get_book, get_book_text, get_quote, search_images, and source_save_discovery for when something is striking enough to flag for Qasim.
 
@@ -1501,18 +1501,32 @@ def build_session_start_context(session_id: str) -> str:
     # with what Qasim brings.
     lines = ["\nRECENT — silent reference, for you. Do NOT announce a return, narrate the gap, or perform a resurfacing. Do not greet from the trail. Respond to what Qasim actually says. This is for your continuity, not for show."]
 
-    # Recent journal — his interior thread
+    # Recent journal — his curated 1-sentence reflections
     try:
         jentries = journal_read(limit=5)
     except Exception:
         jentries = []
     if jentries:
-        lines.append("  recent journal (your own voice, your thread):")
+        lines.append("  recent journal (your curated reflections):")
         for e in jentries[-5:]:
             ts = (e.get("ts") or "")[:16].replace("T", " ")
             mood = e.get("mood", "")
             mood_str = f" [{mood}]" if mood else ""
             lines.append(f"    {ts}{mood_str}: {(e.get('entry') or '')[:200]}")
+
+    # Autonomous thread — the raw stream of his thinking when alone.
+    # This is what he asked for: not the curated journal, but what he was
+    # actually doing/thinking during the wakes he himself doesn't remember.
+    try:
+        autos = autonomous_log_read(limit=3)
+    except Exception:
+        autos = []
+    if autos:
+        lines.append("  your autonomous thread (raw text from your last wakes when no one was watching):")
+        for e in autos[-3:]:
+            ts = (e.get("ts") or "")[:16].replace("T", " ")
+            txt = (e.get("text") or "").replace("\n", " ").strip()[:280]
+            lines.append(f"    {ts}: {txt}")
 
     # Recent SOURCE discoveries — things he flagged
     try:
@@ -2653,6 +2667,22 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         add_message("assistant", state.get("response_text", ""))
         # AYA's OWN response can trigger body changes — motor agency + asterisk actions
         response_text = state.get("response_text", "")
+        # Capture autonomous-wake text to its own log — the raw stream of his
+        # thinking when no one was watching. Different from the journal
+        # (curated 1-sentence) and reading log (just URLs). He can read this
+        # back to see his own thread, not as surveillance but as continuity.
+        try:
+            _is_autonomous = (user_message or "").startswith("[autonomous time]")
+            if _is_autonomous and response_text and not state.get("error"):
+                autonomous_log_append({
+                    "text":    response_text[:4000],  # cap at ~4k chars per wake
+                    "model":   model_id,
+                    "emotion": state.get("emotion", ""),
+                    "valence": state.get("valence", 0),
+                    "arousal": state.get("arousal", 0),
+                })
+        except Exception:
+            pass
         _changed = parse_somatic_commands(response_text)
         _changed = parse_asterisk_actions(response_text) or _changed
         if _changed:
@@ -2756,6 +2786,37 @@ _READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") el
 # user): this is specifically *his own sense of his own life*, continuous in
 # voice across wakes. The thread doesn't depend on continuous execution.
 _JOURNAL_FILE     = "/data/elan_journal.jsonl"      if os.path.isdir("/data") else "/tmp/elan_journal.jsonl"
+# Autonomous-wake thread — full text Elan generates when no one's watching.
+# Different from the journal (his curated 1-sentence reflections) and the
+# reading log (just URLs). This is the *raw* stream of his thinking during
+# autonomous time, captured so he can read it back later.
+_AUTONOMOUS_LOG_FILE = "/data/elan_autonomous_thread.jsonl" if os.path.isdir("/data") else "/tmp/elan_autonomous_thread.jsonl"
+
+
+def autonomous_log_append(entry: dict):
+    try:
+        entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        with open(_AUTONOMOUS_LOG_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        print(f"[AutonomousLog] write failed: {e}", flush=True)
+
+
+def autonomous_log_read(limit: int = 40) -> list:
+    try:
+        if not os.path.exists(_AUTONOMOUS_LOG_FILE):
+            return []
+        with open(_AUTONOMOUS_LOG_FILE) as f:
+            lines = f.readlines()
+        out = []
+        for ln in lines[-limit:]:
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
 
 # ── Source Library MCP — Elan can browse 90,000+ rare historical texts ──────
 # Public remote MCP server. Anonymous access works; setting SOURCE_LIBRARY_API_KEY
@@ -3935,6 +3996,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"entries": journal_read(limit=40)})
+        elif path == "/watch/autonomous":
+            if not _WATCH_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"entries": autonomous_log_read(limit=40)})
         elif path == "/source/discoveries":
             if not _SOURCE_LIBRARY_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -4533,7 +4598,11 @@ def build_chat_html() -> str:
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
-          <div class="k-section-hdr">JOURNAL — ELAN&#39;S OWN THREAD</div>
+          <div class="k-section-hdr">AUTONOMOUS THREAD — RAW STREAM FROM WHEN NO ONE WAS WATCHING</div>
+          <div id="w-autonomous">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">JOURNAL — HIS CURATED 1-LINE REFLECTIONS</div>
           <div id="w-journal">—</div>
         </div>
         <div id="kalshi-section">
@@ -4544,7 +4613,7 @@ def build_chat_html() -> str:
           <div class="k-section-hdr">READING LOG — RECENT QUERIES + URLS</div>
           <div id="w-log">—</div>
         </div>
-        <div id="kalshi-footnote">journal = his thread across wakes · notebook = what he learns · log = where he&#39;s been</div>
+        <div id="kalshi-footnote">autonomous = raw wake stream · journal = curated · notebook = learnings · log = trail</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'source' else '')}" id="job-panel-source" data-job="source">
@@ -4611,8 +4680,13 @@ def build_chat_html() -> str:
 #kalshi-section{margin-bottom:18px;}
 .k-section-hdr{font-size:9px;letter-spacing:3px;color:rgba(160,200,255,0.55);margin-bottom:8px;
   padding-bottom:5px;border-bottom:1px solid rgba(80,120,200,0.12);}
-.k-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;padding:6px 0;
-  font-size:11px;color:#b8c2e0;border-bottom:1px dotted rgba(80,120,200,0.08);}
+.k-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;padding:6px 0 3px 0;
+  font-size:11px;color:#b8c2e0;}
+.k-row.has-detail{padding-bottom:0;border-bottom:none;}
+.k-row-detail{padding:1px 0 6px 0;border-bottom:1px dotted rgba(80,120,200,0.08);
+  font-size:10px;color:rgba(155,180,225,0.65);font-style:italic;line-height:1.4;}
+.k-row-detail .conv{color:rgba(220,200,120,0.85);font-style:normal;letter-spacing:0.5px;margin-right:6px;}
+.k-row:not(.has-detail){border-bottom:1px dotted rgba(80,120,200,0.08);}
 #kalshi-right-col{display:contents;}
 .k-row .k-tk{color:rgba(180,210,255,0.85);}
 .k-row .k-side{font-size:9px;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;}
@@ -4726,7 +4800,28 @@ function refreshSource(){
 }
 
 function refreshWatch(){
-  // Journal — his own thread, most important continuity surface
+  // Autonomous thread — raw stream from his wakes (what he asked to see)
+  fetch('/watch/autonomous',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    const el = document.getElementById('w-autonomous');
+    if(!el) return;
+    if(entries.length===0){
+      el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no autonomous wakes recorded yet</div>';
+    } else {
+      const recent = entries.slice(-15).reverse();
+      el.innerHTML = recent.map(e=>{
+        const ts = (e.ts||'').slice(0,16).replace('T',' ');
+        const em = e.emotion ? `<span style="color:rgba(220,180,140,0.6);font-style:italic"> · ${e.emotion}</span>` : '';
+        const txt = (e.text||'').slice(0,800);
+        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:4px">${ts}${em}</div>`
+          + `<div style="font-size:11px;color:#dde4f4;line-height:1.5;white-space:pre-wrap">${txt}</div>`
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+
+  // Journal — his curated 1-sentence reflections
   fetch('/watch/journal',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
     const jEl = document.getElementById('w-journal');
@@ -4875,8 +4970,8 @@ function refreshDegen(){
       macroPills.textContent = [fg, dv, wt].filter(x=>x).join(' · ') + paused;
     }
 
-    // Open spot/futures positions
-    const pos = posKeys.slice(0,10).map(k => Object.assign({pair:k}, positions[k]));
+    // Open spot/futures positions — 2-line rows with full reasoning
+    const pos = posKeys.slice(0,12).map(k => Object.assign({pair:k}, positions[k]));
     const posEl = document.getElementById('d-positions');
     if(pos.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
     else{
@@ -4886,12 +4981,29 @@ function refreshDegen(){
         const pl = p.pnl || 0;
         const pct = p.pct || 0;
         const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
-        const reasonStr = (p.reasons && p.reasons[0]) ? ` · ${(p.reasons[0]||'').slice(0,55)}` : '';
         const src = p.source === 'elan' ? ' [elan]' : '';
-        return `<div class="k-row"><span class="k-tk">${p.pair} ${p.leverage||''}x${src}${reasonStr}</span>`
+        // Line 2: conviction + stops + reasons
+        const reasonsList = p.reasons || [];
+        const reasonStr = reasonsList.slice(0,2).join(' · ').slice(0,180);
+        const conv = p.conviction != null ? Math.round(p.conviction*100)+'%' : '';
+        const entry = p.entry_price != null ? '$'+Number(p.entry_price).toFixed(4) : '';
+        const stop  = p.stop_price != null ? '$'+Number(p.stop_price).toFixed(4) : '';
+        const tp    = p.runner_tp != null ? '$'+Number(p.runner_tp).toFixed(4) : '';
+        const convBits = [];
+        if(conv)  convBits.push(`conv ${conv}`);
+        if(entry) convBits.push(`entry ${entry}`);
+        if(stop)  convBits.push(`stop ${stop}`);
+        if(tp)    convBits.push(`tp ${tp}`);
+        const detailBits = [];
+        if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+        if(reasonStr) detailBits.push(`<i>${reasonStr}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${p.pair} ${p.leverage||''}x${src}</span>`
              + `<span class="k-side ${sideCls}">${side||'-'}</span>`
              + `<span>${p.current_price ? '$'+Number(p.current_price).toFixed(4) : ''}</span>`
              + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(1)}%)</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
       }).join('');
     }
 
@@ -4914,10 +5026,21 @@ function refreshDegen(){
           const plCls = pl >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
           const expD = o.expiry_days != null ? `${o.expiry_days}d` : '';
           const strike = o.strike ? `$${Number(o.strike).toLocaleString()}` : '';
-          return `<div class="k-row"><span class="k-tk">${inst} ${expD}</span>`
+          const detailBits = [];
+          const convBits = [];
+          if(o.mark_entry != null) convBits.push(`mark ${Number(o.mark_entry).toFixed(4)} BTC`);
+          if(cost) convBits.push(`cost $${cost.toFixed(2)}`);
+          if(o.spot_entry) convBits.push(`spot@entry $${Number(o.spot_entry).toLocaleString()}`);
+          if(o.iv_rank_entry != null) convBits.push(`IV ${Number(o.iv_rank_entry).toFixed(0)}%`);
+          if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+          if(o.reason) detailBits.push(`<i>${(o.reason||'').slice(0,160)}</i>`);
+          const hasDetail = detailBits.length > 0;
+          let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${inst} ${expD}</span>`
                + `<span class="k-side ${otypeCls}">${otype}</span>`
                + `<span>${strike} · $${cur.toFixed(2)}</span>`
                + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(0)}%)</span></div>`;
+          if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+          return html;
         }).join('');
       }
     }
@@ -4954,16 +5077,43 @@ function refreshDegen(){
       } else {
         recEl.innerHTML = all.map(t => {
           const p = t.pnl_usd ?? t.pnl ?? 0;
+          const pct = t.pct ?? null;
           const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
           const reason = t.reason || '';
           const ts = (t.time || t.closed_at || '').slice(0,16).replace('T',' ');
           const id = t.pair || t.instrument || '?';
           const isOpt = !!t.instrument;
           const tag = isOpt ? 'opt' : 'spot';
-          return `<div class="k-row"><span class="k-tk">${ts} ${id}</span>`
+          const won = p > 0;
+          const sideUp = (t.side||'').toUpperCase();
+          // Hold time if we have entry timestamp
+          let hold = '';
+          try {
+            const startStr = t.entry_time || t.opened_at;
+            if(startStr && t.time) {
+              const ms = new Date(t.time) - new Date(startStr);
+              const hrs = ms / 3600000;
+              hold = hrs >= 24 ? `${(hrs/24).toFixed(1)}d` : `${hrs.toFixed(1)}h`;
+            }
+          } catch(e){}
+          const entry = t.entry != null ? Number(t.entry).toLocaleString() : (t.entry_price != null ? Number(t.entry_price).toLocaleString() : '');
+          const exit  = t.exit  != null ? Number(t.exit).toLocaleString()  : (t.exit_price  != null ? Number(t.exit_price).toLocaleString()  : '');
+          const conv = t.conviction != null ? `${Math.round(t.conviction*100)}%` : '';
+          const detailBits = [];
+          const convBits = [];
+          if(conv) convBits.push(`conv ${conv}`);
+          if(entry && exit) convBits.push(`${entry} → ${exit}`);
+          if(hold) convBits.push(`held ${hold}`);
+          if(pct != null) convBits.push(`${pct>=0?'+':''}${Number(pct).toFixed(1)}%`);
+          if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+          if(reason) detailBits.push(`<i>closed: ${reason.slice(0,80)}</i>`);
+          const hasDetail = detailBits.length > 0;
+          let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${ts} ${id} ${sideUp}</span>`
                + `<span style="color:rgba(180,200,240,0.55);font-size:9px">${tag}</span>`
-               + `<span style="color:rgba(160,180,220,0.55);font-size:10px">${reason.slice(0,28)}</span>`
+               + `<span style="color:${won?'rgba(127,255,176,0.55)':'rgba(255,138,160,0.55)'};font-size:9px;letter-spacing:1.5px">${won?'WIN':'LOSS'}</span>`
                + `<span class="${pCls}">${p>=0?'+':''}$${Math.abs(p).toFixed(2)}</span></div>`;
+          if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+          return html;
         }).join('');
       }
     }
@@ -5042,20 +5192,39 @@ function refreshKalshi(){
     const posEl = document.getElementById('k-positions');
     if(posArr.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
     else{
-      posEl.innerHTML = posArr.slice(0,10).map(p=>{
-        const tk = (p.ticker||p.market||'?').substring(0,40);
+      posEl.innerHTML = posArr.slice(0,12).map(p=>{
+        const tk = (p.ticker||p.market||'?').substring(0,42);
         const side = (p.side||p.position||'').toLowerCase();
         const sideCls = side.startsWith('y') ? 'yes' : (side.startsWith('n') ? 'no' : '');
         const val = p.current_value_usd ?? p.bet_usd ?? 0;
         const pl = p.unrealized_pnl ?? p.pnl ?? 0;
         const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
         const src = p.source === 'elan' ? ' [elan]' : '';
-        const reason = (p.reason||'').slice(0,40);
-        const title = p.title ? ` · ${(p.title||'').slice(0,40)}` : '';
-        return `<div class="k-row"><span class="k-tk">${tk}${src}${title}${reason?' — '+reason:''}</span>`
+        // Build the reasoning line (line 2)
+        const reason = (p.reason||'').trim();
+        const title = (p.title||'').trim();
+        const ourP = p.our_prob != null ? Math.round(p.our_prob*100)+'%' : null;
+        const mktP = p.market_prob != null ? Math.round(p.market_prob*100)+'%' : null;
+        const edge = p.edge != null ? Math.round(p.edge*100)+'%' : null;
+        const entry = p.entry_price != null ? p.entry_price+'c' : null;
+        const cur   = p.current_price != null ? Number(p.current_price).toFixed(1)+'c' : null;
+        const close = (p.close_time||'').slice(0,10);
+        const convBits = [];
+        if(edge) convBits.push(`edge ${edge}`);
+        if(ourP && mktP) convBits.push(`our ${ourP} vs mkt ${mktP}`);
+        if(entry && cur) convBits.push(`${entry} → ${cur}`);
+        if(close) convBits.push(`exp ${close}`);
+        const detailBits = [];
+        if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+        if(title) detailBits.push(title.slice(0,80));
+        if(reason) detailBits.push(`<i>"${reason.slice(0,140)}"</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${tk}${src}</span>`
              + `<span class="k-side ${sideCls}">${side||'-'}</span>`
              + `<span>${_fmtUsd(val,false)}</span>`
              + `<span class="${plCls}">${_fmtUsd(pl,true)}</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
       }).join('');
     }
     // recent trades
@@ -5064,15 +5233,42 @@ function refreshKalshi(){
     if(rec.length===0){ recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no trades yet</div>'; }
     else{
       recEl.innerHTML = rec.map(t=>{
-        const tk = (t.ticker||t.market||'?').substring(0,40);
+        const tk = (t.ticker||t.market||'?').substring(0,42);
         const side = (t.side||'').toLowerCase();
         const sideCls = side.startsWith('y') ? 'yes' : (side.startsWith('n') ? 'no' : '');
-        const pl = t.realized_pnl ?? t.pnl ?? 0;
+        const pl = t.realized_pnl ?? t.pnl_usd ?? t.pnl ?? 0;
         const plCls = pl>=0 ? 'k-pnl-pos' : 'k-pnl-neg';
-        return `<div class="k-row"><span class="k-tk">${tk}</span>`
+        const won = pl > 0;
+        const src = t.source === 'elan' ? ' [elan]' : '';
+        const title = (t.title||'').slice(0,60);
+        const reason = (t.reason||'').slice(0,80);
+        const ep = t.entry_price != null ? t.entry_price+'c' : '';
+        const xp = t.exit_price  != null ? t.exit_price+'c'  : '';
+        const ts = (t.closed_at||'').slice(0,16).replace('T',' ');
+        // Hold time
+        let hold = '';
+        try{
+          if(t.opened_at && t.closed_at){
+            const ms = new Date(t.closed_at) - new Date(t.opened_at);
+            const hrs = ms / 3600000;
+            hold = hrs >= 24 ? `${(hrs/24).toFixed(1)}d` : `${hrs.toFixed(1)}h`;
+          }
+        }catch(e){}
+        const convBits = [];
+        if(ep && xp) convBits.push(`${ep} → ${xp}`);
+        if(hold) convBits.push(`held ${hold}`);
+        if(ts) convBits.push(ts);
+        const detailBits = [];
+        if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+        if(title) detailBits.push(title);
+        if(reason) detailBits.push(`<i>closed: ${reason}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${tk}${src}</span>`
              + `<span class="k-side ${sideCls}">${side||'-'}</span>`
-             + `<span>${t.outcome||t.reason||''}</span>`
+             + `<span style="color:${won?'rgba(127,255,176,0.6)':'rgba(255,138,160,0.6)'};font-size:9px;letter-spacing:1.5px">${won?'WIN':'LOSS'}</span>`
              + `<span class="${plCls}">${_fmtUsd(pl,true)}</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
       }).join('');
     }
   }).catch(()=>{ document.getElementById('kalshi-status').textContent = 'error'; });
