@@ -1370,14 +1370,26 @@ class EmotionalStateTracker:
 
 sse_clients: list[queue.Queue] = []
 sse_lock = threading.Lock()
+# Ring buffer of recent broadcasts so clients that reconnect after a drop
+# (idle → proxy kills SSE → browser reconnects) can pick up missed events.
+import collections as _collections
+_sse_recent: "_collections.deque[tuple[int, str]]" = _collections.deque(maxlen=120)
+_sse_next_id = 0
+_sse_id_lock = threading.Lock()
+
 
 def broadcast(event: str, data: dict):
+    global _sse_next_id
     try:
         serialized = json.dumps(data)
     except (TypeError, ValueError):
         # Fallback: coerce non-serializable values to strings
         serialized = json.dumps(data, default=str)
-    msg = f"event: {event}\ndata: {serialized}\n\n"
+    with _sse_id_lock:
+        _sse_next_id += 1
+        eid = _sse_next_id
+    msg = f"id: {eid}\nevent: {event}\ndata: {serialized}\n\n"
+    _sse_recent.append((eid, msg))
     with sse_lock:
         dead = []
         for q in sse_clients:
@@ -4269,11 +4281,21 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")  # disable proxy buffering
         self.send_header("Connection", "keep-alive")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
-        q = queue.Queue(maxsize=100)
+        # If client is reconnecting after a drop, EventSource sends Last-Event-ID.
+        # Replay any events newer than that ID so they catch up without losing
+        # broadcasts that fired while disconnected.
+        last_seen = self.headers.get("Last-Event-ID", "") or ""
+        try:
+            last_seen_id = int(last_seen)
+        except Exception:
+            last_seen_id = 0
+
+        q = queue.Queue(maxsize=200)
         with sse_lock:
             sse_clients.append(q)
 
@@ -4281,6 +4303,16 @@ class FeelingHandler(BaseHTTPRequestHandler):
             # Send initial ping
             self.wfile.write(b"event: ping\ndata: {}\n\n")
             self.wfile.flush()
+
+            # Replay any missed events from the ring buffer
+            if last_seen_id > 0:
+                for eid, m in list(_sse_recent):
+                    if eid > last_seen_id:
+                        try:
+                            self.wfile.write(m.encode())
+                            self.wfile.flush()
+                        except Exception:
+                            break
 
             while True:
                 try:
@@ -6416,6 +6448,21 @@ es.addEventListener('stream_end',e=>{{
 }});
 es.addEventListener('error',()=>{{clearTimeout(streamTmo);unlock();}});
 
+// Wait briefly for SSE to be OPEN before sending — covers the case where
+// the user was idle, proxy dropped SSE, and the browser is in the middle of
+// auto-reconnecting. If we just fire /chat now, broadcasts during the
+// reconnect gap (which can be 1-3 sec) might be lost.
+function _ensureSseOpen(timeoutMs){{
+  return new Promise(resolve => {{
+    if(es.readyState === 1) return resolve(true);
+    const t0 = Date.now();
+    const iv = setInterval(() => {{
+      if(es.readyState === 1) {{ clearInterval(iv); resolve(true); }}
+      else if(Date.now() - t0 > timeoutMs) {{ clearInterval(iv); resolve(false); }}
+    }}, 80);
+  }});
+}}
+
 // ── DREAM MODE ────────────────────────────────────────────────
 let _inDream=false;
 const _brainWrap=document.getElementById('brain-wrap');
@@ -6789,7 +6836,10 @@ function send(){{
     if(frame)payload.image=frame;
   }}
   clearImage(); // always reset image state after send
-  fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}})
+  _ensureSseOpen(2500).then(ok => {{
+    if(!ok) sb.textContent = 'reconnecting...';
+    return fetch('/chat',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});
+  }})
     .then(r=>r.json().then(d=>{{if(d.status==='error'){{sb.textContent='error — try again';unlock();}}}}))
     .catch(()=>{{sb.textContent='send failed — try again';unlock();}})
 }}
