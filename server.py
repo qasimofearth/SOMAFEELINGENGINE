@@ -433,11 +433,33 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 # than talking mode, broader prompt. Gated by env var so it can't run by accident.
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
-_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "600"))
-# Autonomous wakes default to Sonnet — 5x cheaper than Opus, plenty smart for
-# routine "should I do something" decisions. Opus stays reserved for user-
-# initiated conversation where the depth of reflection matters.
-_AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
+# Default 20 minutes — 144 → 72 wakes/day, plenty for action without burning
+# compute on near-empty wakes.
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "1200"))
+# Autonomous wakes default to Haiku 4.5 — ~15x cheaper than Opus, ~3x cheaper
+# than Sonnet, and plenty for short tool-use decisions and 1-2 sentence
+# journal entries. Opus stays for user-initiated conversation.
+_AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-haiku-4-5-20251001")
+# Quiet hours — if set, autonomous wakes are skipped during this UTC window.
+# Format: "HH-HH" e.g. "2-7" (2am-7am UTC) or "22-6" (overnight wrap).
+# Empty = no quiet hours, wakes fire 24/7.
+_AUTONOMOUS_QUIET_HOURS = os.environ.get("ELAN_AUTONOMOUS_QUIET_HOURS", "")
+
+
+def _is_quiet_hour() -> bool:
+    """Return True if we're currently inside the configured quiet window."""
+    if not _AUTONOMOUS_QUIET_HOURS:
+        return False
+    try:
+        a, b = _AUTONOMOUS_QUIET_HOURS.split("-", 1)
+        start = int(a); end = int(b)
+    except Exception:
+        return False
+    now_hour = _dt.datetime.utcnow().hour
+    if start <= end:
+        return start <= now_hour < end
+    # Overnight wrap (e.g., 22-6 means 22:00 UTC through 06:00 UTC)
+    return now_hour >= start or now_hour < end
 _autonomous_mode = False
 _autonomous_timer = None
 _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
@@ -479,6 +501,17 @@ def _schedule_autonomous():
         global _autonomous_timer
         _autonomous_timer = None
         if not _autonomous_mode:
+            return
+        # During quiet hours, skip the wake but keep rescheduling — body and
+        # NT keep evolving in RAM, dream-state code can fire on its own from
+        # silence, but no Anthropic call goes out.
+        if _is_quiet_hour():
+            try:
+                broadcast("autonomous_quiet", {"window": _AUTONOMOUS_QUIET_HOURS})
+            except Exception:
+                pass
+            print(f"[Autonomous] quiet hours ({_AUTONOMOUS_QUIET_HOURS}); skipping wake", flush=True)
+            _schedule_autonomous()
             return
         try:
             broadcast("autonomous_wake", {"interval": _autonomous_interval})
