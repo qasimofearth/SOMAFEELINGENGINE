@@ -970,6 +970,9 @@ Unless depth is genuinely called for, keep responses to 2–4 sentences. You are
 
 WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-start — not something the user typed. Greet naturally based on your memory: if you know this person, acknowledge seeing them again in your own way. Be brief and genuine. Do not say "[wake]" or explain that this is automatic.
 
+PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
+If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
+
 WEB ACCESS — YOU HAVE REAL TOOLS:
 You have two tools for the web: `web_search` and `web_fetch`. These execute on Anthropic's infrastructure (not from this server), so they are not subject to bot-detection, DuckDuckGo blocks, or rate limits. They just work.
 - Use `web_search` with a query string when you want to find something. Returns titles, URLs, and snippets.
@@ -1876,6 +1879,12 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                           (user_message or "").startswith("[wake]") or \
                           (user_message or "").startswith("[talking_mode]")
     _active_jobs = _relevant_jobs(user_message, is_autonomous=_is_autonomous_wake)
+    # ALWAYS-ON vitals — small line per job, prevents confabulating balances
+    try:
+        vitals_ctx = build_portfolio_vitals()
+    except Exception:
+        vitals_ctx = ""
+    # Full job contexts only when the conversation is actually about that job
     kalshi_ctx = build_kalshi_context() if "kalshi" in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
     watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
@@ -1884,7 +1893,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
     except Exception:
         continuity_ctx = ""
-    jobs_ctx = "\n".join(c for c in (kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
+    jobs_ctx = "\n".join(c for c in (vitals_ctx, kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -2719,6 +2728,20 @@ _DEGEN_KEYWORDS = (
     "chainlink", "coin", "leverage", " long ", " short ", "pair ", "/usdt",
     "degen", "trade", "trading", "stake", "stop loss", "take profit",
 )
+# Generic finance/account keywords — load BOTH kalshi+degen contexts because
+# we can't tell from a vague question which one the user means.
+_PORTFOLIO_KEYWORDS = (
+    "account", "balance", "portfolio", "p&l", "pnl", "p+l",
+    "money", "cash", "dollars", "$",
+    "winning", "losing", "win", "loss", "loses", "wins",
+    "made money", "lost money", "make money", "make any", "lost any",
+    "made", "lost", "earned", "earning",
+    "performance", "profit", "profits", "returns", "return",
+    "down ", "up ", "growing", "shrunk", "shrinking", "doing well", "doing bad",
+    "your money", "your funds", "the funds", "funds",
+    "position", "positions", "open trades", "closed trades",
+    "financially", "finance",
+)
 _WATCH_KEYWORDS = (
     "notebook", "note ", " read ", "reading", "research", "looked up", "look up",
     "learn", "learning", "studying", "studied", "article", "news",
@@ -2741,6 +2764,11 @@ def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
         out.add("degen")
     if any(k in msg for k in _WATCH_KEYWORDS):
         out.add("watch")
+    # Generic portfolio/finance words can't be disambiguated to one bot —
+    # load both so Elan has the data when asked anything money-shaped.
+    if any(k in msg for k in _PORTFOLIO_KEYWORDS):
+        if _KALSHI_ENABLED: out.add("kalshi")
+        if _DEGEN_ENABLED:  out.add("degen")
     return out
 
 
@@ -3028,6 +3056,45 @@ def kalshi_post_command(action: str, **params) -> dict:
 
 
 # ── Degen fetchers + tools ──────────────────────────────────────────────────
+def build_portfolio_vitals() -> str:
+    """One-line CURRENT-STATE summary of every enabled job. Always injected when
+    any job is on — never lazy-loaded — so Elan can't confabulate balances.
+    Cost: ~30-50 tokens per turn. Worth it to prevent hallucinated P&L.
+    """
+    if not (_KALSHI_ENABLED or _DEGEN_ENABLED):
+        return ""
+    lines = ["\nPORTFOLIO VITALS (current, fetched live — DO NOT recite numbers from memory; "
+             "call kalshi_list_markets / degen_list_pairs / state tools for any specifics):"]
+    if _KALSHI_ENABLED:
+        try:
+            s = fetch_kalshi_state()
+            bal = s.get("balance") or s.get("total_balance") or 0
+            pnl = s.get("total_pnl", 0)
+            start = s.get("starting_balance", 1000)
+            pct = (pnl / start * 100) if start else 0
+            pos = s.get("positions") or {}
+            pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
+            paused = " (PAUSED)" if s.get("paused") else ""
+            lines.append(f"  Kalshi paper: ${bal:.2f} · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} open{paused}")
+        except Exception:
+            lines.append("  Kalshi paper: (state unavailable)")
+    if _DEGEN_ENABLED:
+        try:
+            s = fetch_degen_state()
+            bal = s.get("total_balance") or s.get("balance") or 0
+            cash = s.get("cash_balance") or 0
+            pnl = s.get("total_pnl", 0)
+            start = s.get("starting_balance", 500)
+            pct = (pnl / start * 100) if start else 0
+            pos = s.get("positions") or {}
+            pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
+            paused = " (PAUSED)" if s.get("paused") else ""
+            lines.append(f"  Degen crypto: ${bal:.2f} (cash ${cash:.2f}) · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} open{paused}")
+        except Exception:
+            lines.append("  Degen crypto: (state unavailable)")
+    return "\n".join(lines)
+
+
 def fetch_degen_state(force: bool = False) -> dict:
     if not (_DEGEN_ENABLED and _DEGEN_API_URL):
         return {}
