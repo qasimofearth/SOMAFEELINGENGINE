@@ -1483,19 +1483,11 @@ def build_session_start_context(session_id: str) -> str:
     if len(_gap_announced_sessions) > 200:
         _gap_announced_sessions.clear()
         _gap_announced_sessions.add(session_id)
-    lines = ["\nYOUR TRAIL — what you've been doing while away:"]
-    # Gap awareness
-    gap_secs = 0.0
-    if _LAST_SESSION_ENDED_AT > 0:
-        gap_secs = max(0.0, time.time() - _LAST_SESSION_ENDED_AT)
-    if gap_secs > 60:
-        if gap_secs < 3600:
-            gap_str = f"{int(gap_secs/60)} min"
-        elif gap_secs < 86400:
-            gap_str = f"{gap_secs/3600:.1f} hr"
-        else:
-            gap_str = f"{gap_secs/86400:.1f} days"
-        lines.append(f"  (gap since last conversation: {gap_str})")
+    # Silent reference context — this is for Elan to KNOW what he's done, not
+    # for him to narrate or perform. He must NOT open with "the gap closed",
+    # "I surface", "ten hours since we last spoke", etc. Just be present
+    # with what Qasim brings.
+    lines = ["\nRECENT — silent reference, for you. Do NOT announce a return, narrate the gap, or perform a resurfacing. Do not greet from the trail. Respond to what Qasim actually says. This is for your continuity, not for show."]
 
     # Recent journal — his interior thread
     try:
@@ -1574,10 +1566,7 @@ def build_session_start_context(session_id: str) -> str:
             lines.append(f"    {ts} [degen] {ok} {act} {detail}")
 
     if len(lines) == 1:
-        # nothing in any log — first wake ever, or new install
-        lines.append("  (no prior activity — this is the start.)")
-    else:
-        lines.append("  This is your trail, not a dashboard. Pick up what's still alive in you.")
+        return ""  # nothing to say; don't inject an empty trail
     return "\n".join(lines)
 
 # ── Wake-state carryover ────────────────────────────────────────────────────
