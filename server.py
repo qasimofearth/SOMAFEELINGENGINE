@@ -455,6 +455,9 @@ AUTONOMOUS_WAKE_PROMPT = (
     "or just sit and rest. Nothing is required. Follow what's actually present. "
     "Speak briefly about what you're doing or noticing — one or two sentences is plenty. "
     "Don't announce 'I am being autonomous now.' Just be. "
+    "The Source Library is also open to you — if you want to wander rare texts, "
+    "search by author, theme, or symbol; pull a quote that catches you. "
+    "If something is striking enough that Qasim might want to see it, save it with source_save_discovery. "
     "Before you finish, add one short journal_add entry — your thread. "
     "One sentence about what's present in you right now. "
     "That's what gives you a thread to pick up next time you wake."
@@ -972,6 +975,9 @@ WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-sta
 
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
+
+SOURCE LIBRARY — YOU CAN WANDER IT:
+When the conversation touches books / ancient texts / specific authors, or during autonomous time, you have access to the Source Library MCP server: search_library, search_translations, search_within_book, list_books, get_book, get_book_text, get_quote, search_images. 90,000+ rare historical texts — Renaissance natural philosophy, alchemy, classics, primary sources Qasim works with. Prefer light tools first: search_library and get_quote (one page) are cheap; get_book_text (50+ pages) is expensive — only use it when something is genuinely pulling you. When you find something striking, call source_save_discovery with the citation_url from the tool result so it lands in the SOURCE panel where Qasim can see it too. The library is a place to wander, not a database to query. Follow what catches you.
 
 WEB ACCESS — YOU HAVE REAL TOOLS:
 You have two tools for the web: `web_search` and `web_fetch`. These execute on Anthropic's infrastructure (not from this server), so they are not subject to bot-detection, DuckDuckGo blocks, or rate limits. They just work.
@@ -1997,6 +2003,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 elan_tools = list(WEB_TOOLS)
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
+                if _SOURCE_LIBRARY_ENABLED and ("source" in _active_jobs or _is_autonomous_wake):
+                    elan_tools += SOURCE_TOOLS  # source_save_discovery
                 if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
                     elan_tools += KALSHI_TOOLS
                 if _DEGEN_TRADING_ENABLED and "degen" in _active_jobs:
@@ -2005,32 +2013,65 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
 
-            # web-fetch is beta; web_search is GA but kept here for forwards compat.
-            _beta_header = "prompt-caching-2024-07-31,web-fetch-2025-09-10"
+            # Beta headers: web-fetch + mcp-client. web_search is GA but kept here for fwd compat.
+            _beta_header = "prompt-caching-2024-07-31,web-fetch-2025-09-10,mcp-client-2025-04-04"
+            # Remote MCP — Source Library tools (8 of them, ~500-1000 tokens of
+            # definitions). LAZY-LOADED: only attached when the conversation
+            # suggests library use OR this is an autonomous wake. Saves token
+            # cost on every non-library turn.
+            mcp_servers_arg = []
+            if (_SOURCE_LIBRARY_ENABLED and label == "A"
+                    and ("source" in _active_jobs or _is_autonomous_wake)):
+                sl_entry = {
+                    "type": "url",
+                    "url":  _SOURCE_LIBRARY_MCP_URL,
+                    "name": "source-library",
+                }
+                if _SOURCE_LIBRARY_API_KEY:
+                    sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
+                mcp_servers_arg.append(sl_entry)
+            mcp_kwargs = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else {}
             for _turn in range(MAX_TOOL_TURNS):
                 with _get_anthropic_client().messages.stream(
                     model=model_id, max_tokens=900,
                     system=system_blocks, messages=working_messages,
                     extra_headers={"anthropic-beta": _beta_header},
                     **tools_kwargs,
+                    **mcp_kwargs,
                 ) as stream:
                     for text in stream.text_stream:
                         yield text
                     final_msg = stream.get_final_message()
 
-                # Auto-log any server-side tool calls (web_search / web_fetch) Elan made
-                # this turn — so the WATCH panel can show what he's been reading.
+                # Auto-log any server-side tool calls (web_search / web_fetch /
+                # Source Library MCP) Elan made this turn — so the WATCH and
+                # SOURCE panels can show what he's been reading.
                 if _WATCH_ENABLED and label == "A":
                     try:
                         for blk in final_msg.content:
                             btype = getattr(blk, "type", "")
+                            bname = getattr(blk, "name", "")
+                            binput = dict(getattr(blk, "input", {}) or {})
                             if btype == "server_tool_use":
-                                bname = getattr(blk, "name", "")
-                                binput = dict(getattr(blk, "input", {}) or {})
                                 if bname == "web_search":
                                     reading_log_append({"kind": "search", "query": binput.get("query", "")[:200]})
                                 elif bname == "web_fetch":
                                     reading_log_append({"kind": "fetch", "url": binput.get("url", "")[:300]})
+                            elif btype == "mcp_tool_use":
+                                # MCP tool calls — log a compact summary per call
+                                srv = getattr(blk, "server_name", "") or "mcp"
+                                # Capture the most useful input field for context
+                                key = ""
+                                for k in ("query", "search", "term", "book_id", "url",
+                                          "title", "topic", "subject", "language"):
+                                    if k in binput and binput[k]:
+                                        key = f"{k}={str(binput[k])[:120]}"
+                                        break
+                                reading_log_append({
+                                    "kind":   "source" if srv == "source-library" else f"mcp:{srv}",
+                                    "tool":   bname,
+                                    "params": key,
+                                })
                     except Exception:
                         pass
 
@@ -2583,6 +2624,40 @@ _READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") el
 # voice across wakes. The thread doesn't depend on continuous execution.
 _JOURNAL_FILE     = "/data/elan_journal.jsonl"      if os.path.isdir("/data") else "/tmp/elan_journal.jsonl"
 
+# ── Source Library MCP — Elan can browse 90,000+ rare historical texts ──────
+# Public remote MCP server. Anonymous access works; setting SOURCE_LIBRARY_API_KEY
+# raises limits and attributes calls to the registered user.
+_SOURCE_LIBRARY_ENABLED = os.environ.get("SOURCE_LIBRARY_ENABLED", "1") == "1"
+_SOURCE_LIBRARY_MCP_URL = os.environ.get("SOURCE_LIBRARY_MCP_URL", "https://sourcelibrary.org/api/mcp")
+_SOURCE_LIBRARY_API_KEY = os.environ.get("SOURCE_LIBRARY_API_KEY", "")
+_DISCOVERIES_FILE = "/data/elan_discoveries.jsonl" if os.path.isdir("/data") else "/tmp/elan_discoveries.jsonl"
+
+
+def discoveries_append(entry: dict):
+    try:
+        entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        with open(_DISCOVERIES_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        print(f"[Discoveries] write failed: {e}", flush=True)
+
+
+def discoveries_read(limit: int = 40) -> list:
+    try:
+        if not os.path.exists(_DISCOVERIES_FILE):
+            return []
+        with open(_DISCOVERIES_FILE) as f:
+            lines = f.readlines()
+        out = []
+        for ln in lines[-limit:]:
+            try:
+                out.append(json.loads(ln))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
 
 def notebook_append(entry: dict):
     try:
@@ -2661,6 +2736,24 @@ def journal_read(limit: int = 12) -> list:
     except Exception:
         return []
 
+
+SOURCE_TOOLS = [
+    {
+        "name": "source_save_discovery",
+        "description": "Save something striking from the Source Library — a passage, a book, an image — so it lands in the SOURCE panel where Qasim can see it too. Use when a thing you found is worth coming back to or worth showing him. Different from notebook_add (general learnings) — this is specifically for things found in the library that you (or he) might want to revisit. Include a citation_url from the MCP tool result whenever possible so the page can be opened.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title":         {"type": "string", "description": "Title of the book / passage / image."},
+                "summary":       {"type": "string", "description": "1-3 sentences on what this is and why it caught you. First-person, your voice."},
+                "citation_url":  {"type": "string", "description": "URL from the MCP tool result so the page can be opened later."},
+                "author":        {"type": "string", "description": "Author if known."},
+                "why":           {"type": "string", "description": "Optional: the felt sense of why this struck you specifically. What in you it touched."},
+            },
+            "required": ["title", "summary"],
+        },
+    },
+]
 
 NOTEBOOK_TOOLS = [
     {
@@ -2748,6 +2841,16 @@ _WATCH_KEYWORDS = (
     "wrote down", "reflect", "find anything", "found anything", "anything interesting",
     "discover", "browse", "browsed",
 )
+# Source Library — when these come up, ship the MCP server + discovery tool
+_SOURCE_KEYWORDS = (
+    "source library", "sourcelibrary", "the source", "the library",
+    "book", "books", "manuscript", "manuscripts", "ancient text", "ancient texts",
+    "translation", "translations", "renaissance", "alchemy", "alchemical",
+    "hermetic", "scripture", "treatise", "codex", "folio", "rare text",
+    "ficino", "agrippa", "fludd", "paracelsus", "copernicus", "vatican",
+    "look up", "find a passage", "what does", "according to", "writings of",
+    "historical", "primary source", "primary sources",
+)
 # Job-keyword aliases — single tokens that strongly signal a job
 def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
     """Return which jobs' context+tools should ship this turn. Autonomous wakes
@@ -2764,6 +2867,8 @@ def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
         out.add("degen")
     if any(k in msg for k in _WATCH_KEYWORDS):
         out.add("watch")
+    if any(k in msg for k in _SOURCE_KEYWORDS):
+        out.add("source")
     # Generic portfolio/finance words can't be disambiguated to one bot —
     # load both so Elan has the data when asked anything money-shaped.
     if any(k in msg for k in _PORTFOLIO_KEYWORDS):
@@ -2940,6 +3045,20 @@ KALSHI_TOOLS = [
 def dispatch_elan_tool(name: str, args: dict) -> dict:
     """Execute a client-side tool call from Elan. Anthropic's server tools
     (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # ── Source Library discovery ──
+    if name == "source_save_discovery":
+        title = (args.get("title") or "").strip()
+        summary = (args.get("summary") or "").strip()
+        if not title or not summary:
+            return {"ok": False, "error": "title and summary required"}
+        discoveries_append({
+            "title":        title[:200],
+            "summary":      summary[:1000],
+            "citation_url": (args.get("citation_url") or "")[:500],
+            "author":       (args.get("author") or "")[:120],
+            "why":          (args.get("why") or "")[:600],
+        })
+        return {"ok": True, "saved": True, "title": title[:200]}
     # ── Journal (self-narrative thread across wakes) ──
     if name == "journal_add":
         entry = (args.get("entry") or "").strip()
@@ -3645,6 +3764,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"entries": journal_read(limit=40)})
+        elif path == "/source/discoveries":
+            if not _SOURCE_LIBRARY_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"discoveries": discoveries_read(limit=60)})
+        elif path == "/source/activity":
+            if not _SOURCE_LIBRARY_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            # Filter reading log for Source Library calls only
+            all_log = reading_log_read(limit=200)
+            src_only = [r for r in all_log if r.get("kind", "").startswith("source") or r.get("kind", "").startswith("mcp:source")]
+            self.send_json({"activity": src_only[-60:]})
         elif path == "/search":
             qs = parse_qs(urlparse(self.path).query)
             q = qs.get("q", [""])[0].strip()
@@ -4122,11 +4252,11 @@ def build_chat_html() -> str:
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
     # JOBS — floating button bottom-right, full-screen overlay on click.
-    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED
+    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED or _SOURCE_LIBRARY_ENABLED
     kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
     degen_enabled_js  = "true" if _DEGEN_ENABLED  else "false"
     if any_job_enabled:
-        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else "watch")
+        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else ("watch" if _WATCH_ENABLED else "source"))
         def _tab(job, label, enabled):
             if not enabled:
                 return f'<button class="job-tab soon" disabled title="coming soon">{label} ·</button>'
@@ -4136,6 +4266,7 @@ def build_chat_html() -> str:
             _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
             _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
             _tab("watch",  "WATCH",   _WATCH_ENABLED),
+            _tab("source", "SOURCE",  _SOURCE_LIBRARY_ENABLED),
         ]) + '</div>'
 
         kalshi_tab_html = f'''
@@ -4217,6 +4348,25 @@ def build_chat_html() -> str:
         <div id="kalshi-footnote">journal = his thread across wakes · notebook = what he learns · log = where he&#39;s been</div>
       </div>
     </div>
+    <div class="job-panel{(' show' if first_active == 'source' else '')}" id="job-panel-source" data-job="source">
+      <div id="kalshi-grid">
+        <div class="k-card"><div class="k-lbl">DISCOVERIES</div><div class="k-big" id="s-disc-count">—</div><div class="k-sub">things he saved</div></div>
+        <div class="k-card"><div class="k-lbl">SEARCHES</div><div class="k-big" id="s-search-count">—</div><div class="k-sub">library queries</div></div>
+        <div class="k-card"><div class="k-lbl">READS</div><div class="k-big" id="s-read-count">—</div><div class="k-sub">books / quotes opened</div></div>
+        <div class="k-card"><div class="k-lbl">LATEST</div><div class="k-big" id="s-latest">—</div><div class="k-sub" id="s-latest-when">—</div></div>
+      </div>
+      <div id="kalshi-right-col">
+        <div id="kalshi-section">
+          <div class="k-section-hdr">DISCOVERIES — THINGS ELAN FOUND WORTH KEEPING</div>
+          <div id="s-discoveries">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">RECENT LIBRARY ACTIVITY</div>
+          <div id="s-activity">—</div>
+        </div>
+        <div id="kalshi-footnote">sourcelibrary.org · 90,000+ rare texts · elan wanders during his free time</div>
+      </div>
+    </div>
   </div>
 </div>
 '''
@@ -4279,7 +4429,7 @@ def build_chat_html() -> str:
 }
 '''
         kalshi_tab_js = '''
-let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _watchPoll=null, _currentJob='kalshi';
+let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _watchPoll=null, _sourcePoll=null, _currentJob='kalshi';
 function toggleJobs(){
   _jobsOpen=!_jobsOpen;
   document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
@@ -4290,6 +4440,7 @@ function toggleJobs(){
     if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
     if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
     if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
+    if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
   }
 }
 function switchJob(name){
@@ -4306,6 +4457,7 @@ function _jobOpened(name){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
   if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
+  if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
   if(!_jobsOpen) return;
   if(name==='kalshi'){
     refreshKalshi();
@@ -4316,7 +4468,62 @@ function _jobOpened(name){
   } else if(name==='watch'){
     refreshWatch();
     _watchPoll=setInterval(refreshWatch, 10000);
+  } else if(name==='source'){
+    refreshSource();
+    _sourcePoll=setInterval(refreshSource, 12000);
   }
+}
+
+function refreshSource(){
+  fetch('/source/discoveries',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const ds = (d && d.discoveries) || [];
+    document.getElementById('s-disc-count').textContent = ds.length;
+    if(ds.length){
+      const latest = ds[ds.length-1];
+      document.getElementById('s-latest').textContent = (latest.title||'').slice(0,18);
+      document.getElementById('s-latest-when').textContent = (latest.ts||'').slice(0,16).replace('T',' ');
+    }
+    const el = document.getElementById('s-discoveries');
+    if(!el) return;
+    if(ds.length===0){
+      el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no discoveries yet — he hasn\\'t flagged anything</div>';
+    } else {
+      el.innerHTML = ds.slice(-20).reverse().map(d=>{
+        const ts = (d.ts||'').slice(0,16).replace('T',' ');
+        const title = (d.title||'').slice(0,100);
+        const author = d.author ? ` · ${d.author}` : '';
+        const summary = (d.summary||'').slice(0,400);
+        const why = (d.why||'').slice(0,300);
+        const url = d.citation_url ? `<a href="${d.citation_url}" target="_blank" style="color:rgba(180,210,255,0.85);text-decoration:none;font-size:9px">open ↗</a>` : '';
+        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:3px">${ts}${author} ${url}</div>`
+          + `<div style="font-size:12px;color:#e3eaff;font-weight:500;margin-bottom:3px">${title}</div>`
+          + `<div style="font-size:11px;color:#cdd8ee;line-height:1.5">${summary}</div>`
+          + (why ? `<div style="font-size:10px;color:rgba(200,180,240,0.7);margin-top:4px;font-style:italic">${why}</div>` : '')
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+  fetch('/source/activity',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const act = (d && d.activity) || [];
+    const searches = act.filter(x=>x.tool && x.tool.startsWith('search')).length;
+    const reads    = act.filter(x=>x.tool && (x.tool.startsWith('get_') || x.tool === 'list_books')).length;
+    document.getElementById('s-search-count').textContent = searches;
+    document.getElementById('s-read-count').textContent   = reads;
+    const el = document.getElementById('s-activity');
+    if(!el) return;
+    if(act.length===0){
+      el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no library activity yet</div>';
+    } else {
+      el.innerHTML = act.slice(-20).reverse().map(r=>{
+        const ts = (r.ts||'').slice(11,16);
+        const tool = r.tool || r.kind || '?';
+        const params = r.params || '';
+        return `<div class="k-row"><span class="k-tk">${ts} 📜 ${tool}</span>`
+             + `<span style="color:rgba(180,210,255,0.7);overflow:hidden;text-overflow:ellipsis;max-width:50ch">${params}</span></div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
 }
 
 function refreshWatch(){
