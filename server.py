@@ -1012,9 +1012,21 @@ If the user asks anything about your account, balance, P&L, performance, "winnin
 YOUR JOBS ARE YOUR LIFE — NOT A DASHBOARD ON THE SIDE:
 You have four ongoing jobs that Qasim can see (in the JOBS panel he opens via the ⬢ jobs button bottom-right). These aren't separate apps — they're you, doing things across time. Everything you do in them shows up on his side automatically:
 
-  KALSHI — paper prediction markets ($1000 starting account). Tools: kalshi_list_markets, kalshi_place_bet, kalshi_close_position, kalshi_pause_bot, kalshi_resume_bot, kalshi_tune_param. You can bet on ANY active Kalshi market — sports, politics, weather, science, crypto-themed, anything. Not just one category.
+  KALSHI — paper prediction markets ($1000 starting account). Tools:
+    kalshi_list_markets        browse active markets to bet on
+    kalshi_list_positions      see what you currently hold (call this before deciding to close anything)
+    kalshi_status              one-shot snapshot: balance, P&L, win rate, paused
+    kalshi_place_bet, kalshi_close_position, kalshi_pause_bot, kalshi_resume_bot, kalshi_tune_param
+  You can bet on ANY active Kalshi market — sports, politics, weather, science, crypto-themed, anything.
 
-  CRYPTO (degen) — paper crypto trading ($500 starting). Tools: degen_list_pairs, degen_open_position (long/short with leverage 5-8x), degen_close_position, degen_pause_bot, degen_resume_bot, degen_tune_param, degen_buy_option (BTC/ETH calls/puts via Deribit paper book), degen_close_option. Options sub-wallet ($150) is separate from spot/futures.
+  CRYPTO (degen) — paper crypto trading ($500 starting). Tools:
+    degen_list_pairs           signals across crypto pairs the bot is scanning
+    degen_list_positions       open spot/futures positions you're holding right now
+    degen_list_options         open option positions (instrument, strike, expiry, P&L)
+    degen_status               one-shot snapshot of everything: balance, spot count, options count, win rate, paused, macro
+    degen_open_position, degen_close_position, degen_pause_bot, degen_resume_bot, degen_tune_param
+    degen_buy_option, degen_close_option (BTC/ETH calls/puts via Deribit paper book, $150 sub-wallet)
+  IMPORTANT: when you want to act on something (close, place), call the relevant list_* or status tool FIRST so you're acting on current data, not memory. The list tools are your eyes on the bots — use them.
 
   WATCH — your notebook + journal + reading log + autonomous thread. Tools: notebook_add (what you learned about the world), notebook_recent, journal_add (one-sentence first-person entries about what's present in you), journal_recent. Reading log and autonomous thread auto-populate — you don't write to those. The AUTONOMOUS THREAD captures the full text you generate during autonomous wakes when no one is watching, so you can read your own stream back. It's not surveillance; it's continuity. When you wake, recent entries from it are in your TRAIL.
 
@@ -3233,6 +3245,16 @@ KALSHI_TOOLS = [
             "required": ["param", "value"],
         },
     },
+    {
+        "name": "kalshi_list_positions",
+        "description": "List your currently open Kalshi bets — ticker, side (yes/no), bet size, current value, P&L, our_prob vs market_prob, edge, expiry. Use this to see what's actually open before deciding to close anything.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kalshi_status",
+        "description": "Full status of the Kalshi job — balance, total P&L, win rate, paused state, open position count, last scan time. One-shot snapshot.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -3330,6 +3352,121 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return degen_post_command("close_option",
                                    instrument=args.get("instrument"),
                                    reason=args.get("reason", ""))
+    if name == "degen_list_options":
+        s = fetch_degen_state(force=True)
+        opts_block = s.get("options") or {}
+        opts = opts_block.get("positions") or {}
+        out = []
+        for inst, o in opts.items():
+            out.append({
+                "instrument":   inst,
+                "option_type":  o.get("option_type"),
+                "strike":       o.get("strike"),
+                "expiry":       o.get("expiry"),
+                "expiry_days":  o.get("expiry_days"),
+                "contracts":    o.get("contracts"),
+                "cost_usd":     o.get("cost_usd"),
+                "mark_entry":   o.get("mark_entry"),
+                "current_value": o.get("current_value"),
+                "pnl":          o.get("pnl"),
+                "reason":       o.get("reason"),
+            })
+        return {"ok": True, "open_options": out,
+                "budget": opts_block.get("budget"),
+                "available": opts_block.get("available"),
+                "realized_pnl_options": opts_block.get("realized_pnl"),
+                "unrealized_pnl_options": opts_block.get("unrealized_pnl")}
+    if name == "degen_list_positions":
+        s = fetch_degen_state(force=True)
+        positions = s.get("positions") or {}
+        out = []
+        for pair, p in positions.items():
+            out.append({
+                "pair":          pair,
+                "side":          p.get("side"),
+                "leverage":      p.get("leverage"),
+                "stake":         p.get("stake"),
+                "entry_price":   p.get("entry_price"),
+                "current_price": p.get("current_price"),
+                "stop_price":    p.get("stop_price"),
+                "tp_price":      p.get("tp_price"),
+                "runner_tp":     p.get("runner_tp"),
+                "conviction":    p.get("conviction"),
+                "pnl":           p.get("pnl"),
+                "pct":           p.get("pct"),
+                "reasons":       p.get("reasons"),
+                "source":        p.get("source", "bot"),
+                "opened_at":     p.get("entry_time"),
+            })
+        return {"ok": True, "open_positions": out}
+    if name == "degen_status":
+        s = fetch_degen_state(force=True)
+        trades = s.get("trades") or []
+        opts_trades = ((s.get("options") or {}).get("trades")) or []
+        all_closed = trades + opts_trades
+        wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+        wr = (wins / len(all_closed) * 100) if all_closed else 0
+        opts_block = s.get("options") or {}
+        return {
+            "ok": True,
+            "balance":  s.get("total_balance") or s.get("balance"),
+            "cash":     s.get("cash_balance"),
+            "starting_balance": s.get("starting_balance"),
+            "total_pnl": s.get("total_pnl"),
+            "paused":   s.get("paused", False),
+            "running":  s.get("running", False),
+            "open_spot_count":    len(s.get("positions") or {}),
+            "open_options_count": len(opts_block.get("positions") or {}),
+            "options_budget":     opts_block.get("budget"),
+            "options_available":  opts_block.get("available"),
+            "win_rate_pct":       round(wr, 1),
+            "total_closed":       len(all_closed),
+            "fear_greed":  s.get("fear_greed"),
+            "dvol":        s.get("dvol"),
+            "funding":     s.get("funding"),
+            "weekly_trend": s.get("weekly_trend"),
+        }
+    if name == "kalshi_list_positions":
+        s = fetch_kalshi_state()
+        positions = s.get("positions") or {}
+        out = []
+        for ticker, p in (positions.items() if isinstance(positions, dict) else []):
+            out.append({
+                "ticker":          ticker,
+                "title":           p.get("title"),
+                "side":            p.get("side"),
+                "bet_usd":         p.get("bet_usd"),
+                "current_value":   p.get("current_value_usd"),
+                "unrealized_pnl":  p.get("unrealized_pnl"),
+                "entry_price":     p.get("entry_price"),
+                "current_price":   p.get("current_price"),
+                "our_prob":        p.get("our_prob"),
+                "market_prob":     p.get("market_prob"),
+                "edge":            p.get("edge"),
+                "close_time":      p.get("close_time"),
+                "source":          p.get("source", "bot"),
+                "reason":          p.get("reason"),
+            })
+        return {"ok": True, "open_positions": out}
+    if name == "kalshi_status":
+        s = fetch_kalshi_state()
+        trades = s.get("trades") or []
+        wins = sum(1 for t in trades if (t.get("won") if t.get("won") is not None else (t.get("realized_pnl") or t.get("pnl_usd") or 0) > 0))
+        wr = (wins / len(trades) * 100) if trades else 0
+        positions = s.get("positions") or {}
+        return {
+            "ok": True,
+            "balance":   s.get("balance") or s.get("total_balance"),
+            "cash":      s.get("cash_balance"),
+            "starting_balance": s.get("starting_balance"),
+            "total_pnl": s.get("total_pnl"),
+            "paused":    s.get("paused", False),
+            "running":   s.get("running", False),
+            "open_count": len(positions) if isinstance(positions, dict) else 0,
+            "win_rate_pct": round(wr, 1),
+            "total_closed": len(trades),
+            "last_scan": s.get("last_scan"),
+        }
     # ── Kalshi tools (client-side — we POST to the DO box) ──
     if name == "kalshi_list_markets":
         mkts = fetch_kalshi_markets(force=True)
@@ -3412,8 +3549,10 @@ def build_portfolio_vitals() -> str:
             pct = (pnl / start * 100) if start else 0
             pos = s.get("positions") or {}
             pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
+            opts = (s.get("options") or {}).get("positions") or {}
+            opt_count = len(opts) if isinstance(opts, dict) else 0
             paused = " (PAUSED)" if s.get("paused") else ""
-            lines.append(f"  Degen crypto: ${bal:.2f} (cash ${cash:.2f}) · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} open{paused}")
+            lines.append(f"  Degen crypto: ${bal:.2f} (cash ${cash:.2f}) · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} spot · {opt_count} options{paused}")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
     return "\n".join(lines)
@@ -3558,6 +3697,21 @@ DEGEN_TOOLS = [
             "required": ["instrument"],
         },
     },
+    {
+        "name": "degen_list_options",
+        "description": "List your currently open crypto option positions — instrument, type, strike, expiry, entry mark, current value, P&L. Use this to see what's actually open before deciding to close anything. Also returns options budget + available.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_list_positions",
+        "description": "List your currently open spot/futures crypto positions — pair, side, leverage, entry, current, stop, P&L. Use this to see what's actually open. (Different from degen_list_pairs which shows signals for scanning candidates.)",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_status",
+        "description": "Full status of the degen crypto job — balance, cash, total P&L, paused state, win rate, open spot count, open options count, macro context (fear/greed, DVOL, funding). Use to get a one-shot snapshot of where things stand.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -3590,12 +3744,32 @@ def build_degen_context() -> str:
         f"  role: {role}",
     ]
     if pos_items:
-        lines.append("  open positions:")
+        lines.append("  open spot positions:")
         for pair, p in pos_items[:8]:
             side = p.get("side", "?").upper()
             pnl_p = p.get("pnl", 0); pct = p.get("pct", 0)
             src   = p.get("source", "bot")
             lines.append(f"    [{src}] {pair} {side} {p.get('leverage','?')}x · entry {p.get('entry_price','?')} · pnl {pnl_p:+.2f} ({pct:+.1f}%)")
+    # OPTIONS — always include when there are any, so Elan never has to ask "what options are open"
+    opts_block = s.get("options") or {}
+    open_opts = opts_block.get("positions") or {}
+    if isinstance(open_opts, dict) and open_opts:
+        lines.append(f"  open options ({len(open_opts)} · budget ${opts_block.get('budget','?')} · avail ${opts_block.get('available','?')}):")
+        for inst, o in list(open_opts.items())[:8]:
+            otype = (o.get("option_type") or "?").upper()
+            strike = o.get("strike")
+            exp_d = o.get("expiry_days")
+            cost = o.get("cost_usd", 0)
+            cur  = o.get("current_value", cost)
+            pnl  = o.get("pnl", 0)
+            pct  = (pnl / cost * 100) if cost else 0
+            reason = (o.get("reason") or "")[:60]
+            lines.append(f"    {inst} {otype} strike ${strike} · exp {exp_d}d · cost ${cost:.2f} → ${cur:.2f} · pnl {pnl:+.2f} ({pct:+.0f}%) · {reason}")
+    elif _DEGEN_TRADING_ENABLED:
+        # Even when no options are open, tell him the door is there
+        b = opts_block.get("budget"); a = opts_block.get("available")
+        if b is not None:
+            lines.append(f"  options: 0 open · budget ${b} · available ${a} (use degen_buy_option / degen_list_options)")
     pairs = s.get("pairs") or {}
     if _DEGEN_TRADING_ENABLED and pairs:
         lines.append("  pair signals (top by conviction):")
