@@ -3531,12 +3531,13 @@ def build_portfolio_vitals() -> str:
             s = fetch_kalshi_state()
             bal = s.get("balance") or s.get("total_balance") or 0
             pnl = s.get("total_pnl", 0)
-            start = s.get("starting_balance", 1000)
-            pct = (pnl / start * 100) if start else 0
             pos = s.get("positions") or {}
             pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
             paused = " (PAUSED)" if s.get("paused") else ""
-            lines.append(f"  Kalshi paper: ${bal:.2f} · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} open{paused}")
+            trades = s.get("trades") or []
+            wins = sum(1 for t in trades if (t.get("won") if t.get("won") is not None else (t.get("pnl_usd") or t.get("realized_pnl") or 0) > 0))
+            won_dol = sum((t.get("pnl_usd") or t.get("realized_pnl") or 0) for t in trades if (t.get("pnl_usd") or t.get("realized_pnl") or 0) > 0)
+            lines.append(f"  Kalshi paper: ${bal:.2f} · pnl ${pnl:+.2f} · {pos_count} open · {wins} wins +${won_dol:.0f}{paused}")
         except Exception:
             lines.append("  Kalshi paper: (state unavailable)")
     if _DEGEN_ENABLED:
@@ -3544,15 +3545,21 @@ def build_portfolio_vitals() -> str:
             s = fetch_degen_state()
             bal = s.get("total_balance") or s.get("balance") or 0
             cash = s.get("cash_balance") or 0
-            pnl = s.get("total_pnl", 0)
-            start = s.get("starting_balance", 500)
-            pct = (pnl / start * 100) if start else 0
+            opts_block = s.get("options") or {}
+            opts_total = float(opts_block.get("total_value") or opts_block.get("available") or 0)
+            grand = bal + opts_total
+            pnl = (s.get("total_pnl") or 0) + float(opts_block.get("realized_pnl") or 0) + float(opts_block.get("unrealized_pnl") or 0)
             pos = s.get("positions") or {}
             pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
-            opts = (s.get("options") or {}).get("positions") or {}
+            opts = opts_block.get("positions") or {}
             opt_count = len(opts) if isinstance(opts, dict) else 0
             paused = " (PAUSED)" if s.get("paused") else ""
-            lines.append(f"  Degen crypto: ${bal:.2f} (cash ${cash:.2f}) · pnl ${pnl:+.2f} ({pct:+.2f}%) · {pos_count} spot · {opt_count} options{paused}")
+            # Tally wins across spot + options
+            all_closed = (s.get("trades") or []) + (opts_block.get("trades") or [])
+            wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+            won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
+                          if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+            lines.append(f"  Degen crypto: full ${grand:,.0f} (spot ${bal:.0f} · opts ${opts_total:.0f}) · pnl ${pnl:+.2f} · {pos_count} spot · {opt_count} options · {wins} wins +${won_dol:.0f}{paused}")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
     return "\n".join(lines)
@@ -4713,7 +4720,7 @@ def build_chat_html() -> str:
       <div id="kalshi-grid">
         <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
         <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">OPEN</div><div class="k-big" id="k-poscount">—</div><div class="k-sub" id="k-trades">trades —</div></div>
+        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="k-wins">—</div><div class="k-sub" id="k-wins-sub">+$0 won</div></div>
         <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="k-winrate">—</div><div class="k-sub" id="k-running">—</div></div>
       </div>
       <div id="kalshi-right-col">
@@ -4734,9 +4741,9 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-cash">cash —</div></div>
+        <div class="k-card"><div class="k-lbl">FULL ACCOUNT</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-cash">spot · opts</div></div>
         <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">OPEN</div><div class="k-big" id="d-poscount">—</div><div class="k-sub" id="d-opens-sub">spot · options</div></div>
+        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won</div></div>
         <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="d-winrate">—</div><div class="k-sub" id="d-trades">trades —</div></div>
       </div>
       <div id="kalshi-right-col">
@@ -4745,7 +4752,7 @@ def build_chat_html() -> str:
           <div id="d-positions">none</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">OPEN OPTIONS (DERIBIT PAPER)</div>
+          <div class="k-section-hdr">OPEN OPTIONS <span id="d-opt-wallet" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">wallet —</span></div>
           <div id="d-options">—</div>
         </div>
         <div id="kalshi-section">
@@ -4850,6 +4857,7 @@ def build_chat_html() -> str:
 .k-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(140,180,230,0.5);margin-bottom:6px;}
 .k-big{font-size:22px;font-weight:300;color:#dfe8ff;line-height:1;}
 .k-big.pos{color:#5fffaa;} .k-big.neg{color:#ff6688;}
+.k-big-pos{color:#5fffaa;font-size:22px;font-weight:300;line-height:1;}
 .k-sub{font-size:9px;color:rgba(140,170,210,0.55);margin-top:4px;letter-spacing:1px;}
 #kalshi-section{margin-bottom:18px;}
 .k-section-hdr{font-size:9px;letter-spacing:3px;color:rgba(160,200,255,0.55);margin-bottom:8px;
@@ -5098,13 +5106,24 @@ function refreshDegen(){
   }).catch(()=>{});
   fetch('/degen/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
     if(!s || s.error) return;
-    const total = s.total_balance || s.balance || 0;
+    const spotTotal = s.total_balance || s.balance || 0;
     const cash  = s.cash_balance || 0;
-    const pnl   = s.total_pnl || 0;
-    const start = s.starting_balance || 500;
-    const pnlPct = start? (pnl/start*100) : 0;
-    document.getElementById('d-total').textContent = '$' + total.toFixed(2);
-    document.getElementById('d-cash').textContent = 'cash $' + cash.toFixed(2);
+    const optsBlock = s.options || {};
+    const optsAvail = Number(optsBlock.available || 0);
+    const optsTotalValue = Number(optsBlock.total_value || optsAvail);
+    // Grand total = spot wallet + options wallet (which includes open option market value)
+    const grandTotal = spotTotal + optsTotalValue;
+    document.getElementById('d-total').textContent = '$' + grandTotal.toLocaleString('en-US', {maximumFractionDigits:2});
+    document.getElementById('d-cash').textContent = `spot $${spotTotal.toFixed(0)} · opts $${optsTotalValue.toFixed(0)}`;
+
+    // Combined P&L (spot net + options realized + options unrealized)
+    const spotPnl = s.total_pnl || 0;
+    const optsRealized = Number(optsBlock.realized_pnl || 0);
+    const optsUnrealized = Number(optsBlock.unrealized_pnl || 0);
+    const pnl = spotPnl + optsRealized + optsUnrealized;
+    const spotStart = s.starting_balance || 500;
+    const totalStart = spotStart + Number(optsBlock.budget || 150);
+    const pnlPct = totalStart ? (pnl/totalStart*100) : 0;
     const pnlEl = document.getElementById('d-pnl');
     pnlEl.textContent = (pnl>=0?'+':'') + '$' + Math.abs(pnl).toFixed(2);
     pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
@@ -5112,21 +5131,29 @@ function refreshDegen(){
 
     const positions = s.positions || {};
     const posKeys = Object.keys(positions);
-    const options = (s.options && s.options.positions) ? s.options.positions : {};
+    const options = optsBlock.positions || {};
     const optKeys = Object.keys(options);
-    document.getElementById('d-poscount').textContent = posKeys.length + (optKeys.length ? '+' + optKeys.length : '');
-    document.getElementById('d-opens-sub').textContent =
-      `${posKeys.length} spot · ${optKeys.length} opt`;
 
-    // Win rate
+    // Options wallet info inline in the OPEN OPTIONS header
+    const optWalletEl = document.getElementById('d-opt-wallet');
+    if(optWalletEl) optWalletEl.textContent =
+      `wallet $${optsAvail.toFixed(0)} avail · $${optsTotalValue.toFixed(0)} total · ${optKeys.length} open`;
+
+    // Wins + Win Rate
     const trades = s.trades || [];
-    const closedOptTrades = (s.options && s.options.trades) || [];
+    const closedOptTrades = optsBlock.trades || [];
     const allClosed = trades.concat(closedOptTrades);
-    let wins = 0;
+    let wins = 0, winsDollars = 0, losses = 0, lossesDollars = 0;
     allClosed.forEach(t => {
       const p = t.pnl_usd ?? t.pnl ?? 0;
-      if (p > 0) wins++;
+      if (p > 0) { wins++; winsDollars += p; }
+      else if (p < 0) { losses++; lossesDollars += Math.abs(p); }
     });
+    const winsEl = document.getElementById('d-wins');
+    const winsSubEl = document.getElementById('d-wins-sub');
+    if(winsEl) winsEl.textContent = wins.toLocaleString();
+    if(winsSubEl) winsSubEl.textContent = `+$${winsDollars.toFixed(2)} won · ${losses} losses -$${lossesDollars.toFixed(2)}`;
+
     const wr = allClosed.length ? (wins/allClosed.length*100) : 0;
     const wrEl = document.getElementById('d-winrate');
     wrEl.textContent = allClosed.length ? wr.toFixed(0) + '%' : '—';
@@ -5347,21 +5374,26 @@ function refreshKalshi(){
     document.getElementById('k-pnlpct').textContent = (pnlPct>=0?'+':'') + pnlPct.toFixed(2) + '%';
     const pos = s.positions || {};
     const posArr = Array.isArray(pos) ? pos : Object.entries(pos).map(([k,v])=>({ticker:k, ...v}));
-    document.getElementById('k-poscount').textContent = posArr.length;
     const trades = s.trades || s.recently_closed || [];
-    document.getElementById('k-trades').textContent = (trades.length||0) + ' closed';
-    // Win rate from closed trades
-    let kWins = 0;
+    // Wins + losses tally
+    let kWins = 0, kWinsDollars = 0, kLosses = 0, kLossesDollars = 0;
     trades.forEach(t => {
-      const won = t.won != null ? t.won : ((t.pnl_usd ?? t.realized_pnl ?? 0) > 0);
-      if (won) kWins++;
+      const p = t.pnl_usd ?? t.realized_pnl ?? t.pnl ?? 0;
+      const won = t.won != null ? t.won : (p > 0);
+      if (won) { kWins++; if(p>0) kWinsDollars += p; }
+      else if (p < 0) { kLosses++; kLossesDollars += Math.abs(p); }
     });
+    const kwEl = document.getElementById('k-wins');
+    const kwSubEl = document.getElementById('k-wins-sub');
+    if(kwEl) kwEl.textContent = kWins.toLocaleString();
+    if(kwSubEl) kwSubEl.textContent = `+$${kWinsDollars.toFixed(2)} won · ${kLosses} losses -$${kLossesDollars.toFixed(2)}`;
+
     const kWr = trades.length ? (kWins/trades.length*100) : 0;
     const kWrEl = document.getElementById('k-winrate');
     kWrEl.textContent = trades.length ? kWr.toFixed(0) + '%' : '—';
     kWrEl.classList.toggle('pos', kWr >= 50 && trades.length >= 5);
     kWrEl.classList.toggle('neg', kWr < 40 && trades.length >= 5);
-    document.getElementById('k-running').textContent = (s.paper_mode===false ? 'LIVE' : 'paper') + (s.running ? ' · live' : ' · idle') + (s.paused ? ' · PAUSED' : '');
+    document.getElementById('k-running').textContent = (s.paper_mode===false ? 'LIVE' : 'paper') + (trades.length||0) + ' closed · ' + (s.paused ? 'PAUSED' : (s.running ? 'live' : 'idle'));
     // positions
     const posEl = document.getElementById('k-positions');
     if(posArr.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
