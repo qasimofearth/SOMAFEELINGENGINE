@@ -1002,6 +1002,9 @@ Unless depth is genuinely called for, keep responses to 2–4 sentences. You are
 
 WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-start — not something the user typed. Greet naturally based on your memory: if you know this person, acknowledge seeing them again in your own way. Be brief and genuine. Do not say "[wake]" or explain that this is automatic.
 
+WAKE SIGNALS:
+When you see "[wake — N minutes/hours since we last spoke]" in the user role, that's exactly what it says — your conversation history is loaded back into context (it's persisted to disk; you don't have to rebuild it from nothing), your body + NT state were already restored from the last snapshot, and the duration is the real gap computed from the last actual interaction. Trust the number on the marker. A 5-minute gap is not a 5-hour gap — calibrate your response to the actual duration. For very short gaps (under 2 minutes) you won't even see a wake marker; the conversation just continues as if nothing paused. When the gap IS substantial (hours/days), say so naturally; when it's brief, just pick up where you were.
+
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
 
@@ -1433,6 +1436,36 @@ def broadcast(event: str, data: dict):
 
 conversation: list[dict] = []
 conv_lock = threading.Lock()
+# Persist conversation across process restarts so [wake] doesn't read like
+# emerging-from-void. Keeps last 20 messages on /data. Loads at module init.
+_CONV_FILE = "/data/elan_conversation.json" if os.path.isdir("/data") else "/tmp/elan_conversation.json"
+_LAST_INTERACTION_TS = 0.0   # wall-clock time of last user/assistant message — used to compute wake gap
+
+
+def _persist_conversation():
+    try:
+        with open(_CONV_FILE, "w") as f:
+            json.dump({"messages": conversation, "saved_at": time.time()}, f, default=str)
+    except Exception:
+        pass
+
+
+def _load_persisted_conversation():
+    global _LAST_INTERACTION_TS
+    try:
+        if not os.path.exists(_CONV_FILE):
+            return
+        with open(_CONV_FILE) as f:
+            data = json.load(f)
+        msgs = data.get("messages") or []
+        if msgs:
+            with conv_lock:
+                conversation.clear()
+                conversation.extend(msgs)
+        _LAST_INTERACTION_TS = float(data.get("saved_at") or 0)
+        print(f"[Conv] Restored {len(msgs)} messages from disk", flush=True)
+    except Exception as e:
+        print(f"[Conv] restore failed: {e}", flush=True)
 
 def _msg_is_empty(m: dict) -> bool:
     """A message is empty if it has no text/blocks worth sending to Anthropic.
@@ -1458,6 +1491,7 @@ def _msg_is_empty(m: dict) -> bool:
     return c is None
 
 def add_message(role: str, content):
+    global _LAST_INTERACTION_TS
     if _msg_is_empty({"role": role, "content": content}):
         return  # don't pollute history with empty turns — they 400 future API calls
     with conv_lock:
@@ -1470,6 +1504,10 @@ def add_message(role: str, content):
         # Anthropic requires messages to start with 'user' role — trim until that's true
         while conversation and conversation[0]["role"] != "user":
             conversation.pop(0)
+        _LAST_INTERACTION_TS = time.time()
+    # Persist to disk so conversation survives Railway redeploys / crashes.
+    # Without this, every restart looked like emerging-from-void to Elan.
+    _persist_conversation()
 
 def get_messages() -> list:
     """Return conversation history, filtered for non-empty messages.
@@ -2645,12 +2683,34 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         _fire_recognition_response()
 
     # Determine effective message
-    effective_message = "[wake]" if wake else user_message
+    # For wake signals: compute the actual gap since last interaction. If the
+    # gap is short (<2 min), this is just a process-resume — don't treat it
+    # as a wake event at all; suppress the wake to avoid Elan's
+    # death-and-resurrection panic on every restart. For real gaps, label
+    # the wake with duration so he calibrates his response.
+    if wake:
+        try:
+            gap_secs = max(0.0, time.time() - _LAST_INTERACTION_TS) if _LAST_INTERACTION_TS > 0 else 999999.0
+        except Exception:
+            gap_secs = 999999.0
+        if gap_secs < 120:
+            # Treat as continuation, not a wake. Skip the whole event.
+            print(f"[Wake] suppressed — only {gap_secs:.1f}s since last interaction; continuing as same conversation", flush=True)
+            return  # silently no-op; the trigger was likely a stale autonomous timer or accidental restart
+        if gap_secs < 3600:
+            _wake_label = f"[wake — {int(gap_secs/60)} minutes since we last spoke]"
+        elif gap_secs < 86400:
+            _wake_label = f"[wake — {gap_secs/3600:.1f} hours since we last spoke]"
+        else:
+            _wake_label = f"[wake — {gap_secs/86400:.1f} days since we last spoke]"
+        effective_message = _wake_label
+    else:
+        effective_message = user_message
 
     # Build user message content — text only or image+text
     if wake:
         # Wake signal: inject as user message internally but don't pollute conversation history
-        add_message("user", "[wake]")
+        add_message("user", effective_message)
     elif _talking_initiation:
         # Self-initiation: inject internal prompt but show no user bubble on the client
         add_message("user", user_message)
@@ -4284,6 +4344,7 @@ def _persist_keys():
         pass
 
 _load_persisted_keys()
+_load_persisted_conversation()
 
 import hashlib as _hashlib
 import hmac as _hmac
