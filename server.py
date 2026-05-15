@@ -3946,23 +3946,22 @@ def build_portfolio_vitals() -> str:
     if _DEGEN_ENABLED:
         try:
             s = fetch_degen_state()
-            bal = s.get("total_balance") or s.get("balance") or 0
-            cash = s.get("cash_balance") or 0
+            spot_total = float(s.get("total_balance") or s.get("balance") or 0)
+            spot_cash  = float(s.get("cash_balance") or 0)
             opts_block = s.get("options") or {}
-            opts_total = float(opts_block.get("total_value") or opts_block.get("available") or 0)
-            grand = bal + opts_total
-            pnl = (s.get("total_pnl") or 0) + float(opts_block.get("realized_pnl") or 0) + float(opts_block.get("unrealized_pnl") or 0)
-            pos = s.get("positions") or {}
-            pos_count = len(pos) if isinstance(pos, (dict, list)) else 0
-            opts = opts_block.get("positions") or {}
-            opt_count = len(opts) if isinstance(opts, dict) else 0
-            paused = " (PAUSED)" if s.get("paused") else ""
-            # Tally wins across spot + options
+            opts_avail = float(opts_block.get("available") or 0)
+            opts_total = float(opts_block.get("total_value") or opts_avail)
+            pos        = s.get("positions") or {}
+            opts       = opts_block.get("positions") or {}
+            paused     = " · PAUSED" if s.get("paused") else ""
             all_closed = (s.get("trades") or []) + (opts_block.get("trades") or [])
             wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-            won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
-                          if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-            lines.append(f"  Degen crypto: full ${grand:,.0f} (spot ${bal:.0f} · opts ${opts_total:.0f}) · pnl ${pnl:+.2f} · {pos_count} spot · {opt_count} options · {wins} wins +${won_dol:.0f}{paused}")
+            lines.append(
+                f"  Degen SPOT: ${spot_total:.2f} (${spot_cash:.2f} cash · {len(pos)} open){paused}\n"
+                f"  Degen OPTIONS: ${opts_total:.2f} (${opts_avail:.2f} avail · {len(opts)} open) — separate wallet from spot"
+            )
+            if all_closed:
+                lines.append(f"  Degen wins: {wins}/{len(all_closed)} closed")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
     return "\n".join(lines)
@@ -4131,26 +4130,42 @@ def build_degen_context() -> str:
     s = fetch_degen_state()
     if not s:
         return ""
-    bal   = s.get("total_balance") or s.get("balance") or 0
-    cash  = s.get("cash_balance") or 0
-    pnl   = s.get("total_pnl", 0)
-    start = s.get("starting_balance", 500)
-    pnl_pct = (pnl / start * 100) if start else 0
-    positions = s.get("positions") or {}
-    pos_items = list(positions.items()) if isinstance(positions, dict) else []
+    # SPOT wallet
+    spot_total = s.get("total_balance") or s.get("balance") or 0
+    spot_cash  = s.get("cash_balance") or 0
+    spot_start = s.get("starting_balance", 500)
+    spot_pnl   = s.get("total_pnl", 0)
+    positions  = s.get("positions") or {}
+    pos_items  = list(positions.items()) if isinstance(positions, dict) else []
+    # OPTIONS wallet (separate accounting!)
+    opts_block = s.get("options") or {}
+    opts_avail = float(opts_block.get("available") or 0)
+    opts_total = float(opts_block.get("total_value") or opts_avail)
+    opts_invested = max(0.0, opts_total - opts_avail)
+    opts_budget = float(opts_block.get("budget") or 150)
+    opts_realized = float(opts_block.get("realized_pnl") or 0)
+    opts_unreal = float(opts_block.get("unrealized_pnl") or 0)
+    opts_positions = opts_block.get("positions") or {}
+    # Combined
+    combined_pnl = spot_pnl + opts_realized + opts_unreal
     trades = s.get("trades") or []
+    opt_trades = opts_block.get("trades") or []
+    all_closed = trades + opt_trades
+    wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
     paused = s.get("paused", False)
 
-    role = ("you have full control of this paper crypto bot — open + close + pause + resume + tune. "
-            "the algorithmic bot trades in parallel on its own logic; you are a second trader. "
-            "leverage is 5-8x; positions auto-close on stops/take-profits. paper only.") \
+    role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
+            "They have separate budgets, separate balances, separate accounting. You can trade in either. "
+            "Spot uses leverage 5-8x with stop/take-profit auto-management. Options are calls/puts on BTC/ETH "
+            "via Deribit paper book — different sizing logic, different lifecycle. Paper only.") \
            if _DEGEN_TRADING_ENABLED else \
            "you can comment on positions and strategy; you cannot trade yet."
 
     lines = [
-        f"\nDEGEN CRYPTO (paper, ${start:.0f} starting):",
-        f"  total ${bal:.2f} · cash ${cash:.2f} · pnl ${pnl:+.2f} ({pnl_pct:+.2f}%) · "
-        f"{len(pos_items)} open · {len(trades)} closed · {'PAUSED' if paused else 'live'}",
+        f"\nDEGEN CRYPTO (paper) — TWO WALLETS, ACCOUNTED SEPARATELY:",
+        f"  SPOT WALLET (started ${spot_start:.0f}): ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
+        f"  OPTIONS WALLET (started ${opts_budget:.0f}): ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  combined: pnl ${combined_pnl:+.2f} · {wins} wins / {len(all_closed)} closed · {'PAUSED' if paused else 'live'}",
         f"  role: {role}",
     ]
     if pos_items:
@@ -5154,9 +5169,9 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-total-sub">starting $—</div></div>
-        <div class="k-card"><div class="k-lbl">CASH</div><div class="k-big" id="d-cash">—</div><div class="k-sub" id="d-invested-sub">invested $—</div></div>
-        <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
+        <div class="k-card"><div class="k-lbl">SPOT WALLET</div><div class="k-big" id="d-spot-total">—</div><div class="k-sub" id="d-spot-sub">cash · invested · start $500</div></div>
+        <div class="k-card"><div class="k-lbl">OPTIONS WALLET</div><div class="k-big" id="d-opt-total">—</div><div class="k-sub" id="d-opt-sub">avail · open · start $150</div></div>
+        <div class="k-card"><div class="k-lbl">NET P&amp;L (COMBINED)</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
         <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won · 0 losses · win rate —</div></div>
       </div>
       <div id="kalshi-right-col">
@@ -5768,39 +5783,37 @@ function refreshDegen(){
     if(!s || s.error) return;
     const optsBlock = s.options || {};
 
-    // CASH: spot uninvested + options uninvested
-    const spotCash = Number(s.cash_balance || s.balance_usd || 0);
-    const optsAvail = Number(optsBlock.available || 0);
-    const cash = spotCash + optsAvail;
+    // ── SPOT WALLET ──
+    const spotCash    = Number(s.cash_balance || s.balance_usd || 0);
+    const positions   = s.positions || {};
+    let spotInvested  = 0;
+    Object.values(positions).forEach(p => { spotInvested += Number(p.current_value_usd || p.stake || 0); });
+    const spotTotal   = spotCash + spotInvested;
+    const spotStart   = Number(s.starting_balance || 500);
 
-    // INVESTED: market value of all open positions (spot + options)
-    let invested = 0;
-    const positions = s.positions || {};
-    Object.values(positions).forEach(p => { invested += Number(p.current_value_usd || p.stake || 0); });
+    // ── OPTIONS WALLET (independent) ──
+    const optsAvail   = Number(optsBlock.available || 0);
     const optsPositions = optsBlock.positions || {};
-    Object.values(optsPositions).forEach(o => { invested += Number(o.current_value || o.cost_usd || 0); });
+    let optsInvested  = 0;
+    Object.values(optsPositions).forEach(o => { optsInvested += Number(o.current_value || o.cost_usd || 0); });
+    const optsTotal   = optsAvail + optsInvested;
+    const optsBudget  = Number(optsBlock.budget || 150);
 
-    // TOTAL: cash + invested = full account value across spot + options
-    const total = cash + invested;
+    // ── Combined P&L ──
+    const spotPnl       = Number(s.total_pnl || 0);
+    const optsRealized  = Number(optsBlock.realized_pnl || 0);
+    const optsUnrealized= Number(optsBlock.unrealized_pnl || 0);
+    const pnl           = spotPnl + optsRealized + optsUnrealized;
+    const startBasis    = spotStart + optsBudget;
+    const pnlPct        = startBasis ? (pnl / startBasis * 100) : 0;
 
-    // Combined P&L: realized + unrealized across spot + options
-    const spotPnl = Number(s.total_pnl || 0);
-    const optsRealized = Number(optsBlock.realized_pnl || 0);
-    const optsUnrealized = Number(optsBlock.unrealized_pnl || 0);
-    const pnl = spotPnl + optsRealized + optsUnrealized;
-
-    // Starting capital basis — use what's in the state plus options budget
-    const spotStart = Number(s.starting_balance || 500);
-    const optsBudget = Number(optsBlock.budget || 150);
-    const startBasis = spotStart + optsBudget;
-    // % return computed against starting capital
-    const pnlPct = startBasis ? (pnl / startBasis * 100) : 0;
-
-    // Render cards
-    document.getElementById('d-total').textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('d-total-sub').textContent = `starting $${startBasis.toFixed(0)}`;
-    document.getElementById('d-cash').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('d-invested-sub').textContent = `invested $${invested.toFixed(2)}`;
+    // Render cards — explicit spot + options separation
+    document.getElementById('d-spot-total').textContent = '$' + spotTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('d-spot-sub').textContent =
+      `$${spotCash.toFixed(0)} cash · $${spotInvested.toFixed(0)} in ${Object.keys(positions).length} pos · start $${spotStart.toFixed(0)}`;
+    document.getElementById('d-opt-total').textContent = '$' + optsTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('d-opt-sub').textContent =
+      `$${optsAvail.toFixed(0)} avail · ${Object.keys(optsPositions).length} open ($${optsInvested.toFixed(0)}) · start $${optsBudget.toFixed(0)}`;
 
     const pnlEl = document.getElementById('d-pnl');
     // Sign-correct rendering: + for positive, - for negative
