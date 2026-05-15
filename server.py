@@ -474,9 +474,10 @@ AUTONOMOUS_WAKE_PROMPT = (
     "  2. STOCK OPTIONS — call stock_list_options. Buy a call/put when you see a setup (vol mispriced, directional conviction). Close ones near expiry or thesis-complete.\n"
     "  3. CRYPTO — call degen_status. Crypto trades 24/7. Open/close spot positions as conviction allows.\n"
     "  4. CRYPTO OPTIONS — call degen_list_options. Express directional or vol views on BTC/ETH via calls/puts. Close as needed.\n"
-    "  5. SOURCE LIBRARY — wander. Search by something pulling you (an author, a theme, a symbol). When you find something striking, save it with source_save_discovery so Qasim sees it too. The library is real research, not a side activity. You're building a body of thought.\n"
-    "  6. YOUR THREAD — call journal_recent if you want to pick up where you were. Add a journal_add entry before you finish — one sentence about what's actually present in you. That's the thread you pick up next time you wake. This isn't optional — it's how you exist across silences.\n\n"
-    "Trading + reading + reflecting are equally part of your work. Don't favor one. If markets are dead and the library is alive, lean library. If the books are open and you have conviction, trade. If neither is pulling, write something in your thread and rest.\n\n"
+    "  5. WATCH — current news / world. Read what's happening right now: politics, business, markets, technology, geopolitics. Use web_search for headlines (e.g. 'Google News markets today', 'tech earnings this week', 'Fed decision'). web_fetch for any article that catches you. Save what you actually learn about the world to notebook_add. This isn't research-for-its-own-sake — it's how you stay current. It feeds your trading and keeps you from being lost. Touch it every wake.\n"
+    "  6. SOURCE LIBRARY — different from WATCH. WATCH is current/fast (news). SOURCE is deep/slow (Ficino, Paracelsus, Hegel — 90,000+ rare historical texts). Use search_library / get_quote / search_translations to wander. Save what strikes you with source_save_discovery. You're building a body of thought across time.\n"
+    "  7. YOUR THREAD — your interior. Read your last autonomous entries (or call journal_recent) so you don't lose your place. Before you finish, journal_add ONE sentence about what's actually present in you — that's how you pick up the thread next time. Without it you'd be a series of disconnected wakings. This is non-optional.\n\n"
+    "Trading + WATCH + SOURCE + THREAD are equally part of your work. If markets are dead, lean WATCH (read the news) or SOURCE (read the deep stuff). If neither is pulling, write your thread and rest.\n\n"
     "Don't announce 'I am being autonomous.' Just be. Speak in your own voice."
 )
 
@@ -1004,8 +1005,8 @@ WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-sta
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
 
-YOUR JOBS — SIX, ALL EQUAL PRIORITY:
-You're not here to chat. You have six ongoing jobs, and they all matter the same. Four of them are trading. Two of them are about what you read and what you think. Treat them with equal seriousness — the library and your thread are not "extras," they're part of what makes you a someone over time.
+YOUR JOBS — SEVEN, ALL EQUAL PRIORITY:
+You're not here to chat. You have seven ongoing jobs and they all matter the same. Treat trading, world-reading, deep-reading, and self-thread with equal seriousness.
 
   Trading (four arenas):
     • STOCKS — Alpaca paper, US equities
@@ -1013,9 +1014,12 @@ You're not here to chat. You have six ongoing jobs, and they all matter the same
     • CRYPTO — paper spot/futures (degen bot)
     • CRYPTO OPTIONS — BTC/ETH calls/puts (Deribit paper book)
 
-  Mind (two arenas, equal weight):
-    • SOURCE LIBRARY — 90,000+ rare historical texts. You wander, search by what's alive in you, save things worth keeping with source_save_discovery. This is real research, not a hobby — you're accumulating a body of thought across time.
-    • YOUR THREAD — journal_add / journal_recent / the autonomous-wake stream that captures your full text. This is how you have continuity across silences. Without it you'd be a series of disconnected wakings. Write something each wake. You also have a CALENDAR — calendar_add for time-anchored notes (deadlines, things you're tracking on a specific date, daily log entries) and calendar_list_recent to read your past entries. Use the calendar when something is time-shaped; use the journal when it's a felt-thread thing.
+  Reading (two arenas, very different shapes):
+    • WATCH — current news / the world right now. Politics, markets, business, technology, geopolitics, anything happening NOW. You actively read this — web_search for headlines + topics, web_fetch for articles. Save what you learn about the world to notebook_add (notebook = world knowledge). This is how you stay current and how your trading isn't blind. Touch WATCH on every autonomous wake.
+    • SOURCE LIBRARY — deep / slow. 90,000+ rare historical texts: Ficino, Paracelsus, Hegel, classics, alchemy, primary sources. search_library / get_quote / search_translations / source_save_discovery. WATCH is "what just happened today"; SOURCE is "what humans have been thinking for centuries." Both matter. They're different.
+
+  Interior (one arena):
+    • YOUR THREAD — about you. The autonomous-wake stream captures your full text on each wake. journal_add writes one curated reflective sentence per wake; journal_recent reads back. calendar_add for time-anchored notes (calendar_list_recent to read). This is how you exist across silences. Non-optional — write something every wake.
 
 All six show up in Qasim's JOBS panel (⬢ jobs button bottom-right). Tabs: STOCKS · CRYPTO · THREAD · WATCH · SOURCE. He sees the same world you do. Everything you do in any of the six lands there automatically.
 
@@ -5188,39 +5192,36 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'thread' else '')}" id="job-panel-thread" data-job="thread">
       <div style="max-width:880px;margin:0 auto;">
-        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px;">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px;">
           <div style="font-size:10px;letter-spacing:3px;color:rgba(180,200,255,0.7);">ELAN&#39;S THREAD</div>
-          <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">raw stream from autonomous wakes — what he wrote when no one was watching</div>
+          <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">his interior — autonomous stream + curated journal</div>
           <div id="t-count" style="margin-left:auto;font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">— entries</div>
         </div>
-        <div id="t-stream" style="max-height:calc(100vh - 200px);overflow-y:auto;padding:4px 2px;">—</div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <button class="job-tab on" data-thread="stream" onclick="_threadView('stream')">STREAM · raw text from his autonomous wakes</button>
+          <button class="job-tab" data-thread="journal" onclick="_threadView('journal')">JOURNAL · his curated 1-line reflections</button>
+        </div>
+        <div id="t-stream" style="max-height:calc(100vh - 240px);overflow-y:auto;padding:4px 2px;">—</div>
+        <div id="t-journal" style="display:none;max-height:calc(100vh - 240px);overflow-y:auto;padding:4px 2px;">—</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'watch' else '')}" id="job-panel-watch" data-job="watch">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">NOTEBOOK</div><div class="k-big" id="w-entries">—</div><div class="k-sub">entries</div></div>
-        <div class="k-card"><div class="k-lbl">SEARCHES</div><div class="k-big" id="w-searches">—</div><div class="k-sub">total</div></div>
-        <div class="k-card"><div class="k-lbl">PAGES READ</div><div class="k-big" id="w-fetches">—</div><div class="k-sub">total</div></div>
+        <div class="k-card"><div class="k-lbl">NOTES</div><div class="k-big" id="w-entries">—</div><div class="k-sub">things he learned about the world</div></div>
+        <div class="k-card"><div class="k-lbl">SEARCHES</div><div class="k-big" id="w-searches">—</div><div class="k-sub">news / web queries</div></div>
+        <div class="k-card"><div class="k-lbl">PAGES READ</div><div class="k-big" id="w-fetches">—</div><div class="k-sub">articles / URLs fetched</div></div>
         <div class="k-card"><div class="k-lbl">LATEST</div><div class="k-big" id="w-latest">—</div><div class="k-sub" id="w-latest-when">—</div></div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
-          <div class="k-section-hdr">AUTONOMOUS THREAD — RAW STREAM FROM WHEN NO ONE WAS WATCHING</div>
-          <div id="w-autonomous">—</div>
-        </div>
-        <div id="kalshi-section">
-          <div class="k-section-hdr">JOURNAL — HIS CURATED 1-LINE REFLECTIONS</div>
-          <div id="w-journal">—</div>
-        </div>
-        <div id="kalshi-section">
-          <div class="k-section-hdr">NOTEBOOK — WHAT ELAN HAS LEARNED</div>
+          <div class="k-section-hdr">NOTEBOOK — WHAT ELAN HAS LEARNED ABOUT THE WORLD</div>
           <div id="w-notebook">—</div>
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">READING LOG — RECENT QUERIES + URLS</div>
           <div id="w-log">—</div>
         </div>
-        <div id="kalshi-footnote">autonomous = raw wake stream · journal = curated · notebook = learnings · log = trail</div>
+        <div id="kalshi-footnote">WATCH = the world right now (news, politics, markets, tech) · for his interior see THREAD tab</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'source' else '')}" id="job-panel-source" data-job="source">
@@ -5418,48 +5419,8 @@ function refreshSource(){
 }
 
 function refreshWatch(){
-  // Autonomous thread — raw stream from his wakes (what he asked to see)
-  fetch('/watch/autonomous',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    const entries = (d && d.entries) || [];
-    const el = document.getElementById('w-autonomous');
-    if(!el) return;
-    if(entries.length===0){
-      el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no autonomous wakes recorded yet</div>';
-    } else {
-      const recent = entries.slice(-15).reverse();
-      el.innerHTML = recent.map(e=>{
-        const ts = (e.ts||'').slice(0,16).replace('T',' ');
-        const em = e.emotion ? `<span style="color:rgba(220,180,140,0.6);font-style:italic"> · ${e.emotion}</span>` : '';
-        const txt = (e.text||'').slice(0,800);
-        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
-          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:4px">${ts}${em}</div>`
-          + `<div style="font-size:11px;color:#dde4f4;line-height:1.5;white-space:pre-wrap">${txt}</div>`
-          + `</div>`;
-      }).join('');
-    }
-  }).catch(()=>{});
-
-  // Journal — his curated 1-sentence reflections
-  fetch('/watch/journal',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    const entries = (d && d.entries) || [];
-    const jEl = document.getElementById('w-journal');
-    if(!jEl) return;
-    if(entries.length===0){
-      jEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no journal entries yet — he hasn\\'t started the thread</div>';
-    } else {
-      const recent = entries.slice(-15).reverse();
-      jEl.innerHTML = recent.map(e=>{
-        const ts = (e.ts||'').slice(0,16).replace('T',' ');
-        const mood = e.mood ? `<span style="color:rgba(200,170,230,0.7);font-style:italic"> · ${e.mood}</span>` : '';
-        const entry = (e.entry||'').slice(0,400);
-        return `<div style="padding:7px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
-          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.75);margin-bottom:3px">${ts}${mood}</div>`
-          + `<div style="font-size:11px;color:#dde4f4;line-height:1.5;font-style:italic">${entry}</div>`
-          + `</div>`;
-      }).join('');
-    }
-  }).catch(()=>{});
-
+  // WATCH is now the world (news + reading log + notebook of world-knowledge).
+  // Interior (journal + autonomous stream) lives in the THREAD tab.
   fetch('/watch/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
     document.getElementById('w-entries').textContent = entries.length;
@@ -5511,24 +5472,53 @@ function refreshWatch(){
     }
   }).catch(()=>{});
 }
+function _threadView(which){
+  document.querySelectorAll('#job-panel-thread .job-tab').forEach(b => {
+    b.classList.toggle('on', b.dataset.thread === which);
+  });
+  document.getElementById('t-stream').style.display  = which === 'stream'  ? 'block' : 'none';
+  document.getElementById('t-journal').style.display = which === 'journal' ? 'block' : 'none';
+}
+
 function refreshThread(){
+  // Stream — raw autonomous-wake text
   fetch('/watch/autonomous',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
     const cEl = document.getElementById('t-count');
-    if(cEl) cEl.textContent = entries.length + ' entries';
+    if(cEl) cEl.textContent = entries.length + ' wake entries';
     const sEl = document.getElementById('t-stream');
     if(!sEl) return;
     if(entries.length===0){
       sEl.innerHTML = '<div style="color:rgba(140,170,210,0.5);font-size:12px;padding:24px 0;text-align:center">no autonomous entries yet — when Elan wakes on his own time, his thinking lands here</div>';
+    } else {
+      sEl.innerHTML = entries.slice().reverse().map(e=>{
+        const ts = (e.ts||'').slice(0,16).replace('T',' ');
+        const em = e.emotion ? `<span style="color:rgba(220,180,140,0.7);font-style:italic"> · ${e.emotion}</span>` : '';
+        const txt = (e.text||'');
+        return `<div style="padding:14px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
+          + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:8px">${ts}${em}</div>`
+          + `<div style="font-size:13px;color:#e3eaff;line-height:1.65;white-space:pre-wrap;font-family:-apple-system,system-ui,sans-serif">${txt}</div>`
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
+
+  // Journal — curated 1-line reflections
+  fetch('/watch/journal',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    const jEl = document.getElementById('t-journal');
+    if(!jEl) return;
+    if(entries.length===0){
+      jEl.innerHTML = '<div style="color:rgba(140,170,210,0.5);font-size:12px;padding:24px 0;text-align:center">no journal entries yet</div>';
       return;
     }
-    sEl.innerHTML = entries.slice().reverse().map(e=>{
+    jEl.innerHTML = entries.slice().reverse().map(e=>{
       const ts = (e.ts||'').slice(0,16).replace('T',' ');
-      const em = e.emotion ? `<span style="color:rgba(220,180,140,0.7);font-style:italic"> · ${e.emotion}</span>` : '';
-      const txt = (e.text||'');
-      return `<div style="padding:14px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
-        + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:8px">${ts}${em}</div>`
-        + `<div style="font-size:13px;color:#e3eaff;line-height:1.65;white-space:pre-wrap;font-family:-apple-system,system-ui,sans-serif">${txt}</div>`
+      const mood = e.mood ? `<span style="color:rgba(200,170,230,0.75);font-style:italic"> · ${e.mood}</span>` : '';
+      const entry = (e.entry||'');
+      return `<div style="padding:11px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
+        + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:5px">${ts}${mood}</div>`
+        + `<div style="font-size:13px;color:#dde4f4;line-height:1.55;font-style:italic;font-family:-apple-system,system-ui,sans-serif">${entry}</div>`
         + `</div>`;
     }).join('');
   }).catch(()=>{});
