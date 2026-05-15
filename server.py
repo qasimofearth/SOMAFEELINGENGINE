@@ -3554,10 +3554,9 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "ok": True,
             "GRAND_TOTAL_USD":  round(grand_total, 2),  # spot wallet + options wallet COMBINED
             "spot_balance":     round(spot_bal, 2),
-            "cash":             s.get("cash_balance"),
+            "spot_cash":        s.get("cash_balance"),
             "options_total":    round(opts_total, 2),  # available + open option values
             "options_available": opts_block.get("available"),
-            "starting_balance": s.get("starting_balance"),
             "combined_pnl":     round(combined_pnl, 2),
             "paused":           s.get("paused", False),
             "running":          s.get("running", False),
@@ -4163,8 +4162,8 @@ def build_degen_context() -> str:
 
     lines = [
         f"\nDEGEN CRYPTO (paper) — TWO WALLETS, ACCOUNTED SEPARATELY:",
-        f"  SPOT WALLET (started ${spot_start:.0f}): ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
-        f"  OPTIONS WALLET (started ${opts_budget:.0f}): ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
+        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
         f"  combined: pnl ${combined_pnl:+.2f} · {wins} wins / {len(all_closed)} closed · {'PAUSED' if paused else 'live'}",
         f"  role: {role}",
     ]
@@ -5169,8 +5168,8 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">SPOT WALLET</div><div class="k-big" id="d-spot-total">—</div><div class="k-sub" id="d-spot-sub">cash · invested · start $500</div></div>
-        <div class="k-card"><div class="k-lbl">OPTIONS WALLET</div><div class="k-big" id="d-opt-total">—</div><div class="k-sub" id="d-opt-sub">avail · open · start $150</div></div>
+        <div class="k-card"><div class="k-lbl">SPOT WALLET</div><div class="k-big" id="d-spot-total">—</div><div class="k-sub" id="d-spot-sub">cash · invested</div></div>
+        <div class="k-card"><div class="k-lbl">OPTIONS WALLET</div><div class="k-big" id="d-opt-total">—</div><div class="k-sub" id="d-opt-sub">available · open</div></div>
         <div class="k-card"><div class="k-lbl">NET P&amp;L (COMBINED)</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
         <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won · 0 losses · win rate —</div></div>
       </div>
@@ -5810,10 +5809,10 @@ function refreshDegen(){
     // Render cards — explicit spot + options separation
     document.getElementById('d-spot-total').textContent = '$' + spotTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('d-spot-sub').textContent =
-      `$${spotCash.toFixed(0)} cash · $${spotInvested.toFixed(0)} in ${Object.keys(positions).length} pos · start $${spotStart.toFixed(0)}`;
+      `$${spotCash.toFixed(0)} cash · $${spotInvested.toFixed(0)} in ${Object.keys(positions).length} pos`;
     document.getElementById('d-opt-total').textContent = '$' + optsTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('d-opt-sub').textContent =
-      `$${optsAvail.toFixed(0)} avail · ${Object.keys(optsPositions).length} open ($${optsInvested.toFixed(0)}) · start $${optsBudget.toFixed(0)}`;
+      `$${optsAvail.toFixed(0)} avail · ${Object.keys(optsPositions).length} open ($${optsInvested.toFixed(0)})`;
 
     const pnlEl = document.getElementById('d-pnl');
     // Sign-correct rendering: + for positive, - for negative
