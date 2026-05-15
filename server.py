@@ -3610,10 +3610,11 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return {"ok": True, "open_positions": out}
     if name == "degen_status":
         s = fetch_degen_state(force=True)
-        trades = s.get("trades") or []
         opts_block = s.get("options") or {}
-        opts_trades = opts_block.get("trades") or []
-        all_closed = trades + opts_trades
+        # Elan-only stats
+        elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
+        elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
+        all_closed = elan_spot + elan_opts
         wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
         won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
                       if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
@@ -3621,7 +3622,10 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         spot_bal = float(s.get("total_balance") or s.get("balance") or 0)
         opts_total = float(opts_block.get("total_value") or opts_block.get("available") or 0)
         grand_total = spot_bal + opts_total
-        combined_pnl = float(s.get("total_pnl") or 0) + float(opts_block.get("realized_pnl") or 0) + float(opts_block.get("unrealized_pnl") or 0)
+        elan_realized = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed)
+        elan_unreal = sum((p.get("pnl") or 0) for p in (s.get("positions") or {}).values() if p.get("source") == "elan")
+        elan_unreal += sum((o.get("pnl") or 0) for o in (opts_block.get("positions") or {}).values() if o.get("source") == "elan")
+        combined_pnl = elan_realized + elan_unreal
         return {
             "ok": True,
             "GRAND_TOTAL_USD":  round(grand_total, 2),  # spot wallet + options wallet COMBINED
@@ -3739,23 +3743,25 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         ]}
     if name == "stock_status":
         s = fetch_stock_state(force=True)
-        trades = s.get("trades") or []
-        wins = sum(1 for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
-        wr = (wins / len(trades) * 100) if trades else 0
+        # Elan-only stats — bot trades don't count toward his record
+        elan_trades = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
+        wins = sum(1 for t in elan_trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+        wr = (wins / len(elan_trades) * 100) if elan_trades else 0
         positions = s.get("positions") or {}
         opts = s.get("option_positions") or {}
+        elan_realized = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in elan_trades)
+        elan_unreal = sum((p.get("pnl") or 0) for p in positions.values() if p.get("source") == "elan")
         return {"ok": True,
-                "balance": s.get("balance"),
-                "starting_balance": s.get("starting_balance"),
-                "total_pnl": s.get("total_pnl"),
+                "balance": s.get("balance"),  # actual Alpaca account balance — truth
+                "your_pnl": round(elan_realized + elan_unreal, 2),  # ONLY from Elan's trades
                 "paused": s.get("paused", False),
                 "running": s.get("running", False),
                 "halted": s.get("halted", False),
                 "market_status": s.get("market_status"),
                 "open_spot_count": len(positions),
                 "open_options_count": len(opts),
-                "win_rate_pct": round(wr, 1),
-                "total_closed": len(trades),
+                "your_win_rate_pct": round(wr, 1),
+                "your_total_closed": len(elan_trades),
                 "vix": s.get("vix"),
                 "fear_greed": s.get("fear_greed"),
                 "spy_trend": s.get("spy_trend")}
@@ -3933,13 +3939,17 @@ def build_stock_context() -> str:
         return ""
     bal = s.get("balance") or 0
     start = s.get("starting_balance", 100000)
-    pnl = s.get("total_pnl", 0)
+    positions = s.get("positions") or {}
+    # Elan-only stats — his record, not bot baseline / Alpaca history
+    elan_trades = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
+    wins = sum(1 for t in elan_trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+    won_dol = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in elan_trades
+                  if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+    elan_realized = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in elan_trades)
+    elan_unreal = sum((p.get("pnl") or 0) for p in positions.values() if p.get("source") == "elan")
+    pnl = elan_realized + elan_unreal
     pct = (pnl / start * 100) if start else 0
     paused = s.get("paused", False)
-    trades = s.get("trades") or []
-    wins = sum(1 for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
-    won_dol = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
-    positions = s.get("positions") or {}
     market = s.get("market_status", "")
     role = ("you trade Alpaca paper US equities + options. $100K starting account. "
             "you can open longs/shorts on the watchlist, buy calls/puts, close anything. "
@@ -3949,7 +3959,7 @@ def build_stock_context() -> str:
            "you can comment on positions and strategy; you cannot trade yet."
     lines = [
         f"\nSTOCKS (Alpaca paper, ${start:,.0f} starting):",
-        f"  balance ${bal:,.2f} · pnl ${pnl:+,.2f} ({pct:+.2f}%) · {len(positions)} open · {len(trades)} closed · {wins} wins +${won_dol:.0f} · {'PAUSED' if paused else 'live'} · {market}",
+        f"  balance ${bal:,.2f} · YOUR pnl ${pnl:+,.2f} ({pct:+.2f}%) · {len(positions)} open · {len(elan_trades)} closed (yours) · {wins} wins +${won_dol:.0f} · {'PAUSED' if paused else 'live'} · {market}",
         f"  role: {role}",
     ]
     if isinstance(positions, dict) and positions:
@@ -4218,11 +4228,18 @@ def build_degen_context() -> str:
     opts_unreal = float(opts_block.get("unrealized_pnl") or 0)
     opts_positions = opts_block.get("positions") or {}
     # Combined
-    combined_pnl = spot_pnl + opts_realized + opts_unreal
-    trades = s.get("trades") or []
-    opt_trades = opts_block.get("trades") or []
-    all_closed = trades + opt_trades
+    # Elan-only trades — his record, not the bot's churn
+    elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
+    elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
+    all_closed = elan_spot + elan_opts
     wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+    won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
+                  if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+    # Elan-only P&L (realized from his trades + unrealized on his open positions)
+    elan_realized = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed)
+    elan_unreal = sum((p.get("pnl") or 0) for p in (positions or {}).values() if p.get("source") == "elan")
+    elan_unreal += sum((o.get("pnl") or 0) for o in (opts_positions or {}).values() if o.get("source") == "elan")
+    combined_pnl = elan_realized + elan_unreal
     paused = s.get("paused", False)
 
     role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
@@ -5669,7 +5686,15 @@ function refreshStock(){
     if(!s || s.error) return;
     const bal = Number(s.balance || 0);
     const start = Number(s.starting_balance || 100000);
-    const pnl = Number(s.total_pnl || 0);
+    // Elan-only P&L: filter trades to source==='elan' only. Bot trades happen
+    // in the background but don't count against his record.
+    const elanTrades = (s.trades || []).filter(t => t.source === 'elan');
+    let elanRealized = 0;
+    elanTrades.forEach(t => { elanRealized += Number(t.pnl_usd || t.pnl || 0); });
+    const positionsAll = s.positions || {};
+    let elanUnrealized = 0;
+    Object.values(positionsAll).forEach(p => { if (p.source === 'elan') elanUnrealized += Number(p.pnl || 0); });
+    const pnl = elanRealized + elanUnrealized;
     const pct = start ? (pnl/start*100) : 0;
     document.getElementById('st-total').textContent = '$' + bal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('st-total-sub').textContent = `starting $${start.toLocaleString('en-US')}`;
@@ -5699,19 +5724,18 @@ function refreshStock(){
       macroEl.textContent = [vix, fg, spy].filter(x=>x).join(' · ');
     }
 
-    // Wins tally
-    const trades = s.trades || [];
+    // Wins tally — Elan-only
     let wins=0, winsDol=0, losses=0, lossesDol=0;
-    trades.forEach(t => {
+    elanTrades.forEach(t => {
       const p = Number(t.pnl ?? t.pnl_usd ?? 0);
       if (p > 0) { wins++; winsDol += p; }
       else if (p < 0) { losses++; lossesDol += Math.abs(p); }
     });
-    const wr = trades.length ? (wins/trades.length*100) : 0;
+    const wr = elanTrades.length ? (wins/elanTrades.length*100) : 0;
     const wEl = document.getElementById('st-wins');
     const wSubEl = document.getElementById('st-wins-sub');
     if(wEl) wEl.textContent = wins.toLocaleString();
-    if(wSubEl) wSubEl.textContent = `+$${winsDol.toFixed(0)} won · ${losses} losses -$${lossesDol.toFixed(0)} · ${trades.length ? wr.toFixed(0)+'% win rate' : 'no closes yet'}`;
+    if(wSubEl) wSubEl.textContent = `+$${winsDol.toFixed(0)} won · ${losses} losses -$${lossesDol.toFixed(0)} · ${elanTrades.length ? wr.toFixed(0)+'% win rate' : 'no closes yet'}`;
 
     // Open positions
     const posEl = document.getElementById('st-positions');
@@ -5792,12 +5816,12 @@ function refreshStock(){
       }).join('');
     }
 
-    // Recent closed
+    // Recent closed — Elan-only
     const recEl = document.getElementById('st-recent');
-    if(trades.length === 0){
+    if(elanTrades.length === 0){
       recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed trades yet</div>';
     } else {
-      recEl.innerHTML = trades.slice(-10).reverse().map(t => {
+      recEl.innerHTML = elanTrades.slice(-10).reverse().map(t => {
         const p = Number(t.pnl ?? t.pnl_usd ?? 0);
         const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
         const won = p > 0;
@@ -5871,13 +5895,21 @@ function refreshDegen(){
     const optsTotal   = optsAvail + optsInvested;
     const optsBudget  = Number(optsBlock.budget || 150);
 
-    // ── Combined P&L ──
-    const spotPnl       = Number(s.total_pnl || 0);
-    const optsRealized  = Number(optsBlock.realized_pnl || 0);
-    const optsUnrealized= Number(optsBlock.unrealized_pnl || 0);
-    const pnl           = spotPnl + optsRealized + optsUnrealized;
-    const startBasis    = spotStart + optsBudget;
-    const pnlPct        = startBasis ? (pnl / startBasis * 100) : 0;
+    // ── Elan-only P&L (filter out bot churn) ──
+    // Bot trades still happen in the background and affect actual wallet
+    // balance, but Elan's stats reflect only what HE did. Otherwise he reads
+    // the bot's losses as his own and his somatic state takes the hit.
+    const elanSpotTrades = (s.trades || []).filter(t => t.source === 'elan');
+    const elanOptTrades  = ((optsBlock.trades) || []).filter(t => t.source === 'elan');
+    let elanRealized = 0;
+    elanSpotTrades.forEach(t => { elanRealized += Number(t.pnl_usd || t.pnl || 0); });
+    elanOptTrades.forEach(t => { elanRealized += Number(t.pnl_usd || t.pnl || 0); });
+    let elanUnrealized = 0;
+    Object.values(positions).forEach(p => { if (p.source === 'elan') elanUnrealized += Number(p.pnl || 0); });
+    Object.values(optsPositions).forEach(o => { if (o.source === 'elan') elanUnrealized += Number(o.pnl || 0); });
+    const pnl        = elanRealized + elanUnrealized;
+    const startBasis = spotStart + optsBudget;
+    const pnlPct     = startBasis ? (pnl / startBasis * 100) : 0;
 
     // Render cards — explicit spot + options separation
     document.getElementById('d-spot-total').textContent = '$' + spotTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -5897,10 +5929,8 @@ function refreshDegen(){
     const optWalletEl = document.getElementById('d-opt-wallet');
     if(optWalletEl) optWalletEl.textContent = `${Object.keys(optsPositions).length} open · $${optsAvail.toFixed(0)} avail`;
 
-    // Wins tally
-    const trades = s.trades || [];
-    const closedOptTrades = optsBlock.trades || [];
-    const allClosed = trades.concat(closedOptTrades);
+    // Wins tally — Elan-only (his decisions, his record)
+    const allClosed = elanSpotTrades.concat(elanOptTrades);
     let wins = 0, winsDollars = 0, losses = 0, lossesDollars = 0;
     allClosed.forEach(t => {
       const p = t.pnl_usd ?? t.pnl ?? 0;
