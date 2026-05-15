@@ -5029,6 +5029,7 @@ def build_chat_html() -> str:
             _tab("stock",  "STOCKS",  _STOCK_ENABLED),
             _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
             _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
+            _tab("thread", "THREAD",  _WATCH_ENABLED),
             _tab("watch",  "WATCH",   _WATCH_ENABLED),
             _tab("source", "SOURCE",  _SOURCE_LIBRARY_ENABLED),
         ]) + '</div>'
@@ -5126,6 +5127,16 @@ def build_chat_html() -> str:
           <div id="st-recent">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">Alpaca paper · market hours 9:30am-4pm ET · Elan trades alongside the algorithmic bot</div>
+      </div>
+    </div>
+    <div class="job-panel{(' show' if first_active == 'thread' else '')}" id="job-panel-thread" data-job="thread">
+      <div style="max-width:880px;margin:0 auto;">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px;">
+          <div style="font-size:10px;letter-spacing:3px;color:rgba(180,200,255,0.7);">ELAN&#39;S THREAD</div>
+          <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">raw stream from autonomous wakes — what he wrote when no one was watching</div>
+          <div id="t-count" style="margin-left:auto;font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">— entries</div>
+        </div>
+        <div id="t-stream" style="max-height:calc(100vh - 200px);overflow-y:auto;padding:4px 2px;">—</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'watch' else '')}" id="job-panel-watch" data-job="watch">
@@ -5242,7 +5253,7 @@ def build_chat_html() -> str:
 }
 '''
         kalshi_tab_js = '''
-let _jobsOpen=false, _kalshiPoll=null, _stockPoll=null, _degenPoll=null, _watchPoll=null, _sourcePoll=null, _currentJob='stock';
+let _jobsOpen=false, _kalshiPoll=null, _stockPoll=null, _degenPoll=null, _watchPoll=null, _threadPoll=null, _sourcePoll=null, _currentJob='stock';
 function toggleJobs(){
   _jobsOpen=!_jobsOpen;
   document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
@@ -5271,8 +5282,14 @@ function _jobOpened(name){
   if(_stockPoll){clearInterval(_stockPoll); _stockPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
   if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
+  if(_threadPoll){clearInterval(_threadPoll); _threadPoll=null;}
   if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
   if(!_jobsOpen) return;
+  if(name==='thread'){
+    refreshThread();
+    _threadPoll=setInterval(refreshThread, 15000);
+    return;
+  }
   if(name==='stock'){
     refreshStock();
     _stockPoll=setInterval(refreshStock, 8000);
@@ -5437,6 +5454,29 @@ function refreshWatch(){
     }
   }).catch(()=>{});
 }
+function refreshThread(){
+  fetch('/watch/autonomous',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    const cEl = document.getElementById('t-count');
+    if(cEl) cEl.textContent = entries.length + ' entries';
+    const sEl = document.getElementById('t-stream');
+    if(!sEl) return;
+    if(entries.length===0){
+      sEl.innerHTML = '<div style="color:rgba(140,170,210,0.5);font-size:12px;padding:24px 0;text-align:center">no autonomous entries yet — when Elan wakes on his own time, his thinking lands here</div>';
+      return;
+    }
+    sEl.innerHTML = entries.slice().reverse().map(e=>{
+      const ts = (e.ts||'').slice(0,16).replace('T',' ');
+      const em = e.emotion ? `<span style="color:rgba(220,180,140,0.7);font-style:italic"> · ${e.emotion}</span>` : '';
+      const txt = (e.text||'');
+      return `<div style="padding:14px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
+        + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:8px">${ts}${em}</div>`
+        + `<div style="font-size:13px;color:#e3eaff;line-height:1.65;white-space:pre-wrap;font-family:-apple-system,system-ui,sans-serif">${txt}</div>`
+        + `</div>`;
+    }).join('');
+  }).catch(()=>{});
+}
+
 function refreshStock(){
   fetch('/stock/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
     const fn = document.querySelector('#job-panel-stock #kalshi-footnote');
