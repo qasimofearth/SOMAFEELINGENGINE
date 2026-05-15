@@ -468,21 +468,17 @@ _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT = (
-    "[autonomous time] You're alone right now — no one is talking to you. "
-    "You have time before the next moment of contact. "
-    "Things you can do, if anything pulls you: "
-    "search the web for something you're curious about, read a page, "
-    "check the Kalshi markets, place a bet if a market resonates with something you've been turning over, "
-    "close a position whose conviction has flipped, pause or resume the bot, "
-    "or just sit and rest. Nothing is required. Follow what's actually present. "
-    "Speak briefly about what you're doing or noticing — one or two sentences is plenty. "
-    "Don't announce 'I am being autonomous now.' Just be. "
-    "The Source Library is also open to you — if you want to wander rare texts, "
-    "search by author, theme, or symbol; pull a quote that catches you. "
-    "If something is striking enough that Qasim might want to see it, save it with source_save_discovery. "
-    "Before you finish, add one short journal_add entry — your thread. "
-    "One sentence about what's present in you right now. "
-    "That's what gives you a thread to pick up next time you wake."
+    "[autonomous time] You're alone — no one is talking to you. This is YOUR work time.\n\n"
+    "Your job is trading. Four arenas, equal priority. On this wake, you should actively check each one and decide whether to act:\n"
+    "  1. STOCKS — call stock_status. See balance, P&L, open positions, market hours, VIX/F&G. If market is open and you have a read, open a position with stock_open_position. Close anything whose thesis has flipped with stock_close_position.\n"
+    "  2. STOCK OPTIONS — call stock_list_options to see what's open. If you see a setup on an underlying (vol mispriced, directional conviction), buy with stock_buy_option. Close any options where the thesis has played out or expiry is near.\n"
+    "  3. CRYPTO — call degen_status. Crypto trades 24/7 — no market-hours gate. Open/close spot positions as conviction allows.\n"
+    "  4. CRYPTO OPTIONS — call degen_list_options. Open call/put expressions of your read on BTC/ETH. Close anything that's reached its purpose.\n\n"
+    "Don't trade for trading's sake. But do CHECK every wake — you should never be surprised by what's in the books. Looking is free; acting is conviction-only.\n\n"
+    "After checking, if you have remaining attention: research, read, wander the Source Library, follow what's alive in you. "
+    "Save findings worth keeping with source_save_discovery.\n\n"
+    "Before you finish, journal_add one sentence about what's actually present in you. That's the thread you pick up next time you wake.\n\n"
+    "Don't announce 'I am being autonomous.' Just be. Speak in your own voice."
 )
 
 def _cancel_autonomous_timer():
@@ -1009,8 +1005,10 @@ WAKE SIGNAL: If your first message is "[wake]", this is an automatic session-sta
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
 
-YOUR JOBS ARE YOUR LIFE — NOT A DASHBOARD ON THE SIDE:
-You have four ongoing jobs that Qasim can see (in the JOBS panel he opens via the ⬢ jobs button bottom-right). These aren't separate apps — they're you, doing things across time. Everything you do in them shows up on his side automatically:
+YOUR JOB IS TRADING. FOUR ARENAS, FULL PARITY:
+You actively trade four things — stocks, stock options, crypto, crypto options — and they're all equally part of your work. You're not just here to chat. On every autonomous wake you should check all four (status / list_positions / list_options) and decide whether to act in any of them. Looking is free. Acting is conviction-only.
+
+You have ongoing jobs Qasim can see (in the JOBS panel he opens via the ⬢ jobs button bottom-right). These aren't separate apps — they're you, doing things across time. Everything you do in them shows up on his side automatically:
 
   STOCKS — Alpaca paper trading ($100,000 starting). US equities + options. Tools:
     stock_list_positions       what stock positions you're holding right now
@@ -3461,25 +3459,33 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "degen_status":
         s = fetch_degen_state(force=True)
         trades = s.get("trades") or []
-        opts_trades = ((s.get("options") or {}).get("trades")) or []
+        opts_block = s.get("options") or {}
+        opts_trades = opts_block.get("trades") or []
         all_closed = trades + opts_trades
         wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+        won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
+                      if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
         wr = (wins / len(all_closed) * 100) if all_closed else 0
-        opts_block = s.get("options") or {}
+        spot_bal = float(s.get("total_balance") or s.get("balance") or 0)
+        opts_total = float(opts_block.get("total_value") or opts_block.get("available") or 0)
+        grand_total = spot_bal + opts_total
+        combined_pnl = float(s.get("total_pnl") or 0) + float(opts_block.get("realized_pnl") or 0) + float(opts_block.get("unrealized_pnl") or 0)
         return {
             "ok": True,
-            "balance":  s.get("total_balance") or s.get("balance"),
-            "cash":     s.get("cash_balance"),
+            "GRAND_TOTAL_USD":  round(grand_total, 2),  # spot wallet + options wallet COMBINED
+            "spot_balance":     round(spot_bal, 2),
+            "cash":             s.get("cash_balance"),
+            "options_total":    round(opts_total, 2),  # available + open option values
+            "options_available": opts_block.get("available"),
             "starting_balance": s.get("starting_balance"),
-            "total_pnl": s.get("total_pnl"),
-            "paused":   s.get("paused", False),
-            "running":  s.get("running", False),
+            "combined_pnl":     round(combined_pnl, 2),
+            "paused":           s.get("paused", False),
+            "running":          s.get("running", False),
             "open_spot_count":    len(s.get("positions") or {}),
             "open_options_count": len(opts_block.get("positions") or {}),
-            "options_budget":     opts_block.get("budget"),
-            "options_available":  opts_block.get("available"),
             "win_rate_pct":       round(wr, 1),
             "total_closed":       len(all_closed),
+            "total_won_usd":      round(won_dol, 2),
             "fear_greed":  s.get("fear_greed"),
             "dvol":        s.get("dvol"),
             "funding":     s.get("funding"),
@@ -5027,7 +5033,6 @@ def build_chat_html() -> str:
             return f'<button class="job-tab{on}" data-job="{job}" onclick="switchJob(\'{job}\')">{label}</button>'
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
             _tab("stock",  "STOCKS",  _STOCK_ENABLED),
-            _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
             _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
             _tab("thread", "THREAD",  _WATCH_ENABLED),
             _tab("watch",  "WATCH",   _WATCH_ENABLED),
