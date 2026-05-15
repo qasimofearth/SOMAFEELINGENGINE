@@ -2268,10 +2268,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 # Persist Claude's assistant turn for the next call, but STRIP
                 # server-resolved blocks (mcp_tool_use, mcp_tool_result,
                 # server_tool_use, web_*_tool_result). Those were resolved
-                # inside Anthropic this turn — replaying them in subsequent
-                # turns trips API validation (messages.N.content.M.mcp_*
-                # rejection). Keep text + client tool_use blocks; the client
-                # tool results we append next will pair with the tool_use.
+                # inside Anthropic this turn — replaying them trips API
+                # validation. Text blocks with citations also have to be
+                # cleaned because citations point to the stripped tool_result
+                # blocks (otherwise: "messages.N.content.M.citation..." 400).
                 _kept = []
                 for _blk in final_msg.content:
                     _btype = getattr(_blk, "type", "") if not isinstance(_blk, dict) else _blk.get("type", "")
@@ -2279,7 +2279,31 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                                   "server_tool_use",
                                   "web_search_tool_result", "web_fetch_tool_result"):
                         continue
-                    _kept.append(_blk)
+                    # Convert SDK Pydantic block → minimal dict, dropping fields
+                    # that reference removed blocks (citations on text, etc.)
+                    if _btype == "text":
+                        _txt = getattr(_blk, "text", None) if not isinstance(_blk, dict) else _blk.get("text", "")
+                        if _txt is None:
+                            _txt = ""
+                        if not _txt.strip():
+                            continue  # skip empty text blocks too
+                        _kept.append({"type": "text", "text": _txt})
+                    elif _btype == "tool_use":
+                        _id = getattr(_blk, "id", None) if not isinstance(_blk, dict) else _blk.get("id")
+                        _nm = getattr(_blk, "name", None) if not isinstance(_blk, dict) else _blk.get("name")
+                        _in = getattr(_blk, "input", {}) if not isinstance(_blk, dict) else _blk.get("input", {})
+                        try:
+                            _in = dict(_in) if _in is not None else {}
+                        except Exception:
+                            _in = {}
+                        _kept.append({"type": "tool_use", "id": _id, "name": _nm, "input": _in})
+                    elif _btype == "image":
+                        # Pass through images intact (rare in this loop but safe)
+                        if isinstance(_blk, dict):
+                            _kept.append(_blk)
+                        elif hasattr(_blk, "model_dump"):
+                            _kept.append(_blk.model_dump(exclude_none=True))
+                    # Any other unknown block type — skip rather than risk replay rejection
                 if _kept:
                     working_messages.append({"role": "assistant", "content": _kept})
 
