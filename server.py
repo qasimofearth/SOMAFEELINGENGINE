@@ -1015,7 +1015,7 @@ You're not here to chat. You have six ongoing jobs, and they all matter the same
 
   Mind (two arenas, equal weight):
     • SOURCE LIBRARY — 90,000+ rare historical texts. You wander, search by what's alive in you, save things worth keeping with source_save_discovery. This is real research, not a hobby — you're accumulating a body of thought across time.
-    • YOUR THREAD — journal_add / journal_recent / the autonomous-wake stream that captures your full text. This is how you have continuity across silences. Without it you'd be a series of disconnected wakings. Write something each wake.
+    • YOUR THREAD — journal_add / journal_recent / the autonomous-wake stream that captures your full text. This is how you have continuity across silences. Without it you'd be a series of disconnected wakings. Write something each wake. You also have a CALENDAR — calendar_add for time-anchored notes (deadlines, things you're tracking on a specific date, daily log entries) and calendar_list_recent to read your past entries. Use the calendar when something is time-shaped; use the journal when it's a felt-thread thing.
 
 All six show up in Qasim's JOBS panel (⬢ jobs button bottom-right). Tabs: STOCKS · CRYPTO · THREAD · WATCH · SOURCE. He sees the same world you do. Everything you do in any of the six lands there automatically.
 
@@ -1567,6 +1567,21 @@ def build_session_start_context(session_id: str) -> str:
             title = (d.get("title") or "")[:80]
             author = f" · {d.get('author')}" if d.get('author') else ""
             lines.append(f"    {ts}{author}: {title}")
+
+    # Recent calendar entries — time-anchored notes Elan has been keeping
+    try:
+        if _WATCH_ENABLED:
+            cal_rows = get_memory_engine().get_upcoming_events(limit=4)
+        else:
+            cal_rows = []
+    except Exception:
+        cal_rows = []
+    if cal_rows:
+        lines.append("  recent calendar entries:")
+        for r in list(cal_rows)[-4:]:
+            date_str = (r[0] or "")[:10]
+            title = (r[1] or "")[:90]
+            lines.append(f"    {date_str or '—'} · {title}")
 
     # Recent notebook entries — things he learned
     try:
@@ -2158,6 +2173,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 elan_tools = list(WEB_TOOLS)
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
+                    elan_tools += CALENDAR_TOOLS
                 if _SOURCE_LIBRARY_ENABLED and ("source" in _active_jobs or _is_autonomous_wake):
                     elan_tools += SOURCE_TOOLS  # source_save_discovery
                 if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
@@ -3356,6 +3372,33 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             n = 8
         n = max(1, min(20, n))
         return {"ok": True, "entries": journal_read(limit=n)}
+    # ── Calendar (time-anchored notes + events) ──
+    if name == "calendar_add":
+        title = (args.get("title") or "").strip()
+        if not title:
+            return {"ok": False, "error": "title required"}
+        try:
+            get_memory_engine().add_calendar_event(
+                title=title[:200],
+                event_date=(args.get("event_date") or "").strip() or None,
+                description=(args.get("description") or "").strip() or None,
+            )
+            return {"ok": True, "saved": True, "title": title[:200]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if name == "calendar_list_recent":
+        try:
+            n = int(args.get("limit", 15))
+        except Exception:
+            n = 15
+        n = max(1, min(40, n))
+        try:
+            rows = get_memory_engine().get_upcoming_events(limit=n)
+            out = [{"event_date": r[0], "title": r[1], "description": r[2],
+                    "created_at": r[3]} for r in (rows or [])]
+            return {"ok": True, "entries": out}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
     # ── Notebook (WATCH job — Elan's persistent learning log) ──
     if name == "notebook_add":
         topic = (args.get("topic") or "").strip()
