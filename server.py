@@ -5996,14 +5996,14 @@ function refreshDegen(){
 
     // Open OPTIONS — new section
     const optsEl = document.getElementById('d-options');
+    const optKeysAll = Object.keys(optsPositions);
     if (optsEl) {
-      if (optKeys.length === 0) {
-        const budget = (s.options && s.options.budget) || 150;
-        const avail  = (s.options && s.options.available) != null ? s.options.available : budget;
-        optsEl.innerHTML = `<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no open options · budget $${Number(budget).toFixed(0)}, available $${Number(avail).toFixed(0)}</div>`;
+      if (optKeysAll.length === 0) {
+        const avail  = optsAvail;
+        optsEl.innerHTML = `<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no open options · available $${Number(avail).toFixed(0)}</div>`;
       } else {
-        optsEl.innerHTML = optKeys.slice(0,10).map(inst => {
-          const o = options[inst];
+        optsEl.innerHTML = optKeysAll.slice(0,10).map(inst => {
+          const o = optsPositions[inst];
           const otype = (o.option_type||'').toLowerCase();
           const otypeCls = otype === 'call' ? 'yes' : (otype === 'put' ? 'no' : '');
           const pl = o.pnl || 0;
