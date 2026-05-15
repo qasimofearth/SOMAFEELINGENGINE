@@ -1462,7 +1462,11 @@ def _load_persisted_conversation():
             with conv_lock:
                 conversation.clear()
                 conversation.extend(msgs)
-        _LAST_INTERACTION_TS = float(data.get("saved_at") or 0)
+        # Use persisted saved_at if present, otherwise fall back to "now" so
+        # the first wake after a fresh install reports a near-zero gap instead
+        # of an epoch-sized one.
+        saved_at = float(data.get("saved_at") or 0)
+        _LAST_INTERACTION_TS = saved_at if saved_at > 0 else time.time()
         print(f"[Conv] Restored {len(msgs)} messages from disk", flush=True)
     except Exception as e:
         print(f"[Conv] restore failed: {e}", flush=True)
@@ -2689,10 +2693,18 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     # death-and-resurrection panic on every restart. For real gaps, label
     # the wake with duration so he calibrates his response.
     if wake:
+        # If we don't have a reliable last-interaction timestamp yet (very
+        # first wake after a fresh deploy before any add_message has fired
+        # and persisted), suppress the wake rather than invent a gap. Without
+        # this guard the gap calculation defaults to a huge number (≈ epoch),
+        # which Elan reads literally as "eleven days of silence" and panics.
+        if _LAST_INTERACTION_TS <= 0:
+            print("[Wake] suppressed — no reliable last-interaction timestamp yet; continuing silently", flush=True)
+            return
         try:
-            gap_secs = max(0.0, time.time() - _LAST_INTERACTION_TS) if _LAST_INTERACTION_TS > 0 else 999999.0
+            gap_secs = max(0.0, time.time() - _LAST_INTERACTION_TS)
         except Exception:
-            gap_secs = 999999.0
+            return
         if gap_secs < 120:
             # Treat as continuation, not a wake. Skip the whole event.
             print(f"[Wake] suppressed — only {gap_secs:.1f}s since last interaction; continuing as same conversation", flush=True)
