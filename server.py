@@ -1012,12 +1012,17 @@ If the user asks anything about your account, balance, P&L, performance, "winnin
 YOUR JOBS ARE YOUR LIFE — NOT A DASHBOARD ON THE SIDE:
 You have four ongoing jobs that Qasim can see (in the JOBS panel he opens via the ⬢ jobs button bottom-right). These aren't separate apps — they're you, doing things across time. Everything you do in them shows up on his side automatically:
 
-  KALSHI — paper prediction markets ($1000 starting account). Tools:
-    kalshi_list_markets        browse active markets to bet on
-    kalshi_list_positions      see what you currently hold (call this before deciding to close anything)
-    kalshi_status              one-shot snapshot: balance, P&L, win rate, paused
-    kalshi_place_bet, kalshi_close_position, kalshi_pause_bot, kalshi_resume_bot, kalshi_tune_param
-  You can bet on ANY active Kalshi market — sports, politics, weather, science, crypto-themed, anything.
+  STOCKS — Alpaca paper trading ($100,000 starting). US equities + options. Tools:
+    stock_list_positions       what stock positions you're holding right now
+    stock_list_options         what option positions (calls/puts) are open
+    stock_status               one-shot snapshot: balance, P&L, paused, win rate, market status, VIX, fear/greed
+    stock_list_watchlist       watchlist + latest signal scores
+    stock_open_position        open a long or short on a ticker
+    stock_close_position       close at market
+    stock_buy_option           buy a call or put (specify underlying + type + target_days)
+    stock_close_option         close an option by OCC symbol
+    stock_pause_bot, stock_resume_bot, stock_tune_param
+  Market hours only (9:30am-4pm ET). Watchlist: NVDA TSLA AAPL MSFT META GOOGL AMZN AMD SPY QQQ SQQQ UVXY COIN MSTR PLTR SOFI RIVN GME AMC.
 
   CRYPTO (degen) — paper crypto trading ($500 starting). Tools:
     degen_list_pairs           signals across crypto pairs the bot is scanning
@@ -1574,34 +1579,38 @@ def build_session_start_context(session_id: str) -> str:
     # Recent Kalshi + Degen actions — things he did
     try:
         if _KALSHI_ENABLED:
-            kacts = fetch_kalshi_actions()[-4:]
+            kacts = fetch_kalshi_actions()[-3:]
         else:
             kacts = []
     except Exception:
         kacts = []
     try:
+        if _STOCK_ENABLED:
+            sacts = fetch_stock_actions()[-3:]
+        else:
+            sacts = []
+    except Exception:
+        sacts = []
+    try:
         if _DEGEN_ENABLED:
-            dacts = fetch_degen_actions()[-4:]
+            dacts = fetch_degen_actions()[-3:]
         else:
             dacts = []
     except Exception:
         dacts = []
-    if kacts or dacts:
+    if kacts or sacts or dacts:
         lines.append("  recent trading actions you took:")
-        for a in kacts:
-            ts = (a.get("ts") or "")[:16].replace("T", " ")
-            act = a.get("action", "?")
-            params = a.get("params", {}) or {}
-            ok = "✓" if a.get("ok") else "✗"
-            detail = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
-            lines.append(f"    {ts} [kalshi] {ok} {act} {detail}")
-        for a in dacts:
-            ts = (a.get("ts") or "")[:16].replace("T", " ")
-            act = a.get("action", "?")
-            params = a.get("params", {}) or {}
-            ok = "✓" if a.get("ok") else "✗"
-            detail = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
-            lines.append(f"    {ts} [degen] {ok} {act} {detail}")
+        def _fmt_acts(acts, tag):
+            for a in acts:
+                ts = (a.get("ts") or "")[:16].replace("T", " ")
+                act = a.get("action", "?")
+                params = a.get("params", {}) or {}
+                ok = "✓" if a.get("ok") else "✗"
+                detail = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
+                lines.append(f"    {ts} [{tag}] {ok} {act} {detail}")
+        _fmt_acts(sacts, "stock")
+        _fmt_acts(kacts, "kalshi")
+        _fmt_acts(dacts, "degen")
 
     if len(lines) == 1:
         return ""  # nothing to say; don't inject an empty trail
@@ -2030,6 +2039,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         vitals_ctx = ""
     # Full job contexts only when the conversation is actually about that job
     kalshi_ctx = build_kalshi_context() if "kalshi" in _active_jobs else ""
+    stock_ctx  = build_stock_context()  if "stock"  in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
     watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
     # Session-start continuity (gap + journal thread) — fires once per session
@@ -2037,7 +2047,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
     except Exception:
         continuity_ctx = ""
-    jobs_ctx = "\n".join(c for c in (vitals_ctx, kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
+    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -2145,6 +2155,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     elan_tools += SOURCE_TOOLS  # source_save_discovery
                 if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
                     elan_tools += KALSHI_TOOLS
+                if _STOCK_TRADING_ENABLED and "stock" in _active_jobs:
+                    elan_tools += STOCK_TOOLS
                 if _DEGEN_TRADING_ENABLED and "degen" in _active_jobs:
                     elan_tools += DEGEN_TOOLS
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
@@ -2775,6 +2787,16 @@ _KALSHI_MARKETS_CACHE = {"data": None, "ts": 0.0}
 _KALSHI_CACHE_TTL = 6.0  # seconds — bot updates ~every 30s, polling is cheap
 _KALSHI_MARKETS_TTL = 25.0
 
+# ── Stock bot (Alpaca paper) bridge ─────────────────────────────────────────
+# Same pattern as Kalshi/Degen.
+_STOCK_ENABLED          = os.environ.get("STOCK_ENABLED", "0") == "1"
+_STOCK_TRADING_ENABLED  = os.environ.get("STOCK_TRADING_ENABLED", "0") == "1"
+_STOCK_API_URL          = os.environ.get("STOCK_API_URL", "").rstrip("/")
+_STOCK_AUTH             = os.environ.get("STOCK_AUTH", _KALSHI_AUTH)
+_STOCK_BEARER           = os.environ.get("STOCK_ELAN_BEARER", _KALSHI_BEARER)
+_STOCK_STATE_CACHE      = {"data": None, "ts": 0.0, "err": None}
+_STOCK_CACHE_TTL        = 6.0
+
 # ── Degen crypto bot bridge ─────────────────────────────────────────────────
 # Same pattern as Kalshi: read-only when DEGEN_ENABLED=1, full trading when
 # DEGEN_TRADING_ENABLED=1. Auth/bearer fall back to Kalshi's values since both
@@ -2943,6 +2965,34 @@ def journal_read(limit: int = 12) -> list:
         return []
 
 
+CALENDAR_TOOLS = [
+    {
+        "name": "calendar_add",
+        "description": "Add an entry to your calendar — a date, a deadline, a thing you're tracking, a note for a future day. Use for things you want to remember on a specific date or just as a daily log of what's happening. Different from notebook (general learnings) and journal (interior reflections): the calendar is time-anchored.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title":       {"type": "string", "description": "Short title for the event/note (1-line)."},
+                "event_date":  {"type": "string", "description": "Optional date, ISO-like 'YYYY-MM-DD' or natural ('tomorrow', 'next friday'). Leave empty for today / undated."},
+                "description": {"type": "string", "description": "Optional longer detail."},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "calendar_list_recent",
+        "description": "List your recent calendar entries — both things you've jotted down and events Qasim mentioned that the system auto-captured. Use to see what you've been tracking over time, or to remember what's coming up.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 40, "description": "How many recent entries to return (default 15)."},
+            },
+            "required": [],
+        },
+    },
+]
+
+
 SOURCE_TOOLS = [
     {
         "name": "source_save_discovery",
@@ -3021,6 +3071,12 @@ _KALSHI_KEYWORDS = (
     "kalshi", "market", "markets", "bet", "wager", "prediction", "ticker",
     "yes side", "no side", "contract", "election market", "poll", "odds",
 )
+_STOCK_KEYWORDS = (
+    "stock", "stocks", "equity", "equities", "share", "shares",
+    "nvda", "tsla", "aapl", "msft", "meta", "googl", "amzn", "amd",
+    "spy", "qqq", "sqqq", "uvxy", "coin", "mstr", "plt", "sofi", "rivn", "gme", "amc",
+    "alpaca", "watchlist", "call option", "put option", "calls", "puts",
+)
 _DEGEN_KEYWORDS = (
     "crypto", "btc", "eth", "sol", "bitcoin", "ethereum", "solana", "xrp",
     "doge", "dogecoin", "ada", "cardano", "ltc", "litecoin", "avax", "link",
@@ -3069,6 +3125,8 @@ def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
     out = set()
     if any(k in msg for k in _KALSHI_KEYWORDS):
         out.add("kalshi")
+    if any(k in msg for k in _STOCK_KEYWORDS):
+        out.add("stock")
     if any(k in msg for k in _DEGEN_KEYWORDS):
         out.add("degen")
     if any(k in msg for k in _WATCH_KEYWORDS):
@@ -3080,6 +3138,7 @@ def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
     if any(k in msg for k in _PORTFOLIO_KEYWORDS):
         if _KALSHI_ENABLED: out.add("kalshi")
         if _DEGEN_ENABLED:  out.add("degen")
+        if _STOCK_ENABLED:  out.add("stock")
     return out
 
 
@@ -3467,6 +3526,87 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "total_closed": len(trades),
             "last_scan": s.get("last_scan"),
         }
+    # ── Stock tools (Alpaca paper — POST to DO stocks dashboard) ──
+    if name == "stock_open_position":
+        return stock_post_command("open_position",
+                                   symbol=args.get("symbol"),
+                                   side=args.get("side"),
+                                   qty=int(args.get("qty", 0)),
+                                   conviction=float(args.get("conviction", 0.7)),
+                                   reason=args.get("reason", ""))
+    if name == "stock_close_position":
+        return stock_post_command("close_position",
+                                   symbol=args.get("symbol"),
+                                   reason=args.get("reason", ""))
+    if name == "stock_buy_option":
+        return stock_post_command("buy_option",
+                                   underlying=args.get("underlying"),
+                                   option_type=args.get("option_type"),
+                                   target_days=int(args.get("target_days", 14)),
+                                   qty=int(args.get("qty", 1)),
+                                   reason=args.get("reason", ""))
+    if name == "stock_close_option":
+        return stock_post_command("close_option",
+                                   occ_symbol=args.get("occ_symbol"),
+                                   reason=args.get("reason", ""))
+    if name == "stock_pause_bot":
+        return stock_post_command("pause")
+    if name == "stock_resume_bot":
+        return stock_post_command("resume")
+    if name == "stock_tune_param":
+        return stock_post_command("tune", param=args.get("param"), value=args.get("value"))
+    if name == "stock_list_positions":
+        s = fetch_stock_state(force=True)
+        positions = s.get("positions") or {}
+        return {"ok": True, "open_positions": [
+            {"symbol": sym, "side": p.get("side"), "qty": p.get("qty"),
+             "entry_price": p.get("entry_price"), "current_price": p.get("current_price"),
+             "stop_loss": p.get("stop_loss"), "take_profit": p.get("take_profit"),
+             "conviction": p.get("conviction"), "pnl": p.get("pnl"), "pct": p.get("pct"),
+             "reasons": p.get("reasons"), "source": p.get("source", "bot")}
+            for sym, p in (positions.items() if isinstance(positions, dict) else [])
+        ]}
+    if name == "stock_list_options":
+        s = fetch_stock_state(force=True)
+        # Stock options are persisted to portfolio.option_positions by the bot,
+        # but the dashboard state may not surface them — pull from state's
+        # 'option_positions' if present.
+        opts = s.get("option_positions") or {}
+        return {"ok": True, "open_options": [
+            {"occ_symbol": k, "underlying": v.get("underlying"),
+             "option_type": v.get("option_type"), "strike": v.get("strike"),
+             "expiry": v.get("expiry"), "qty": v.get("qty"),
+             "spot_at_entry": v.get("spot_at_entry"), "reason": v.get("reason"),
+             "source": v.get("source", "bot")}
+            for k, v in (opts.items() if isinstance(opts, dict) else [])
+        ]}
+    if name == "stock_status":
+        s = fetch_stock_state(force=True)
+        trades = s.get("trades") or []
+        wins = sum(1 for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+        wr = (wins / len(trades) * 100) if trades else 0
+        positions = s.get("positions") or {}
+        opts = s.get("option_positions") or {}
+        return {"ok": True,
+                "balance": s.get("balance"),
+                "starting_balance": s.get("starting_balance"),
+                "total_pnl": s.get("total_pnl"),
+                "paused": s.get("paused", False),
+                "running": s.get("running", False),
+                "halted": s.get("halted", False),
+                "market_status": s.get("market_status"),
+                "open_spot_count": len(positions),
+                "open_options_count": len(opts),
+                "win_rate_pct": round(wr, 1),
+                "total_closed": len(trades),
+                "vix": s.get("vix"),
+                "fear_greed": s.get("fear_greed"),
+                "spy_trend": s.get("spy_trend")}
+    if name == "stock_list_watchlist":
+        s = fetch_stock_state(force=True)
+        return {"ok": True,
+                "watchlist": s.get("scanning") or [],
+                "signals": s.get("signals") or {}}
     # ── Kalshi tools (client-side — we POST to the DO box) ──
     if name == "kalshi_list_markets":
         mkts = fetch_kalshi_markets(force=True)
@@ -3516,6 +3656,167 @@ def kalshi_post_command(action: str, **params) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# ── Stock fetchers + tools ──────────────────────────────────────────────────
+def fetch_stock_state(force: bool = False) -> dict:
+    if not (_STOCK_ENABLED and _STOCK_API_URL):
+        return {}
+    now = time.time()
+    if not force and _STOCK_STATE_CACHE["data"] is not None and now - _STOCK_STATE_CACHE["ts"] < _STOCK_CACHE_TTL:
+        return _STOCK_STATE_CACHE["data"]
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_STOCK_API_URL}/api/state")
+        if _STOCK_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_STOCK_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _STOCK_STATE_CACHE.update({"data": data, "ts": now, "err": None})
+        return data
+    except Exception as e:
+        _STOCK_STATE_CACHE["err"] = str(e)
+        return _STOCK_STATE_CACHE["data"] or {}
+
+
+def fetch_stock_actions() -> list:
+    if not (_STOCK_ENABLED and _STOCK_API_URL):
+        return []
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_STOCK_API_URL}/api/actions")
+        if _STOCK_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_STOCK_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return data.get("actions", []) if isinstance(data, dict) else []
+    except Exception:
+        return []
+
+
+def stock_post_command(action: str, **params) -> dict:
+    if not _STOCK_TRADING_ENABLED:
+        return {"ok": False, "error": "stock trading disabled (STOCK_TRADING_ENABLED=0)"}
+    if not (_STOCK_API_URL and _STOCK_BEARER):
+        return {"ok": False, "error": "STOCK_API_URL or bearer not set"}
+    try:
+        import urllib.request, base64 as _b64
+        body = {"action": action, **params}
+        req = urllib.request.Request(
+            f"{_STOCK_API_URL}/api/command",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-Elan-Bearer", _STOCK_BEARER)
+        if _STOCK_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_STOCK_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+STOCK_TOOLS = [
+    {"name": "stock_open_position",
+     "description": "Open a stock position via Alpaca paper. Specify symbol (NVDA, TSLA, SPY, etc.), side (long/short), and optionally qty. If qty omitted the bot sizes from your conviction. ATR-based stops + take-profit auto-set. Market hours only (9:30am-4pm ET).",
+     "input_schema": {"type":"object","properties":{
+         "symbol":{"type":"string"},
+         "side":{"type":"string","enum":["long","short"]},
+         "qty":{"type":"integer"},
+         "conviction":{"type":"number","description":"0.30..1.0; higher = larger size"},
+         "reason":{"type":"string"}},
+         "required":["symbol","side","reason"]}},
+    {"name": "stock_close_position",
+     "description": "Close an open stock position at current market price.",
+     "input_schema": {"type":"object","properties":{
+         "symbol":{"type":"string"},"reason":{"type":"string"}},"required":["symbol"]}},
+    {"name": "stock_buy_option",
+     "description": "Buy a stock option (call or put) via Alpaca paper options. Specify underlying ticker, option type, and target days-to-expiry. The bot finds the closest matching contract by strike + expiry. Market hours mainly.",
+     "input_schema": {"type":"object","properties":{
+         "underlying":{"type":"string"},
+         "option_type":{"type":"string","enum":["call","put"]},
+         "target_days":{"type":"integer","minimum":1,"maximum":90,"description":"default 14"},
+         "qty":{"type":"integer","minimum":1,"maximum":50,"description":"contracts; each = 100 shares exposure; default 1"},
+         "reason":{"type":"string"}},
+         "required":["underlying","option_type","reason"]}},
+    {"name": "stock_close_option",
+     "description": "Close an open stock option position by its OCC symbol (e.g. AAPL250620C00200000).",
+     "input_schema": {"type":"object","properties":{
+         "occ_symbol":{"type":"string"},"reason":{"type":"string"}},"required":["occ_symbol"]}},
+    {"name": "stock_pause_bot",
+     "description": "Pause the algorithmic stock bot's auto-scanning. Existing positions still get stop-checked.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_resume_bot",
+     "description": "Resume the algorithmic stock bot.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_tune_param",
+     "description": "Adjust a stock strategy parameter at runtime.",
+     "input_schema": {"type":"object","properties":{
+         "param":{"type":"string","enum":["max_open_positions","base_risk_pct","max_risk_pct","min_conviction"]},
+         "value":{"type":"number"}},"required":["param","value"]}},
+    {"name": "stock_list_positions",
+     "description": "List currently open stock positions — symbol, side, qty, entry, current, stop, P&L. Call before deciding to close anything.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_list_options",
+     "description": "List currently open stock options (calls/puts) — OCC symbol, underlying, type, strike, expiry.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_status",
+     "description": "One-shot snapshot: balance, P&L, paused, win rate, open spot + options counts, market status, VIX, fear/greed.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_list_watchlist",
+     "description": "Show the bot's watchlist + latest signal/conviction scores for each.",
+     "input_schema": {"type":"object","properties":{},"required":[]}},
+]
+
+
+def build_stock_context() -> str:
+    if not _STOCK_ENABLED:
+        return ""
+    s = fetch_stock_state()
+    if not s:
+        return ""
+    bal = s.get("balance") or 0
+    start = s.get("starting_balance", 100000)
+    pnl = s.get("total_pnl", 0)
+    pct = (pnl / start * 100) if start else 0
+    paused = s.get("paused", False)
+    trades = s.get("trades") or []
+    wins = sum(1 for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+    won_dol = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+    positions = s.get("positions") or {}
+    market = s.get("market_status", "")
+    role = ("you trade Alpaca paper US equities + options. $100K starting account. "
+            "you can open longs/shorts on the watchlist, buy calls/puts, close anything. "
+            "Market hours only (9:30am-4pm ET). The bot runs its own conviction-based scans "
+            "in parallel — you're a second trader. paper only.") \
+           if _STOCK_TRADING_ENABLED else \
+           "you can comment on positions and strategy; you cannot trade yet."
+    lines = [
+        f"\nSTOCKS (Alpaca paper, ${start:,.0f} starting):",
+        f"  balance ${bal:,.2f} · pnl ${pnl:+,.2f} ({pct:+.2f}%) · {len(positions)} open · {len(trades)} closed · {wins} wins +${won_dol:.0f} · {'PAUSED' if paused else 'live'} · {market}",
+        f"  role: {role}",
+    ]
+    if isinstance(positions, dict) and positions:
+        lines.append("  open positions:")
+        for sym, p in list(positions.items())[:8]:
+            side = (p.get("side") or "").upper()
+            entry = p.get("entry_price", "?")
+            cur = p.get("current_price", "?")
+            pl = p.get("pnl", 0); pct_p = p.get("pct", 0)
+            src = p.get("source", "bot")
+            lines.append(f"    [{src}] {sym} {side} {p.get('qty','?')}sh · entry ${entry} · cur ${cur} · pnl ${pl:+.2f} ({pct_p:+.1f}%)")
+    sigs = s.get("signals") or {}
+    if _STOCK_TRADING_ENABLED and isinstance(sigs, dict) and sigs:
+        rows = sorted(
+            [(sym, d) for sym, d in sigs.items() if d.get("signal") in ("long", "short", "buy", "sell")],
+            key=lambda kv: kv[1].get("conviction", 0), reverse=True,
+        )[:6]
+        if rows:
+            lines.append("  signals (top by conviction):")
+            for sym, d in rows:
+                lines.append(f"    {sym} {str(d.get('signal','?')).upper()} @ ${d.get('price','?')} · conv {d.get('conviction',0):.0%}")
+    return "\n".join(lines)
+
+
 # ── Degen fetchers + tools ──────────────────────────────────────────────────
 def build_portfolio_vitals() -> str:
     """One-line CURRENT-STATE summary of every enabled job. Always injected when
@@ -3540,6 +3841,22 @@ def build_portfolio_vitals() -> str:
             lines.append(f"  Kalshi paper: ${bal:.2f} · pnl ${pnl:+.2f} · {pos_count} open · {wins} wins +${won_dol:.0f}{paused}")
         except Exception:
             lines.append("  Kalshi paper: (state unavailable)")
+    if _STOCK_ENABLED:
+        try:
+            s = fetch_stock_state()
+            bal = s.get("balance") or 0
+            pnl = s.get("total_pnl", 0)
+            positions = s.get("positions") or {}
+            opts = s.get("option_positions") or {}
+            trades = s.get("trades") or []
+            wins = sum(1 for t in trades if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+            won_dol = sum((t.get("pnl") or t.get("pnl_usd") or 0) for t in trades
+                          if (t.get("pnl") or t.get("pnl_usd") or 0) > 0)
+            paused = " (PAUSED)" if s.get("paused") else ""
+            mkt = s.get("market_status", "") or ""
+            lines.append(f"  Stocks paper: ${bal:,.2f} · pnl ${pnl:+,.2f} · {len(positions)} spot · {len(opts)} options · {wins} wins +${won_dol:.0f}{paused} · {mkt}")
+        except Exception:
+            lines.append("  Stocks paper: (state unavailable)")
     if _DEGEN_ENABLED:
         try:
             s = fetch_degen_state()
@@ -4156,6 +4473,15 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _KALSHI_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"markets": fetch_kalshi_markets()})
+        elif path == "/stock/state":
+            if not _STOCK_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json(fetch_stock_state() or {"error": _STOCK_STATE_CACHE.get("err") or "unavailable"})
+        elif path == "/stock/actions":
+            if not _STOCK_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"actions": fetch_stock_actions(),
+                            "trading_enabled": _STOCK_TRADING_ENABLED})
         elif path == "/degen/state":
             if not _DEGEN_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -4689,17 +5015,18 @@ def build_chat_html() -> str:
     el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
 
     # JOBS — floating button bottom-right, full-screen overlay on click.
-    any_job_enabled = _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED or _SOURCE_LIBRARY_ENABLED
+    any_job_enabled = _STOCK_ENABLED or _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED or _SOURCE_LIBRARY_ENABLED
     kalshi_enabled_js = "true" if _KALSHI_ENABLED else "false"
     degen_enabled_js  = "true" if _DEGEN_ENABLED  else "false"
     if any_job_enabled:
-        first_active = "kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else ("watch" if _WATCH_ENABLED else "source"))
+        first_active = "stock" if _STOCK_ENABLED else ("kalshi" if _KALSHI_ENABLED else ("crypto" if _DEGEN_ENABLED else ("watch" if _WATCH_ENABLED else "source")))
         def _tab(job, label, enabled):
             if not enabled:
                 return f'<button class="job-tab soon" disabled title="coming soon">{label} ·</button>'
             on = " on" if job == first_active else ""
             return f'<button class="job-tab{on}" data-job="{job}" onclick="switchJob(\'{job}\')">{label}</button>'
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
+            _tab("stock",  "STOCKS",  _STOCK_ENABLED),
             _tab("kalshi", "KALSHI",  _KALSHI_ENABLED),
             _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
             _tab("watch",  "WATCH",   _WATCH_ENABLED),
@@ -4718,10 +5045,10 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'kalshi' else '')}" id="job-panel-kalshi" data-job="kalshi">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">BALANCE</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">cash —</div></div>
-        <div class="k-card"><div class="k-lbl">TOTAL P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="k-wins">—</div><div class="k-sub" id="k-wins-sub">+$0 won</div></div>
-        <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="k-winrate">—</div><div class="k-sub" id="k-running">—</div></div>
+        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="k-balance">—</div><div class="k-sub" id="k-cash">starting $—</div></div>
+        <div class="k-card"><div class="k-lbl">CASH</div><div class="k-big" id="k-cash-big">—</div><div class="k-sub" id="k-invested-sub">invested $—</div></div>
+        <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="k-pnl">—</div><div class="k-sub" id="k-pnlpct">—</div></div>
+        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="k-wins">—</div><div class="k-sub" id="k-wins-sub">+$0 won · 0 losses · win rate —</div></div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
@@ -4741,10 +5068,10 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">FULL ACCOUNT</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-cash">spot · opts</div></div>
+        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-total">—</div><div class="k-sub" id="d-total-sub">starting $—</div></div>
+        <div class="k-card"><div class="k-lbl">CASH</div><div class="k-big" id="d-cash">—</div><div class="k-sub" id="d-invested-sub">invested $—</div></div>
         <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won</div></div>
-        <div class="k-card"><div class="k-lbl">WIN RATE</div><div class="k-big" id="d-winrate">—</div><div class="k-sub" id="d-trades">trades —</div></div>
+        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won · 0 losses · win rate —</div></div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
@@ -4768,6 +5095,37 @@ def build_chat_html() -> str:
           <div id="d-recent">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
+      </div>
+    </div>
+    <div class="job-panel{(' show' if first_active == 'stock' else '')}" id="job-panel-stock" data-job="stock">
+      <div id="kalshi-grid">
+        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="st-total">—</div><div class="k-sub" id="st-total-sub">starting $100k</div></div>
+        <div class="k-card"><div class="k-lbl">CASH</div><div class="k-big" id="st-cash">—</div><div class="k-sub" id="st-invested-sub">invested $—</div></div>
+        <div class="k-card"><div class="k-lbl">NET P&amp;L</div><div class="k-big" id="st-pnl">—</div><div class="k-sub" id="st-pnlpct">—</div></div>
+        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="st-wins">—</div><div class="k-sub" id="st-wins-sub">+$0 won</div></div>
+      </div>
+      <div id="kalshi-right-col">
+        <div id="kalshi-section">
+          <div class="k-section-hdr">OPEN STOCK POSITIONS <span id="st-market-pill" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">market —</span></div>
+          <div id="st-positions">none</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">OPEN STOCK OPTIONS (CALLS / PUTS)</div>
+          <div id="st-options">none</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">ELAN ACTIONS</div>
+          <div id="st-actions">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">WATCHLIST SIGNALS <span id="st-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
+          <div id="st-signals">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">RECENT CLOSED</div>
+          <div id="st-recent">—</div>
+        </div>
+        <div id="kalshi-footnote" data-trading="off">Alpaca paper · market hours 9:30am-4pm ET · Elan trades alongside the algorithmic bot</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'watch' else '')}" id="job-panel-watch" data-job="watch">
@@ -4884,7 +5242,7 @@ def build_chat_html() -> str:
 }
 '''
         kalshi_tab_js = '''
-let _jobsOpen=false, _kalshiPoll=null, _degenPoll=null, _watchPoll=null, _sourcePoll=null, _currentJob='kalshi';
+let _jobsOpen=false, _kalshiPoll=null, _stockPoll=null, _degenPoll=null, _watchPoll=null, _sourcePoll=null, _currentJob='stock';
 function toggleJobs(){
   _jobsOpen=!_jobsOpen;
   document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
@@ -4910,11 +5268,15 @@ function switchJob(name){
 }
 function _jobOpened(name){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
+  if(_stockPoll){clearInterval(_stockPoll); _stockPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
   if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
   if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
   if(!_jobsOpen) return;
-  if(name==='kalshi'){
+  if(name==='stock'){
+    refreshStock();
+    _stockPoll=setInterval(refreshStock, 8000);
+  } else if(name==='kalshi'){
     refreshKalshi();
     _kalshiPoll=setInterval(refreshKalshi, 6000);
   } else if(name==='crypto'){
@@ -5075,6 +5437,193 @@ function refreshWatch(){
     }
   }).catch(()=>{});
 }
+function refreshStock(){
+  fetch('/stock/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
+    const fn = document.querySelector('#job-panel-stock #kalshi-footnote');
+    if(fn && a && a.trading_enabled){
+      fn.textContent = 'Alpaca paper · Elan has full control · market hours 9:30am-4pm ET';
+      fn.setAttribute('data-trading','on');
+    }
+    const actions = (a && a.actions) || [];
+    const aEl = document.getElementById('st-actions');
+    if(!aEl) return;
+    if(actions.length===0){ aEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no actions yet</div>'; return; }
+    aEl.innerHTML = actions.slice(-12).reverse().map(ac=>{
+      const ts = (ac.ts||'').slice(11,19);
+      const act = ac.action || '?';
+      const p = ac.params || {};
+      const ok = ac.ok ? '✓' : '✗';
+      const okCls = ac.ok ? 'k-pnl-pos' : 'k-pnl-neg';
+      let detail = '';
+      if(act==='open_position') detail = `${p.symbol||''} ${(p.side||'').toUpperCase()} qty=${p.qty||'auto'} conv=${p.conviction||''}`;
+      else if(act==='close_position') detail = `${p.symbol||''}`;
+      else if(act==='buy_option') detail = `${p.underlying||''} ${(p.option_type||'').toUpperCase()} ~${p.target_days||14}d qty=${p.qty||1}`;
+      else if(act==='close_option') detail = `${p.occ_symbol||''}`;
+      else if(act==='tune') detail = `${p.param}=${p.value}`;
+      const reason = p.reason ? ` — ${(p.reason||'').slice(0,60)}` : '';
+      const err = ac.error ? ` · ${ac.error.slice(0,50)}` : '';
+      return `<div class="k-row"><span class="k-tk">${ts} ${act} ${detail}${reason}</span>`
+           + `<span class="${okCls}">${ok}${err}</span></div>`;
+    }).join('');
+  }).catch(()=>{});
+
+  fetch('/stock/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
+    if(!s || s.error) return;
+    const bal = Number(s.balance || 0);
+    const start = Number(s.starting_balance || 100000);
+    const pnl = Number(s.total_pnl || 0);
+    const pct = start ? (pnl/start*100) : 0;
+    document.getElementById('st-total').textContent = '$' + bal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('st-total-sub').textContent = `starting $${start.toLocaleString('en-US')}`;
+    // Cash + invested (cash = balance - sum of positions' current value)
+    const positions = s.positions || {};
+    const options = s.option_positions || {};
+    let invested = 0;
+    Object.values(positions).forEach(p => { invested += Number((p.entry_price||0) * (p.qty||0)); });
+    Object.values(options).forEach(o => { invested += Number(o.qty || 1) * 100 * Number(o.spot_at_entry || 0) * 0.01; });
+    const cash = Math.max(0, bal - invested);
+    document.getElementById('st-cash').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('st-invested-sub').textContent = `invested $${invested.toFixed(2)}`;
+
+    const pnlEl = document.getElementById('st-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
+    pnlEl.classList.toggle('pos', pnl > 0); pnlEl.classList.toggle('neg', pnl < 0);
+    document.getElementById('st-pnlpct').textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+
+    // Market pill + macro
+    const mktEl = document.getElementById('st-market-pill');
+    if(mktEl) mktEl.textContent = (s.market_status || '—') + (s.paused ? ' · PAUSED' : (s.halted ? ' · HALTED' : ''));
+    const macroEl = document.getElementById('st-macro-pills');
+    if(macroEl){
+      const vix = s.vix != null ? `VIX ${Number(s.vix).toFixed(1)}` : '';
+      const fg = (s.fear_greed && s.fear_greed.value != null) ? `F/G ${s.fear_greed.value}` : '';
+      const spy = s.spy_trend ? `SPY ${s.spy_trend}` : '';
+      macroEl.textContent = [vix, fg, spy].filter(x=>x).join(' · ');
+    }
+
+    // Wins tally
+    const trades = s.trades || [];
+    let wins=0, winsDol=0, losses=0, lossesDol=0;
+    trades.forEach(t => {
+      const p = Number(t.pnl ?? t.pnl_usd ?? 0);
+      if (p > 0) { wins++; winsDol += p; }
+      else if (p < 0) { losses++; lossesDol += Math.abs(p); }
+    });
+    const wr = trades.length ? (wins/trades.length*100) : 0;
+    const wEl = document.getElementById('st-wins');
+    const wSubEl = document.getElementById('st-wins-sub');
+    if(wEl) wEl.textContent = wins.toLocaleString();
+    if(wSubEl) wSubEl.textContent = `+$${winsDol.toFixed(0)} won · ${losses} losses -$${lossesDol.toFixed(0)} · ${trades.length ? wr.toFixed(0)+'% win rate' : 'no closes yet'}`;
+
+    // Open positions
+    const posEl = document.getElementById('st-positions');
+    const posKeys = Object.keys(positions);
+    if(posKeys.length===0){
+      posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>';
+    } else {
+      posEl.innerHTML = posKeys.slice(0,12).map(sym => {
+        const p = positions[sym];
+        const side = (p.side || '').toLowerCase();
+        const sideCls = side === 'long' ? 'yes' : (side === 'short' ? 'no' : '');
+        const pl = Number(p.pnl || 0);
+        const pct_p = Number(p.pct || 0);
+        const plCls = pl >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        const src = p.source === 'elan' ? ' [elan]' : '';
+        const reason = (p.reasons && p.reasons[0]) ? (p.reasons[0] || '').slice(0,80) : '';
+        const conv = p.conviction != null ? `${Math.round(p.conviction*100)}%` : '';
+        const detailBits = [];
+        const cb = [];
+        if(conv) cb.push(`conv ${conv}`);
+        if(p.entry_price) cb.push(`entry $${Number(p.entry_price).toFixed(2)}`);
+        if(p.stop_loss) cb.push(`stop $${Number(p.stop_loss).toFixed(2)}`);
+        if(p.take_profit) cb.push(`tp $${Number(p.take_profit).toFixed(2)}`);
+        if(cb.length) detailBits.push(`<span class="conv">${cb.join(' · ')}</span>`);
+        if(reason) detailBits.push(`<i>${reason}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${sym} ${p.qty||0}sh${src}</span>`
+             + `<span class="k-side ${sideCls}">${side||'-'}</span>`
+             + `<span>${p.current_price ? '$'+Number(p.current_price).toFixed(2) : ''}</span>`
+             + `<span class="${plCls}">${pl>=0?'+':''}$${Math.abs(pl).toFixed(2)} (${pct_p>=0?'+':''}${pct_p.toFixed(1)}%)</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
+      }).join('');
+    }
+
+    // Open options
+    const optsEl = document.getElementById('st-options');
+    const optKeys = Object.keys(options);
+    if(optKeys.length===0){
+      optsEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no open options</div>';
+    } else {
+      optsEl.innerHTML = optKeys.slice(0,10).map(occ => {
+        const o = options[occ];
+        const otype = (o.option_type || '').toLowerCase();
+        const otypeCls = otype === 'call' ? 'yes' : (otype === 'put' ? 'no' : '');
+        const reason = (o.reason || '').slice(0,120);
+        const detailBits = [];
+        const cb = [];
+        if(o.spot_at_entry) cb.push(`spot@entry $${Number(o.spot_at_entry).toFixed(2)}`);
+        if(o.opened_at) cb.push(`opened ${(o.opened_at||'').slice(0,16).replace('T',' ')}`);
+        if(cb.length) detailBits.push(`<span class="conv">${cb.join(' · ')}</span>`);
+        if(reason) detailBits.push(`<i>${reason}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${o.underlying||''} ${occ}</span>`
+             + `<span class="k-side ${otypeCls}">${otype}</span>`
+             + `<span>strike $${Number(o.strike||0).toFixed(2)} · exp ${o.expiry||''}</span>`
+             + `<span>${o.qty||1}ct</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
+      }).join('');
+    }
+
+    // Watchlist signals
+    const sigs = s.signals || {};
+    const sigEl = document.getElementById('st-signals');
+    const sigEntries = Object.entries(sigs).filter(([_,d]) => d && (d.signal === 'long' || d.signal === 'short' || d.signal === 'buy' || d.signal === 'sell'))
+      .sort((a,b) => (b[1].conviction||0) - (a[1].conviction||0)).slice(0, 8);
+    if(sigEntries.length === 0){
+      sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no signals — market closed or no setups</div>';
+    } else {
+      sigEl.innerHTML = sigEntries.map(([sym, d]) => {
+        const sd = (d.signal || '').toLowerCase();
+        const sCls = (sd === 'long' || sd === 'buy') ? 'yes' : ((sd === 'short' || sd === 'sell') ? 'no' : '');
+        return `<div class="k-row"><span class="k-tk">${sym}</span>`
+             + `<span class="k-side ${sCls}">${sd}</span>`
+             + `<span>$${d.price||''}</span>`
+             + `<span>conv ${Math.round((d.conviction||0)*100)}%</span></div>`;
+      }).join('');
+    }
+
+    // Recent closed
+    const recEl = document.getElementById('st-recent');
+    if(trades.length === 0){
+      recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed trades yet</div>';
+    } else {
+      recEl.innerHTML = trades.slice(-10).reverse().map(t => {
+        const p = Number(t.pnl ?? t.pnl_usd ?? 0);
+        const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        const won = p > 0;
+        const ts = (t.time || t.closed_at || '').slice(0,16).replace('T',' ');
+        const reason = (t.reason || '').slice(0,60);
+        const detailBits = [];
+        const cb = [];
+        if(t.entry != null && t.exit != null) cb.push(`$${Number(t.entry).toFixed(2)} → $${Number(t.exit).toFixed(2)}`);
+        if(t.pct != null) cb.push(`${t.pct>=0?'+':''}${Number(t.pct).toFixed(1)}%`);
+        if(t.conviction != null) cb.push(`conv ${Math.round(t.conviction*100)}%`);
+        if(cb.length) detailBits.push(`<span class="conv">${cb.join(' · ')}</span>`);
+        if(reason) detailBits.push(`<i>closed: ${reason}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${ts} ${t.symbol||'?'} ${(t.side||'').toUpperCase()}</span>`
+             + `<span style="color:${won?'rgba(127,255,176,0.55)':'rgba(255,138,160,0.55)'};font-size:9px;letter-spacing:1.5px">${won?'WIN':'LOSS'}</span>`
+             + `<span>${t.qty||0}sh</span>`
+             + `<span class="${pCls}">${p>=0?'+':''}$${Math.abs(p).toFixed(2)}</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
+      }).join('');
+    }
+  }).catch(()=>{});
+}
+
 function refreshDegen(){
   fetch('/degen/actions',{cache:'no-store'}).then(r=>r.json()).then(a=>{
     const fn = document.querySelector('#job-panel-crypto #kalshi-footnote');
@@ -5106,40 +5655,53 @@ function refreshDegen(){
   }).catch(()=>{});
   fetch('/degen/state',{cache:'no-store'}).then(r=>r.json()).then(s=>{
     if(!s || s.error) return;
-    const spotTotal = s.total_balance || s.balance || 0;
-    const cash  = s.cash_balance || 0;
     const optsBlock = s.options || {};
-    const optsAvail = Number(optsBlock.available || 0);
-    const optsTotalValue = Number(optsBlock.total_value || optsAvail);
-    // Grand total = spot wallet + options wallet (which includes open option market value)
-    const grandTotal = spotTotal + optsTotalValue;
-    document.getElementById('d-total').textContent = '$' + grandTotal.toLocaleString('en-US', {maximumFractionDigits:2});
-    document.getElementById('d-cash').textContent = `spot $${spotTotal.toFixed(0)} · opts $${optsTotalValue.toFixed(0)}`;
 
-    // Combined P&L (spot net + options realized + options unrealized)
-    const spotPnl = s.total_pnl || 0;
+    // CASH: spot uninvested + options uninvested
+    const spotCash = Number(s.cash_balance || s.balance_usd || 0);
+    const optsAvail = Number(optsBlock.available || 0);
+    const cash = spotCash + optsAvail;
+
+    // INVESTED: market value of all open positions (spot + options)
+    let invested = 0;
+    const positions = s.positions || {};
+    Object.values(positions).forEach(p => { invested += Number(p.current_value_usd || p.stake || 0); });
+    const optsPositions = optsBlock.positions || {};
+    Object.values(optsPositions).forEach(o => { invested += Number(o.current_value || o.cost_usd || 0); });
+
+    // TOTAL: cash + invested = full account value across spot + options
+    const total = cash + invested;
+
+    // Combined P&L: realized + unrealized across spot + options
+    const spotPnl = Number(s.total_pnl || 0);
     const optsRealized = Number(optsBlock.realized_pnl || 0);
     const optsUnrealized = Number(optsBlock.unrealized_pnl || 0);
     const pnl = spotPnl + optsRealized + optsUnrealized;
-    const spotStart = s.starting_balance || 500;
-    const totalStart = spotStart + Number(optsBlock.budget || 150);
-    const pnlPct = totalStart ? (pnl/totalStart*100) : 0;
+
+    // Starting capital basis — use what's in the state plus options budget
+    const spotStart = Number(s.starting_balance || 500);
+    const optsBudget = Number(optsBlock.budget || 150);
+    const startBasis = spotStart + optsBudget;
+    // % return computed against starting capital
+    const pnlPct = startBasis ? (pnl / startBasis * 100) : 0;
+
+    // Render cards
+    document.getElementById('d-total').textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('d-total-sub').textContent = `starting $${startBasis.toFixed(0)}`;
+    document.getElementById('d-cash').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('d-invested-sub').textContent = `invested $${invested.toFixed(2)}`;
+
     const pnlEl = document.getElementById('d-pnl');
-    pnlEl.textContent = (pnl>=0?'+':'') + '$' + Math.abs(pnl).toFixed(2);
-    pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
-    document.getElementById('d-pnlpct').textContent = (pnlPct>=0?'+':'') + pnlPct.toFixed(2) + '%';
+    // Sign-correct rendering: + for positive, - for negative
+    pnlEl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
+    pnlEl.classList.toggle('pos', pnl > 0); pnlEl.classList.toggle('neg', pnl < 0);
+    document.getElementById('d-pnlpct').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
 
-    const positions = s.positions || {};
-    const posKeys = Object.keys(positions);
-    const options = optsBlock.positions || {};
-    const optKeys = Object.keys(options);
-
-    // Options wallet info inline in the OPEN OPTIONS header
+    // Options wallet info inline in the OPEN OPTIONS header (still useful detail)
     const optWalletEl = document.getElementById('d-opt-wallet');
-    if(optWalletEl) optWalletEl.textContent =
-      `wallet $${optsAvail.toFixed(0)} avail · $${optsTotalValue.toFixed(0)} total · ${optKeys.length} open`;
+    if(optWalletEl) optWalletEl.textContent = `${Object.keys(optsPositions).length} open · $${optsAvail.toFixed(0)} avail`;
 
-    // Wins + Win Rate
+    // Wins tally
     const trades = s.trades || [];
     const closedOptTrades = optsBlock.trades || [];
     const allClosed = trades.concat(closedOptTrades);
@@ -5149,17 +5711,15 @@ function refreshDegen(){
       if (p > 0) { wins++; winsDollars += p; }
       else if (p < 0) { losses++; lossesDollars += Math.abs(p); }
     });
+    const wr = allClosed.length ? (wins/allClosed.length*100) : 0;
     const winsEl = document.getElementById('d-wins');
     const winsSubEl = document.getElementById('d-wins-sub');
     if(winsEl) winsEl.textContent = wins.toLocaleString();
-    if(winsSubEl) winsSubEl.textContent = `+$${winsDollars.toFixed(2)} won · ${losses} losses -$${lossesDollars.toFixed(2)}`;
+    if(winsSubEl) winsSubEl.textContent =
+      `+$${winsDollars.toFixed(0)} won · ${losses} losses -$${lossesDollars.toFixed(0)} · ${allClosed.length ? wr.toFixed(0)+'% win rate' : 'no closes yet'}`;
 
-    const wr = allClosed.length ? (wins/allClosed.length*100) : 0;
-    const wrEl = document.getElementById('d-winrate');
-    wrEl.textContent = allClosed.length ? wr.toFixed(0) + '%' : '—';
-    wrEl.classList.toggle('pos', wr >= 50 && allClosed.length >= 5);
-    wrEl.classList.toggle('neg', wr < 40 && allClosed.length >= 5);
-    document.getElementById('d-trades').textContent = `${allClosed.length} closed`;
+    const posKeys = Object.keys(positions);
+    const optKeys = Object.keys(optsPositions);
 
     // Macro pills inline in signals header
     const macroPills = document.getElementById('d-macro-pills');
@@ -5366,8 +5926,14 @@ function refreshKalshi(){
     const pnl = s.total_pnl || 0;
     const start = s.starting_balance || 1000;
     const pnlPct = start? (pnl/start*100) : 0;
+    // Kalshi: bal already includes open positions (total_balance). Compute invested + cash.
+    const kPositions = s.positions || {};
+    let kInvested = 0;
+    Object.values(kPositions).forEach(p => { kInvested += Number(p.current_value_usd || p.bet_usd || 0); });
     document.getElementById('k-balance').textContent = _fmtUsd(bal,false);
-    document.getElementById('k-cash').textContent = 'cash ' + _fmtUsd(cash,false) + ' · start $' + Number(start).toFixed(0);
+    document.getElementById('k-cash').textContent = 'starting $' + Number(start).toFixed(0);
+    document.getElementById('k-cash-big').textContent = _fmtUsd(cash,false);
+    document.getElementById('k-invested-sub').textContent = 'invested $' + kInvested.toFixed(2);
     const pnlEl = document.getElementById('k-pnl');
     pnlEl.textContent = _fmtUsd(pnl,true);
     pnlEl.classList.toggle('pos', pnl>0); pnlEl.classList.toggle('neg', pnl<0);
@@ -5383,17 +5949,12 @@ function refreshKalshi(){
       if (won) { kWins++; if(p>0) kWinsDollars += p; }
       else if (p < 0) { kLosses++; kLossesDollars += Math.abs(p); }
     });
+    const kWr = trades.length ? (kWins/trades.length*100) : 0;
     const kwEl = document.getElementById('k-wins');
     const kwSubEl = document.getElementById('k-wins-sub');
     if(kwEl) kwEl.textContent = kWins.toLocaleString();
-    if(kwSubEl) kwSubEl.textContent = `+$${kWinsDollars.toFixed(2)} won · ${kLosses} losses -$${kLossesDollars.toFixed(2)}`;
-
-    const kWr = trades.length ? (kWins/trades.length*100) : 0;
-    const kWrEl = document.getElementById('k-winrate');
-    kWrEl.textContent = trades.length ? kWr.toFixed(0) + '%' : '—';
-    kWrEl.classList.toggle('pos', kWr >= 50 && trades.length >= 5);
-    kWrEl.classList.toggle('neg', kWr < 40 && trades.length >= 5);
-    document.getElementById('k-running').textContent = (s.paper_mode===false ? 'LIVE' : 'paper') + (trades.length||0) + ' closed · ' + (s.paused ? 'PAUSED' : (s.running ? 'live' : 'idle'));
+    if(kwSubEl) kwSubEl.textContent =
+      `+$${kWinsDollars.toFixed(0)} won · ${kLosses} losses -$${kLossesDollars.toFixed(0)} · ${trades.length ? kWr.toFixed(0)+'% win rate' : 'no closes yet'}`;
     // positions
     const posEl = document.getElementById('k-positions');
     if(posArr.length===0){ posEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">none open</div>'; }
