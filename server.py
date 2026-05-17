@@ -4955,22 +4955,49 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _handle_tts(self, body: bytes):
-        """Proxy text to ElevenLabs TTS, return audio/mpeg."""
+        """TTS: route to elan_sensorium if configured, else ElevenLabs."""
         import urllib.request, urllib.error
+        try:
+            data = json.loads(body)
+        except Exception:
+            self.send_error(400); return
+        text = data.get("text", "").strip()[:3000]
+        if not text:
+            self.send_error(400); return
+
+        sensorium_url = os.environ.get("ELAN_SENSORIUM_URL", "").rstrip("/")
+        if sensorium_url:
+            try:
+                from elan_sensorium_bridge import body_to_synth
+                body_snap = get_body().get_snapshot()
+                payload = body_to_synth(body_snap, text)
+                req = urllib.request.Request(
+                    sensorium_url + "/synth",
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    audio = resp.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Length", str(len(audio)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(audio)
+                return
+            except Exception as ex:
+                print(f"[TTS] sensorium failed: {ex} — falling back to ElevenLabs")
+
         el_key  = os.environ.get("ELEVENLABS_API_KEY", "")
         voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam
         if not el_key:
             self.send_response(503)
-            body_out = b'{"error":"ELEVENLABS_API_KEY not set"}'
+            body_out = b'{"error":"ELEVENLABS_API_KEY not set and ELAN_SENSORIUM_URL not configured"}'
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body_out)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers(); self.wfile.write(body_out); return
         try:
-            data = json.loads(body)
-            text = data.get("text", "").strip()[:3000]
-            if not text:
-                self.send_error(400); return
             # Allow per-request voice and settings override (from UI)
             voice_id = data.get("voice_id", voice_id)
             voice_settings = data.get("voice_settings", {
@@ -5007,10 +5034,59 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_error(500)
 
     def _handle_transcribe(self, body: bytes):
-        """Transcribe raw audio via Groq Whisper. Falls back to empty string if unavailable."""
+        """Transcribe raw audio. Routes to elan_sensorium if configured (which
+        also returns prosody + speaker + ambient and nudges the body engine);
+        otherwise falls back to Groq Whisper.
+        """
+        if not body:
+            self.send_json({"text": "", "error": "empty audio"})
+            return
+
+        sensorium_url = os.environ.get("ELAN_SENSORIUM_URL", "").rstrip("/")
+        if sensorium_url:
+            try:
+                import urllib.request
+                ct = self.headers.get("Content-Type", "audio/webm")
+                ext = "wav" if "wav" in ct else ("ogg" if "ogg" in ct else ("mp4" if "mp4" in ct else "webm"))
+                boundary = b"----elan-boundary-9242"
+                head = (
+                    b"--" + boundary + b"\r\n"
+                    + b'Content-Disposition: form-data; name="audio"; filename="rec.' + ext.encode() + b'"\r\n'
+                    + b"Content-Type: " + ct.encode() + b"\r\n\r\n"
+                )
+                tail = b"\r\n--" + boundary + b"--\r\n"
+                payload = head + body + tail
+                req = urllib.request.Request(
+                    sensorium_url + "/listen",
+                    data=payload,
+                    headers={"Content-Type": b"multipart/form-data; boundary=" + boundary},
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = json.loads(resp.read())
+                # Push prosody back into the body engine as somatic uptake
+                try:
+                    from elan_sensorium_bridge import prosody_to_body_drives
+                    drives = prosody_to_body_drives(data.get("prosody") or {})
+                    if drives:
+                        body_eng = get_body()
+                        body_eng.inject_drives(drives)
+                        broadcast("body_tick", body_eng.get_snapshot())
+                except Exception as ex:
+                    print(f"[TRANSCRIBE] prosody → body bridge failed: {ex}")
+                self.send_json({
+                    "text": data.get("text", ""),
+                    "prosody": data.get("prosody"),
+                    "speaker": data.get("speaker"),
+                    "ambient": data.get("ambient"),
+                    "via": "sensorium",
+                })
+                return
+            except Exception as ex:
+                print(f"[TRANSCRIBE] sensorium failed: {ex} — falling back to Groq Whisper")
+
         groq_key = os.environ.get("GROQ_API_KEY", _RUNTIME_GROQ_KEY)
-        if not groq_key or not body:
-            self.send_json({"text": "", "error": "no groq key or empty audio"})
+        if not groq_key:
+            self.send_json({"text": "", "error": "no groq key or sensorium configured"})
             return
         try:
             import groq as _groq_mod
