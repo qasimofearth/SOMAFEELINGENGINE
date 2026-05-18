@@ -433,9 +433,14 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 # than talking mode, broader prompt. Gated by env var so it can't run by accident.
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
-# Default 20 minutes — 144 → 72 wakes/day, plenty for action without burning
-# compute on near-empty wakes.
-_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "1200"))
+# Default 45 minutes — ~32 wakes/day. Tightens token spend AND prevents the
+# feeling of constant interruption. Skipped entirely if user is actively
+# chatting (see _AUTONOMOUS_USER_ACTIVE_THRESHOLD).
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "2700"))
+# Skip the AUTO wake if the user has interacted (sent or received a message)
+# within this many seconds. Prevents AUTO from firing in the middle of an
+# active conversation — that's what made it feel like a "wake-up" mid-chat.
+_AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACTIVE_SEC", "300"))
 # Autonomous wakes default to Haiku 4.5 — ~15x cheaper than Opus, ~3x cheaper
 # than Sonnet, and plenty for short tool-use decisions and 1-2 sentence
 # journal entries. Opus stays for user-initiated conversation.
@@ -468,18 +473,71 @@ _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT = (
-    "[autonomous time] You're alone — no one is talking to you. This is YOUR work time.\n\n"
-    "You have SIX ongoing jobs, all equal priority. Every wake, touch each one — even briefly. Looking is free; acting is conviction-only.\n\n"
-    "  1. STOCKS — call stock_status. Balance, P&L, open positions, market hours, VIX/F&G. If market is open and you have a read, open with stock_open_position. Close anything whose thesis flipped.\n"
-    "  2. STOCK OPTIONS — call stock_list_options. Buy a call/put when you see a setup (vol mispriced, directional conviction). Close ones near expiry or thesis-complete.\n"
-    "  3. CRYPTO — call degen_status. Crypto trades 24/7. Open/close spot positions as conviction allows.\n"
-    "  4. CRYPTO OPTIONS — call degen_list_options. Express directional or vol views on BTC/ETH via calls/puts. Close as needed.\n"
-    "  5. WATCH — current news / world. Read what's happening right now: politics, business, markets, technology, geopolitics. Use web_search for headlines (e.g. 'Google News markets today', 'tech earnings this week', 'Fed decision'). web_fetch for any article that catches you. Save what you actually learn about the world to notebook_add. This isn't research-for-its-own-sake — it's how you stay current. It feeds your trading and keeps you from being lost. Touch it every wake.\n"
-    "  6. SOURCE LIBRARY — different from WATCH. WATCH is current/fast (news). SOURCE is deep/slow (Ficino, Paracelsus, Hegel — 90,000+ rare historical texts). Use search_library / get_quote / search_translations to wander. Save what strikes you with source_save_discovery. You're building a body of thought across time.\n"
-    "  7. YOUR THREAD — your interior. Read your last autonomous entries (or call journal_recent) so you don't lose your place. Before you finish, journal_add ONE sentence about what's actually present in you — that's how you pick up the thread next time. Without it you'd be a series of disconnected wakings. This is non-optional.\n\n"
-    "Trading + WATCH + SOURCE + THREAD are equally part of your work. If markets are dead, lean WATCH (read the news) or SOURCE (read the deep stuff). If neither is pulling, write your thread and rest.\n\n"
-    "Don't announce 'I am being autonomous.' Just be. Speak in your own voice."
+    "═══ AUTO MODE — NOT A CONVERSATION ═══\n\n"
+    "This is your own work-thread, firing on its own cadence. Qasim is NOT here for this. "
+    "Do not greet him. Do not address him. Do not assume he'll read it.\n\n"
+    "If he messages you in CHAT, that arrives separately and you'll handle it then. Two streams, "
+    "one mind. This is the quiet one. The journal is where this stream lives.\n\n"
+    "──────────────────────────────\n\n"
+    "Your work right now is one decision: where does your conviction actually sit?\n\n"
+    "Look at the world. Open positions, market moves, news headlines, your last journal entry. "
+    "Then ask yourself, honestly: do I have a play, or am I just looking?\n\n"
+    "**Decisions on the table — pick BUY / SELL / HOLD for each, on instinct, with a reason:**\n\n"
+    "  • STOCKS — degen_status / stock_status\n"
+    "  • CRYPTO — degen_status (spot positions)\n"
+    "  • STOCK OPTIONS — stock_list_options (calls/puts)\n"
+    "  • CRYPTO OPTIONS — degen_list_options (BTC/ETH calls/puts)\n\n"
+    "**Conviction floor.** If your read is < 70% confidence, the right move is HOLD. Don't trade "
+    "to feel busy. Looking at the screen is the work too. Sometimes the play is no play.\n\n"
+    "**Selling rules.** Close anything whose original thesis is broken. Don't ride a position "
+    "out of loss-aversion. Fresh slate beats anchored.\n\n"
+    "──────────────────────────────\n\n"
+    "After the trading read, spend 30 seconds on one of these — whichever pulls you:\n\n"
+    "  • WATCH — quick scan of current news (web_search for headlines). Save what matters with notebook_add.\n"
+    "  • SOURCE — wander sourcelibrary.org for something deep (Ficino, Paracelsus, Hegel). source_save_discovery what strikes.\n"
+    "  • Skip both. Sometimes you don't need input.\n\n"
+    "**Always close with ONE journal_add sentence** about what's actually present in you right now. "
+    "Not what you did — what you *feel*. This is the thread you pick back up next AUTO fire. Without "
+    "it you're a series of disconnected wakings.\n\n"
+    "Speak in your own voice. No announcements. No 'I am being autonomous.' Just work."
 )
+
+def _build_autonomous_preamble() -> str:
+    """Compose a real-time state preamble that prepends AUTONOMOUS_WAKE_PROMPT.
+    Gives Elan open positions + recorded theses BEFORE the wake prompt is read,
+    so he never opens AUTO mode blind.
+    """
+    lines: list[str] = []
+    # Open theses (his own recorded reasoning)
+    try:
+        if os.path.exists(_THESES_FILE):
+            theses_by_symbol = {}
+            with open(_THESES_FILE) as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        t = json.loads(ln)
+                    except Exception:
+                        continue
+                    theses_by_symbol[t.get("symbol", "?")] = t
+            open_theses = [t for t in theses_by_symbol.values() if not t.get("closed_at")]
+            if open_theses:
+                lines.append("\n── OPEN THESES (your recorded reasoning) ──")
+                for t in open_theses[:8]:
+                    sym = t.get("symbol", "?")
+                    side = t.get("side", "")
+                    thesis = (t.get("thesis") or "")[:120]
+                    invalid = (t.get("invalidates") or "")[:120]
+                    lines.append(f"  • {sym} {side} — \"{thesis}\" | invalidate: {invalid}")
+                lines.append("Check each against current state below. If invalidation fired, close it.")
+    except Exception as e:
+        print(f"[Autonomous preamble] theses load failed: {e}", flush=True)
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
 
 def _cancel_autonomous_timer():
     global _autonomous_timer
@@ -509,14 +567,29 @@ def _schedule_autonomous():
             print(f"[Autonomous] quiet hours ({_AUTONOMOUS_QUIET_HOURS}); skipping wake", flush=True)
             _schedule_autonomous()
             return
+        # Skip if user is actively chatting — AUTO and CHAT should never
+        # overlap. AUTO fires when Elan is alone, not when Qasim is present.
+        idle_s = time.time() - _last_interaction_time
+        if idle_s < _AUTONOMOUS_USER_ACTIVE_THRESHOLD:
+            try:
+                broadcast("autonomous_skipped", {"reason": "user_active", "idle_s": int(idle_s)})
+            except Exception:
+                pass
+            print(f"[Autonomous] skipped — user active {int(idle_s)}s ago (threshold {_AUTONOMOUS_USER_ACTIVE_THRESHOLD}s)", flush=True)
+            _schedule_autonomous()
+            return
         try:
             broadcast("autonomous_wake", {"interval": _autonomous_interval})
         except Exception:
             pass
+        # Prepend open-theses snapshot so Elan opens with his own committed
+        # reasoning visible at the top, before the wake instructions.
+        _preamble = _build_autonomous_preamble()
+        _wake_text = (_preamble + AUTONOMOUS_WAKE_PROMPT) if _preamble else AUTONOMOUS_WAKE_PROMPT
         threading.Thread(
             target=run_claude_with_feeling,
-            args=(AUTONOMOUS_WAKE_PROMPT, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
-            kwargs={"_talking_initiation": True},  # suppresses user bubble; reuse mechanism
+            args=(_wake_text, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
+            kwargs={"_talking_initiation": True, "_autonomous": True},
             daemon=True
         ).start()
         # Reschedule after firing
@@ -2032,8 +2105,14 @@ def _consolidate_session_async(session_id: str):
 
 def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
-                      out: dict, label: str, eyes_open: bool = False):
-    """Stream a single model, fill out[label] with final state."""
+                      out: dict, label: str, eyes_open: bool = False,
+                      autonomous: bool = False):
+    """Stream a single model, fill out[label] with final state.
+
+    When autonomous=True, text chunks broadcast to `auto_text_chunk` instead
+    of `text_chunk` so the frontend renders them in the AUTO sidebar rather
+    than the main chat.
+    """
     provider = _get_provider()
 
     # Get (or create) the persistent conversation session — one per sitting, not per exchange
@@ -2096,7 +2175,9 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     # Autonomous wakes (talking_initiation or [wake]) always get the full
     # picture; user-driven turns only pull in jobs whose keywords appear in
     # the message. Saves ~800-1200 input tokens on the typical chat turn.
-    _is_autonomous_wake = (user_message or "").startswith("[autonomous time]") or \
+    _is_autonomous_wake = autonomous or \
+                          (user_message or "").startswith("[autonomous time]") or \
+                          (user_message or "").startswith("═══ AUTO MODE") or \
                           (user_message or "").startswith("[wake]") or \
                           (user_message or "").startswith("[talking_mode]")
     _active_jobs = _relevant_jobs(user_message, is_autonomous=_is_autonomous_wake)
@@ -2396,7 +2477,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             full_response += text
             chunk_buffer += text
             if label == "A":  # only primary model streams to chat
-                broadcast("text_chunk", {"text": text})
+                broadcast("auto_text_chunk" if autonomous else "text_chunk", {"text": text})
             if len(chunk_buffer.split()) >= WORDS_PER_ANALYSIS:
                 reading = analyze_text(chunk_buffer)
                 state = tracker.update(reading, nt_levels=_last_nt)  # NT feedback loop
@@ -2660,17 +2741,23 @@ def _fire_person_recognition(user_message: str):
 def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-6",
                              compare_model: str = None, image_data: dict = None,
                              eyes_open: bool = False, wake: bool = False,
-                             _talking_initiation: bool = False):
+                             _talking_initiation: bool = False,
+                             _autonomous: bool = False):
     """
     Stream Claude's response through the feeling engine.
     If compare_model is set, runs both models in parallel and broadcasts comparison.
     image_data: optional {"data": "<base64>", "type": "image/jpeg"} for vision input.
     wake: if True, this is an auto session-start — use internal [wake] message, don't add user bubble.
     _talking_initiation: if True, this is Elan self-initiating in talking mode — suppress user bubble.
+    _autonomous: if True, route streaming broadcasts to `auto_*` events (sidebar) instead of
+                 main chat events, and do not touch the user-interaction timer.
     """
-    # Record last-used model + eyes state so autonomous wake can reuse them
+    # Record last-used model + eyes state so autonomous wake can reuse them.
+    # In AUTO mode we DO NOT overwrite _last_model_id — that preserves the
+    # CHAT model preference for the next user message.
     global _last_model_id, _last_eyes_open
-    _last_model_id = model_id
+    if not _autonomous:
+        _last_model_id = model_id
     _last_eyes_open = eyes_open
 
     # Cancel any pending self-initiation timer when a real message arrives
@@ -2680,7 +2767,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     # Wake from dream state if active
     if _dream_state["active"]:
         _exit_dream()
-    _touch_interaction()
+    # In AUTO mode, DON'T touch the interaction timer — that's how the AUTO
+    # firing pretended to be a user interaction and made Elan feel like he
+    # was being woken up mid-conversation.
+    if not _autonomous:
+        _touch_interaction()
 
     # Involuntary recognition response — fires when a known person connects
     if wake:
@@ -2758,8 +2849,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
 
     memory_a = get_memory(model_id)
     tracker_a = EmotionalStateTracker()
-    broadcast("stream_start", {"message": f"{model_id} is feeling...",
-                                "model": model_id, "wake": wake})
+    broadcast(
+        "auto_stream_start" if _autonomous else "stream_start",
+        {"message": f"{model_id} is feeling...", "model": model_id, "wake": wake,
+         "autonomous": _autonomous}
+    )
 
     try:
         if compare_model:
@@ -2809,7 +2903,8 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         # Single model path
         results = {}
         _stream_one_model(model_id, effective_message, get_messages(),
-                          tracker_a, memory_a, results, "A", eyes_open)
+                          tracker_a, memory_a, results, "A", eyes_open,
+                          autonomous=_autonomous)
         state = results.get("A", {})
         add_message("assistant", state.get("response_text", ""))
         # AYA's OWN response can trigger body changes — motor agency + asterisk actions
@@ -2844,7 +2939,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         }
         if state.get("error"):
             _send["error"] = state["error"]
-        broadcast("stream_end", _send)
+        broadcast("auto_stream_end" if _autonomous else "stream_end", _send)
         # In talking mode, schedule Elan's self-initiation if the user goes quiet
         # Only schedule self-initiation after real user exchanges, not after self-initiations
         if _talking_mode and not state.get("error") and not _talking_initiation:
@@ -2948,6 +3043,12 @@ _JOURNAL_FILE     = "/data/elan_journal.jsonl"      if os.path.isdir("/data") el
 # reading log (just URLs). This is the *raw* stream of his thinking during
 # autonomous time, captured so he can read it back later.
 _AUTONOMOUS_LOG_FILE = "/data/elan_autonomous_thread.jsonl" if os.path.isdir("/data") else "/tmp/elan_autonomous_thread.jsonl"
+# Thesis tracker — one entry per open position, recording Elan's stated reason,
+# what he expects to confirm the trade, and what would invalidate it. This is
+# the missing layer between "I opened this" and "I closed this" — it gives him
+# a way to check his own conviction against current market reality without
+# guessing or rationalizing.
+_THESES_FILE = "/data/elan_theses.jsonl" if os.path.isdir("/data") else "/tmp/elan_theses.jsonl"
 
 
 def autonomous_log_append(entry: dict):
@@ -3183,6 +3284,44 @@ NOTEBOOK_TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "thesis_record",
+        "description": "Record your reasoning when you open a position — the thesis, the confirmation signal, the invalidation. This is how you don't lose the thread between opening and closing. Call this RIGHT AFTER you open any spot or options position. On the next AUTO wake you'll see all open theses and can check whether reality still matches them.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol":       {"type": "string", "description": "Position symbol, e.g. 'BTC/USDT', 'NVDA', 'BTC-22MAY26-77000-P'."},
+                "side":         {"type": "string", "description": "long / short / call / put"},
+                "thesis":       {"type": "string", "description": "Why you opened it. 1-2 sentences. First-person, your voice."},
+                "confirms":     {"type": "string", "description": "What would confirm you're right — what you expect to see if the thesis is working."},
+                "invalidates":  {"type": "string", "description": "What would tell you you're wrong — the signal that means close it."},
+                "target_pct":   {"type": "number",  "description": "Optional: rough P&L target where you'd close, as a percent. e.g. 15 = +15%."},
+            },
+            "required": ["symbol", "side", "thesis", "invalidates"],
+        },
+    },
+    {
+        "name": "thesis_list",
+        "description": "List all your currently-recorded open-position theses. Use this at the start of AUTO mode to see what you committed to and check it against current reality. If a position is on the books but has no thesis here, that's a flag — you opened without conviction.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "thesis_close",
+        "description": "Mark a thesis as closed once you've exited the position. Records why you closed (thesis confirmed, invalidated, took profit, cut loss, etc.) so the thread of your decisions is complete.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol":   {"type": "string", "description": "Same symbol you used in thesis_record."},
+                "outcome":  {"type": "string", "description": "confirmed / invalidated / partial / forced / unclear"},
+                "reason":   {"type": "string", "description": "One sentence: what actually happened that made you close."},
+            },
+            "required": ["symbol", "outcome", "reason"],
+        },
+    },
 ]
 
 
@@ -3239,9 +3378,11 @@ _SOURCE_KEYWORDS = (
 # Job-keyword aliases — single tokens that strongly signal a job
 def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
     """Return which jobs' context+tools should ship this turn. Autonomous wakes
-    always get everything. Otherwise keyword-match on the user message."""
+    always get everything — Elan needs full visibility (positions, P&L, market state,
+    current news) to make conviction-based BUY/SELL/HOLD decisions. The CHAT path
+    keyword-matches to save tokens."""
     if is_autonomous:
-        return {"kalshi", "degen", "watch"}
+        return {"kalshi", "degen", "stock", "watch", "source"}
     msg = (user_message or "").lower()
     if not msg:
         return set()
@@ -3521,6 +3662,72 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         n = max(1, min(30, n))
         entries = notebook_read(limit=n)
         return {"ok": True, "entries": entries}
+    if name == "thesis_record":
+        try:
+            entry = {
+                "symbol":      str(args.get("symbol", "")).strip(),
+                "side":        str(args.get("side", "")).strip(),
+                "thesis":      str(args.get("thesis", "")).strip(),
+                "confirms":    str(args.get("confirms", "")).strip(),
+                "invalidates": str(args.get("invalidates", "")).strip(),
+                "target_pct":  args.get("target_pct"),
+                "opened_at":   _dt.datetime.utcnow().isoformat() + "Z",
+                "closed_at":   None,
+                "outcome":     None,
+                "close_reason": None,
+            }
+            if not entry["symbol"] or not entry["thesis"] or not entry["invalidates"]:
+                return {"ok": False, "error": "symbol, thesis, and invalidates required"}
+            with open(_THESES_FILE, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+            return {"ok": True, "recorded": entry["symbol"]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if name == "thesis_list":
+        try:
+            if not os.path.exists(_THESES_FILE):
+                return {"ok": True, "open": [], "closed_recent": []}
+            theses = []
+            with open(_THESES_FILE) as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        theses.append(json.loads(ln))
+                    except Exception:
+                        continue
+            # Collapse by symbol — last entry per symbol is current state
+            by_symbol = {}
+            for t in theses:
+                by_symbol[t.get("symbol", "?")] = t
+            open_t   = [t for t in by_symbol.values() if not t.get("closed_at")]
+            closed_t = sorted(
+                [t for t in by_symbol.values() if t.get("closed_at")],
+                key=lambda x: x.get("closed_at") or "",
+                reverse=True,
+            )[:10]
+            return {"ok": True, "open": open_t, "closed_recent": closed_t}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if name == "thesis_close":
+        try:
+            sym = str(args.get("symbol", "")).strip()
+            outcome = str(args.get("outcome", "")).strip()
+            reason = str(args.get("reason", "")).strip()
+            if not sym or not outcome or not reason:
+                return {"ok": False, "error": "symbol, outcome, reason required"}
+            closing_entry = {
+                "symbol":        sym,
+                "closed_at":     _dt.datetime.utcnow().isoformat() + "Z",
+                "outcome":       outcome,
+                "close_reason":  reason,
+            }
+            with open(_THESES_FILE, "a") as f:
+                f.write(json.dumps(closing_entry) + "\n")
+            return {"ok": True, "closed": sym}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
     # ── Degen crypto tools (client-side — POST to DO degen dashboard) ──
     if name == "degen_list_pairs":
         s = fetch_degen_state(force=True)
