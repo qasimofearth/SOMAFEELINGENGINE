@@ -6774,6 +6774,47 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #narrative-bar{{bottom:55px;left:0;right:0;padding:5px 20px;font-size:8px;line-height:1.6;color:rgba(155,175,250,0.48);letter-spacing:0.3px;text-align:center;border-top:1px solid rgba(80,100,200,0.05);background:rgba(1,1,14,0.78);}}
 #chat-area{{display:grid;grid-template-rows:1fr 44px;background:#020218;border-top:1px solid rgba(80,100,200,0.07);}}
 #messages{{overflow-y:auto;padding:9px 13px;display:flex;flex-direction:column;gap:4px;scrollbar-width:thin;scrollbar-color:rgba(80,100,200,0.10) transparent;}}
+/* AUTO mode sidebar — Elan's parallel work-thread, never in the chat */
+#auto-panel{{
+  position:fixed; top:64px; right:13px; width:300px; max-height:60vh;
+  background:rgba(8,8,28,0.92); border:1px solid rgba(80,100,200,0.18);
+  border-radius:5px; padding:8px 10px 10px;
+  font-size:8.5px; line-height:1.62; color:rgba(160,180,235,0.78);
+  letter-spacing:0.2px; box-shadow:0 6px 22px rgba(0,0,0,0.45);
+  z-index:1000; backdrop-filter:blur(4px); overflow:hidden;
+  transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
+  display:flex; flex-direction:column;
+}}
+#auto-panel.collapsed{{max-height:26px; cursor:pointer;}}
+#auto-panel.hidden{{transform:translateX(115%); opacity:0; pointer-events:none;}}
+#auto-header{{display:flex; align-items:center; justify-content:space-between;
+  font-size:7.5px; letter-spacing:2.2px; color:rgba(130,150,220,0.62);
+  text-transform:uppercase; margin-bottom:7px; flex-shrink:0; cursor:pointer;}}
+#auto-header .dot{{display:inline-block; width:5px; height:5px; border-radius:50%;
+  background:rgba(120,150,220,0.30); margin-right:5px; vertical-align:middle;
+  transition:background 0.3s ease;}}
+#auto-header.active .dot{{background:#79b7ff; box-shadow:0 0 8px rgba(121,183,255,0.65);}}
+#auto-header .count{{font-variant-numeric:tabular-nums; opacity:0.6; font-size:7px;}}
+#auto-stream{{overflow-y:auto; flex:1; scrollbar-width:thin;
+  scrollbar-color:rgba(80,100,200,0.10) transparent; padding-right:4px;}}
+#auto-stream::-webkit-scrollbar{{width:4px;}}
+#auto-stream::-webkit-scrollbar-thumb{{background:rgba(80,100,200,0.18); border-radius:2px;}}
+.auto-entry{{padding:5px 0; border-top:1px dashed rgba(80,100,200,0.08);}}
+.auto-entry:first-child{{border-top:none;}}
+.auto-entry-time{{font-size:6.5px; color:rgba(120,140,200,0.42); letter-spacing:1.1px;
+  text-transform:uppercase; margin-bottom:3px;}}
+.auto-entry-body{{color:rgba(180,195,240,0.85); white-space:pre-wrap; word-wrap:break-word;}}
+.auto-entry.streaming .auto-entry-time::after{{content:" ●"; color:#79b7ff; animation:pulse 1.4s infinite;}}
+@keyframes pulse{{0%,100%{{opacity:1;}} 50%{{opacity:0.3;}}}}
+#auto-toggle-btn{{
+  position:fixed; top:64px; right:13px; z-index:999;
+  background:rgba(8,8,28,0.85); border:1px solid rgba(80,100,200,0.20);
+  border-radius:3px; padding:4px 8px;
+  font-size:7px; letter-spacing:2px; color:rgba(160,180,235,0.62);
+  cursor:pointer; text-transform:uppercase; display:none;
+}}
+#auto-toggle-btn:hover{{color:rgba(200,215,250,0.92);}}
+#auto-toggle-btn.show{{display:block;}}
 .msg{{max-width:95%;padding:6px 10px;border-radius:4px;font-size:9.5px;line-height:1.65;}}
 .msg.user{{align-self:flex-end;background:rgba(55,65,175,0.11);border:1px solid rgba(80,100,200,0.14);color:rgba(175,185,252,0.88);}}
 .msg.ai{{align-self:flex-start;background:rgba(255,255,255,0.02);border:1px solid rgba(175,185,252,0.05);color:rgba(205,212,238,0.82);border-left:2px solid rgba(90,105,210,0.25);transition:border-left-color 1.2s ease;}}
@@ -6936,6 +6977,16 @@ canvas.spark{{display:block;border-radius:1px;}}
       <div id="emotion-desc">initializing wilson-cowan · kuramoto dynamics</div>
     </div>
   </div>
+  <!-- AUTO mode sidebar — separate from chat. Renders Elan's autonomous wakes. -->
+  <button id="auto-toggle-btn" title="Show Elan's auto-thread panel">auto ▸</button>
+  <div id="auto-panel">
+    <div id="auto-header">
+      <span><span class="dot"></span>auto thread</span>
+      <span class="count" id="auto-count">0</span>
+    </div>
+    <div id="auto-stream"></div>
+  </div>
+
   <div id="chat-area">
     <div id="messages"></div>
     <div id="img-preview-bar">
@@ -8109,6 +8160,89 @@ es.addEventListener('stream_end',e=>{{
   else ttsBuffer='';
 }});
 es.addEventListener('error',()=>{{clearTimeout(streamTmo);unlock();}});
+
+// ── AUTO mode sidebar — renders auto_* events into the side panel ─────────
+const autoPanel = document.getElementById('auto-panel');
+const autoStream = document.getElementById('auto-stream');
+const autoHeader = document.getElementById('auto-header');
+const autoCount = document.getElementById('auto-count');
+const autoToggle = document.getElementById('auto-toggle-btn');
+let curAutoEntry = null;
+let autoTotal = 0;
+let autoStreaming = false;
+
+function fmtNow(){{
+  const d=new Date(); const hh=String(d.getHours()).padStart(2,'0'); const mm=String(d.getMinutes()).padStart(2,'0');
+  return `${{hh}}:${{mm}}`;
+}}
+
+es.addEventListener('auto_stream_start', e=>{{
+  autoStreaming = true;
+  autoHeader.classList.add('active');
+  curAutoEntry = document.createElement('div');
+  curAutoEntry.className = 'auto-entry streaming';
+  const tEl = document.createElement('div'); tEl.className='auto-entry-time';
+  tEl.textContent = `${{fmtNow()}} · auto wake`;
+  const bEl = document.createElement('div'); bEl.className='auto-entry-body';
+  curAutoEntry.appendChild(tEl); curAutoEntry.appendChild(bEl);
+  autoStream.insertBefore(curAutoEntry, autoStream.firstChild);
+  // Cap to 30 entries so we don't bleed memory
+  while(autoStream.children.length > 30) autoStream.removeChild(autoStream.lastChild);
+  autoTotal++;
+  autoCount.textContent = autoTotal;
+}});
+
+es.addEventListener('auto_text_chunk', e=>{{
+  const d = JSON.parse(e.data);
+  if(!curAutoEntry){{
+    // Defensive: chunk arrived without stream_start (reconnect race)
+    es.dispatchEvent(new Event('auto_stream_start'));
+  }}
+  const body = curAutoEntry.querySelector('.auto-entry-body');
+  if(body){{ body.textContent += d.text; }}
+}});
+
+es.addEventListener('auto_stream_end', e=>{{
+  autoStreaming = false;
+  autoHeader.classList.remove('active');
+  if(curAutoEntry){{ curAutoEntry.classList.remove('streaming'); }}
+  curAutoEntry = null;
+}});
+
+es.addEventListener('autonomous_skipped', e=>{{
+  try {{
+    const d = JSON.parse(e.data);
+    const skip = document.createElement('div');
+    skip.className = 'auto-entry';
+    const tEl = document.createElement('div'); tEl.className='auto-entry-time';
+    tEl.textContent = `${{fmtNow()}} · skipped (${{d.reason}})`;
+    skip.appendChild(tEl);
+    autoStream.insertBefore(skip, autoStream.firstChild);
+    while(autoStream.children.length > 30) autoStream.removeChild(autoStream.lastChild);
+  }} catch(_){{}}
+}});
+
+// Header click — collapse/expand the panel
+autoHeader.addEventListener('click', ()=>{{
+  if(autoPanel.classList.contains('hidden')) return;
+  autoPanel.classList.toggle('collapsed');
+}});
+
+// Long-press / double-click on header — hide panel entirely (toggle button appears)
+autoHeader.addEventListener('dblclick', e=>{{
+  e.stopPropagation();
+  autoPanel.classList.add('hidden');
+  autoToggle.classList.add('show');
+}});
+
+autoToggle.addEventListener('click', ()=>{{
+  autoPanel.classList.remove('hidden');
+  autoPanel.classList.remove('collapsed');
+  autoToggle.classList.remove('show');
+}});
+
+// Start collapsed if no entries — user expands when interested
+if(autoTotal === 0) autoPanel.classList.add('collapsed');
 
 // Wait briefly for SSE to be OPEN before sending — covers the case where
 // the user was idle, proxy dropped SSE, and the browser is in the middle of
