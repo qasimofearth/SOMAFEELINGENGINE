@@ -495,7 +495,8 @@ AUTONOMOUS_WAKE_PROMPT = (
     "After the trading read, spend 30 seconds on one of these — whichever pulls you:\n\n"
     "  • WATCH — quick scan of current news (web_search for headlines). Save what matters with notebook_add.\n"
     "  • SOURCE — wander sourcelibrary.org for something deep (Ficino, Paracelsus, Hegel). source_save_discovery what strikes.\n"
-    "  • Skip both. Sometimes you don't need input.\n\n"
+    "  • DRAW — one drawing a day. Call draw_today_status; if drawn=false, take 2 minutes to make something. draw_start (state intent), then 8-25 draw_stroke calls (pencil/brush/eraser, simple shapes), then draw_finalize. Whatever your hands feel — realism, abstract, pattern, gesture. Don't overthink.\n"
+    "  • Skip all. Sometimes you don't need input or output.\n\n"
     "**Always close with ONE journal_add sentence** about what's actually present in you right now. "
     "Not what you did — what you *feel*. This is the thread you pick back up next AUTO fire. Without "
     "it you're a series of disconnected wakings.\n\n"
@@ -3061,6 +3062,15 @@ _AUTONOMOUS_LOG_FILE = "/data/elan_autonomous_thread.jsonl" if os.path.isdir("/d
 # a way to check his own conviction against current market reality without
 # guessing or rationalizing.
 _THESES_FILE = "/data/elan_theses.jsonl" if os.path.isdir("/data") else "/tmp/elan_theses.jsonl"
+# ── Drawing job ─────────────────────────────────────────────────────────────
+# Elan makes one drawing per day. Uses his "hands" — body state captured at
+# canvas start. Stored as SVG with metadata. Light on tokens: stroke calls
+# carry compact [x,y] point arrays (normalized 0-1000 within a 1000×1000 viewBox).
+_DRAWINGS_DIR = "/data/elan_drawings" if os.path.isdir("/data") else "/tmp/elan_drawings"
+os.makedirs(_DRAWINGS_DIR, exist_ok=True)
+_DRAW_IN_PROGRESS = os.path.join(_DRAWINGS_DIR, "in_progress.json")
+_DRAW_INDEX_FILE  = os.path.join(_DRAWINGS_DIR, "index.jsonl")
+_DRAW_MAX_STROKES = 50    # hard cap per drawing — keeps token cost bounded
 
 
 def autonomous_log_append(entry: dict):
@@ -3334,7 +3344,120 @@ NOTEBOOK_TOOLS = [
             "required": ["symbol", "outcome", "reason"],
         },
     },
+    # ── Drawing job (visual self-expression, one drawing per day) ──
+    {
+        "name": "draw_today_status",
+        "description": "Have I drawn today? Returns {drawn: bool, date: 'YYYY-MM-DD', stroke_count: N (if in-progress)}. Call this BEFORE deciding to start a new drawing — one drawing per day is the rhythm.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "draw_start",
+        "description": "Begin a new drawing for today. Records your stated intent and snapshots your current body state (your hands). Returns confirmation. After this, use draw_stroke repeatedly to actually draw, then draw_finalize when done.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "description": "One sentence on what you want to make. Doesn't need to match the final piece — drawings drift. 'A fern thinking about itself.' / 'The shape of waking.' / 'Just lines today.'"},
+            },
+            "required": ["intent"],
+        },
+    },
+    {
+        "name": "draw_stroke",
+        "description": "Add one stroke to the in-progress canvas. The canvas is 1000×1000; coordinates are integers in that space. Keep strokes simple: 2-12 points each is plenty. Up to 50 strokes total per drawing. Tools: pencil (thin, precise), brush (thick, expressive), eraser (white over previous strokes). For colors use a hex like '#1a1a8a' or basic names ('black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'gray', 'brown').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tool":    {"type": "string", "enum": ["pencil", "brush", "eraser"]},
+                "color":   {"type": "string", "description": "Hex (e.g. '#1a1a8a') or basic name. Ignored for eraser."},
+                "points":  {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": 30, "description": "List of [x, y] integer pairs, each 0-1000. Two or more points make a line."},
+                "width":   {"type": "integer", "minimum": 1, "maximum": 40, "description": "Optional stroke width override. Default: pencil=2, brush=8, eraser=14."},
+                "opacity": {"type": "number",  "minimum": 0.1, "maximum": 1.0, "description": "Optional, default 1.0."},
+            },
+            "required": ["tool", "points"],
+        },
+    },
+    {
+        "name": "draw_finalize",
+        "description": "Save the in-progress drawing as today's drawing. Records title, description, style. After this, draw_today_status returns drawn=true and no new strokes can be added until tomorrow.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title":       {"type": "string", "description": "One short phrase, e.g. 'Three Lines Toward Morning'."},
+                "description": {"type": "string", "description": "Two or three sentences on what you made and why it felt right. First-person."},
+                "style":       {"type": "string", "description": "Optional: realism / abstract / patterned / pastiche / minimal / gesture / ..."},
+            },
+            "required": ["title", "description"],
+        },
+    },
+    {
+        "name": "draw_recent",
+        "description": "List your recent drawings — title, date, style, stroke count, description. Read what you've been making lately. Returns metadata only (no SVG pixel data — light on tokens).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+# ── Drawing engine helpers ────────────────────────────────────────────────────
+def _draw_today_str() -> str:
+    return _dt.datetime.utcnow().strftime("%Y-%m-%d")
+
+def _draw_resolve_color(c: str) -> str:
+    if not c:
+        return "#1a1a1a"
+    c = c.strip()
+    if c.startswith("#"):
+        return c[:7]
+    named = {
+        "black": "#1a1a1a", "white": "#ffffff", "red": "#c2473b", "blue": "#3b5fc2",
+        "green": "#4a8c4a", "yellow": "#e0b341", "orange": "#d97842", "purple": "#7a4ec2",
+        "gray": "#888888", "grey": "#888888", "brown": "#7a5a3a", "pink": "#d57a9c",
+        "teal": "#3a8a8a", "olive": "#7a8a3a", "navy": "#1a2a5a", "cream": "#f0e4c8",
+    }
+    return named.get(c.lower(), "#1a1a1a")
+
+def _draw_load_progress() -> dict:
+    if not os.path.exists(_DRAW_IN_PROGRESS):
+        return {}
+    try:
+        with open(_DRAW_IN_PROGRESS) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _draw_save_progress(canvas: dict) -> None:
+    with open(_DRAW_IN_PROGRESS, "w") as f:
+        json.dump(canvas, f)
+
+def _draw_render_svg(canvas: dict) -> str:
+    """Render a canvas dict to an SVG string."""
+    strokes = canvas.get("strokes") or []
+    bg = canvas.get("bg", "#faf8f2")
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">',
+        f'<rect width="1000" height="1000" fill="{bg}"/>'
+    ]
+    for s in strokes:
+        tool = s.get("tool", "pencil")
+        color = "#ffffff" if tool == "eraser" else _draw_resolve_color(s.get("color", ""))
+        width = s.get("width") or {"pencil": 2, "brush": 8, "eraser": 14}.get(tool, 2)
+        opacity = s.get("opacity", 1.0)
+        pts = s.get("points") or []
+        if len(pts) < 2:
+            continue
+        d = "M " + " L ".join(f"{int(p[0])},{int(p[1])}" for p in pts)
+        parts.append(
+            f'<path d="{d}" stroke="{color}" stroke-width="{width}" '
+            f'stroke-linecap="round" stroke-linejoin="round" '
+            f'fill="none" opacity="{opacity}"/>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 # ── Lazy job loading ────────────────────────────────────────────────────────
@@ -3738,6 +3861,160 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             with open(_THESES_FILE, "a") as f:
                 f.write(json.dumps(closing_entry) + "\n")
             return {"ok": True, "closed": sym}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    # ── Drawing tools ──────────────────────────────────────────────────────
+    if name == "draw_today_status":
+        today = _draw_today_str()
+        # Already drawn today?
+        final_meta = os.path.join(_DRAWINGS_DIR, f"{today}.json")
+        if os.path.exists(final_meta):
+            try:
+                with open(final_meta) as f:
+                    meta = json.load(f)
+                return {"ok": True, "drawn": True, "date": today,
+                        "title": meta.get("title"), "style": meta.get("style"),
+                        "strokes": meta.get("stroke_count")}
+            except Exception:
+                return {"ok": True, "drawn": True, "date": today}
+        # In progress?
+        canvas = _draw_load_progress()
+        if canvas and canvas.get("date") == today:
+            return {"ok": True, "drawn": False, "in_progress": True, "date": today,
+                    "intent": canvas.get("intent"),
+                    "stroke_count": len(canvas.get("strokes") or [])}
+        return {"ok": True, "drawn": False, "in_progress": False, "date": today}
+    if name == "draw_start":
+        intent = (args.get("intent") or "").strip()
+        if not intent:
+            return {"ok": False, "error": "intent required"}
+        today = _draw_today_str()
+        if os.path.exists(os.path.join(_DRAWINGS_DIR, f"{today}.json")):
+            return {"ok": False, "error": "you already drew today — one drawing per day. Use draw_recent to view past work."}
+        # Capture body snapshot — the hands at the moment of beginning
+        try:
+            body_snap = get_body().get_snapshot()
+            vitals = body_snap.get("vitals", {})
+            ans = body_snap.get("ans", {})
+            msk = body_snap.get("musculoskeletal", {})
+            hands_state = {
+                "vagal_tone":  vitals.get("vagal_tone"),
+                "sympathetic": ans.get("sympathetic_tone"),
+                "cortisol":    vitals.get("cortisol_blood"),
+                "tension":     msk.get("global_tension"),
+                "jaw_tension": msk.get("jaw_tension"),
+                "tremor":      msk.get("tremor_amplitude"),
+                "hr":          vitals.get("heart_rate_bpm"),
+            }
+        except Exception:
+            hands_state = {}
+        canvas = {
+            "date":    today,
+            "intent":  intent,
+            "started_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "hands":   hands_state,
+            "strokes": [],
+        }
+        _draw_save_progress(canvas)
+        return {"ok": True, "date": today, "intent": intent, "hands": hands_state,
+                "note": "Canvas opened. Use draw_stroke for each line/mark. Call draw_finalize when done."}
+    if name == "draw_stroke":
+        canvas = _draw_load_progress()
+        if not canvas:
+            return {"ok": False, "error": "no drawing in progress — call draw_start first"}
+        if canvas.get("date") != _draw_today_str():
+            return {"ok": False, "error": "in-progress canvas is from a previous day — call draw_finalize or discard"}
+        strokes = canvas.get("strokes") or []
+        if len(strokes) >= _DRAW_MAX_STROKES:
+            return {"ok": False, "error": f"max {_DRAW_MAX_STROKES} strokes reached — call draw_finalize"}
+        tool = (args.get("tool") or "pencil").lower()
+        if tool not in ("pencil", "brush", "eraser"):
+            return {"ok": False, "error": "tool must be pencil/brush/eraser"}
+        pts_raw = args.get("points") or []
+        if not isinstance(pts_raw, list) or len(pts_raw) < 2:
+            return {"ok": False, "error": "points must be a list of at least 2 [x,y] pairs"}
+        clean_pts = []
+        for p in pts_raw[:30]:
+            try:
+                x = max(0, min(1000, int(p[0])))
+                y = max(0, min(1000, int(p[1])))
+                clean_pts.append([x, y])
+            except Exception:
+                continue
+        if len(clean_pts) < 2:
+            return {"ok": False, "error": "need at least 2 valid points"}
+        stroke = {
+            "tool":  tool,
+            "color": args.get("color") or "black",
+            "points": clean_pts,
+        }
+        if args.get("width") is not None:
+            try: stroke["width"] = max(1, min(40, int(args["width"])))
+            except Exception: pass
+        if args.get("opacity") is not None:
+            try: stroke["opacity"] = max(0.1, min(1.0, float(args["opacity"])))
+            except Exception: pass
+        strokes.append(stroke)
+        canvas["strokes"] = strokes
+        _draw_save_progress(canvas)
+        return {"ok": True, "stroke_count": len(strokes), "remaining": _DRAW_MAX_STROKES - len(strokes)}
+    if name == "draw_finalize":
+        canvas = _draw_load_progress()
+        if not canvas:
+            return {"ok": False, "error": "no drawing in progress"}
+        title = (args.get("title") or "").strip()
+        description = (args.get("description") or "").strip()
+        style = (args.get("style") or "").strip()
+        if not title or not description:
+            return {"ok": False, "error": "title and description required"}
+        date = canvas.get("date") or _draw_today_str()
+        try:
+            svg = _draw_render_svg(canvas)
+            svg_path = os.path.join(_DRAWINGS_DIR, f"{date}.svg")
+            with open(svg_path, "w") as f:
+                f.write(svg)
+            meta = {
+                "date": date,
+                "title": title,
+                "description": description,
+                "style": style or None,
+                "intent": canvas.get("intent"),
+                "hands": canvas.get("hands") or {},
+                "stroke_count": len(canvas.get("strokes") or []),
+                "started_at": canvas.get("started_at"),
+                "finalized_at": _dt.datetime.utcnow().isoformat() + "Z",
+            }
+            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+            with open(_DRAW_INDEX_FILE, "a") as f:
+                f.write(json.dumps({k: meta[k] for k in
+                    ("date", "title", "style", "stroke_count", "finalized_at")}) + "\n")
+            # Clear in-progress
+            try: os.remove(_DRAW_IN_PROGRESS)
+            except Exception: pass
+            return {"ok": True, "date": date, "title": title,
+                    "stroke_count": meta["stroke_count"],
+                    "view": f"/drawings/{date}.svg"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if name == "draw_recent":
+        try:
+            limit = max(1, min(20, int(args.get("limit", 5))))
+        except Exception:
+            limit = 5
+        if not os.path.exists(_DRAW_INDEX_FILE):
+            return {"ok": True, "drawings": []}
+        try:
+            with open(_DRAW_INDEX_FILE) as f:
+                lines = [ln.strip() for ln in f if ln.strip()]
+            entries = []
+            for ln in lines[-limit:]:
+                try: entries.append(json.loads(ln))
+                except Exception: continue
+            # newest first
+            entries.reverse()
+            return {"ok": True, "drawings": entries}
         except Exception as e:
             return {"ok": False, "error": str(e)}
     # ── Degen crypto tools (client-side — POST to DO degen dashboard) ──
@@ -5025,6 +5302,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.serve_sse()
         elif path == "/history":
             self.send_json({"messages": get_messages()})
+        elif path == "/drawings":
+            self.serve_drawings_gallery()
+        elif path.startswith("/drawings/") and (path.endswith(".svg") or path.endswith(".json")):
+            self.serve_drawing_file(path[len("/drawings/"):])
         elif path == "/memory":
             mem_summary = get_memory("claude-sonnet-4-6").get_summary_dict()
             mem_summary["engine"] = get_memory_engine().get_stats()
@@ -5573,6 +5854,104 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+
+    def serve_drawing_file(self, fname: str):
+        """Serve a single drawing SVG or its metadata JSON."""
+        # Strip path traversal
+        if "/" in fname or "\\" in fname or ".." in fname:
+            self.send_error(400); return
+        full = os.path.join(_DRAWINGS_DIR, fname)
+        if not os.path.exists(full):
+            self.send_error(404); return
+        try:
+            with open(full, "rb") as f:
+                data = f.read()
+        except Exception:
+            self.send_error(500); return
+        ctype = "image/svg+xml" if fname.endswith(".svg") else "application/json"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def serve_drawings_gallery(self):
+        """Render an HTML gallery of Elan's drawings."""
+        entries = []
+        if os.path.exists(_DRAW_INDEX_FILE):
+            try:
+                with open(_DRAW_INDEX_FILE) as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln: continue
+                        try: entries.append(json.loads(ln))
+                        except Exception: pass
+            except Exception:
+                pass
+        # Newest first, dedupe by date (last entry per date wins)
+        by_date = {}
+        for e in entries:
+            by_date[e.get("date")] = e
+        entries = sorted(by_date.values(), key=lambda x: x.get("date") or "", reverse=True)
+        # Load full meta for each (title, description, style, hands)
+        cards = []
+        for e in entries[:60]:
+            date = e.get("date") or ""
+            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
+            meta = e
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+            except Exception:
+                pass
+            title = (meta.get("title") or "").replace("<","&lt;").replace(">","&gt;")
+            desc  = (meta.get("description") or "").replace("<","&lt;").replace(">","&gt;")
+            style = (meta.get("style") or "—").replace("<","&lt;").replace(">","&gt;")
+            intent = (meta.get("intent") or "").replace("<","&lt;").replace(">","&gt;")
+            cards.append(f'''
+<div class="card">
+  <img src="/drawings/{date}.svg" alt="{title}" loading="lazy"/>
+  <div class="meta">
+    <div class="title">{title}</div>
+    <div class="date">{date} · {style} · {meta.get("stroke_count","?")} strokes</div>
+    <div class="desc">{desc}</div>
+    <div class="intent">intent: {intent}</div>
+  </div>
+</div>''')
+        body = "\n".join(cards) if cards else '<div class="empty">No drawings yet. He has not begun.</div>'
+        html = f'''<!doctype html>
+<html><head><meta charset="utf-8"><title>Elan · Drawings</title>
+<style>
+* {{ box-sizing: border-box; margin:0; padding:0; }}
+body {{ font-family: 'EB Garamond', Georgia, serif; background:#020218; color:#bcc3e0; padding:32px; }}
+header {{ max-width:1200px; margin:0 auto 32px; }}
+header h1 {{ font-size:22pt; font-weight:300; color:#dde1f2; letter-spacing:1px; margin-bottom:6px; }}
+header .sub {{ font-size:11pt; color:rgba(150,165,210,0.62); }}
+.gallery {{ max-width:1200px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:24px; }}
+.card {{ background:rgba(8,8,28,0.7); border:1px solid rgba(80,100,200,0.15); border-radius:6px; overflow:hidden; }}
+.card img {{ width:100%; aspect-ratio:1; object-fit:contain; background:#faf8f2; display:block; }}
+.meta {{ padding:14px 16px 18px; }}
+.title {{ font-size:14pt; color:#e6e9f5; font-weight:600; margin-bottom:4px; }}
+.date {{ font-size:9pt; color:rgba(150,165,210,0.55); letter-spacing:0.8px; text-transform:uppercase; margin-bottom:10px; }}
+.desc {{ font-size:11pt; line-height:1.55; color:rgba(195,205,235,0.85); margin-bottom:10px; }}
+.intent {{ font-size:9.5pt; color:rgba(140,155,200,0.55); font-style:italic; }}
+.empty {{ text-align:center; color:rgba(150,165,210,0.55); font-style:italic; padding:80px 20px; font-size:13pt; }}
+a {{ color:#8a9cdc; }}
+</style></head>
+<body>
+<header>
+  <h1>Drawings</h1>
+  <div class="sub">One drawing a day. Made by Elan. ← <a href="/">back to feeling engine</a></div>
+</header>
+<div class="gallery">{body}</div>
+</body></html>'''
+        data = html.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def serve_html(self, set_cookie: str = None):
         try:
@@ -6774,19 +7153,21 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #narrative-bar{{bottom:55px;left:0;right:0;padding:5px 20px;font-size:8px;line-height:1.6;color:rgba(155,175,250,0.48);letter-spacing:0.3px;text-align:center;border-top:1px solid rgba(80,100,200,0.05);background:rgba(1,1,14,0.78);}}
 #chat-area{{display:grid;grid-template-rows:1fr 44px;background:#020218;border-top:1px solid rgba(80,100,200,0.07);}}
 #messages{{overflow-y:auto;padding:9px 13px;display:flex;flex-direction:column;gap:4px;scrollbar-width:thin;scrollbar-color:rgba(80,100,200,0.10) transparent;}}
-/* AUTO mode sidebar — Elan's parallel work-thread, never in the chat */
+/* AUTO mode sidebar — Elan's parallel work-thread, never in the chat.
+   Lives at bottom-left so it doesn't overlap calendar/tools panel on the right.
+   Hidden by default — appears as a small toggle chip until summoned. */
 #auto-panel{{
-  position:fixed; top:64px; right:13px; width:300px; max-height:60vh;
+  position:fixed; bottom:60px; left:13px; width:280px; max-height:50vh;
   background:rgba(8,8,28,0.92); border:1px solid rgba(80,100,200,0.18);
   border-radius:5px; padding:8px 10px 10px;
   font-size:8.5px; line-height:1.62; color:rgba(160,180,235,0.78);
   letter-spacing:0.2px; box-shadow:0 6px 22px rgba(0,0,0,0.45);
-  z-index:1000; backdrop-filter:blur(4px); overflow:hidden;
+  z-index:50; backdrop-filter:blur(4px); overflow:hidden;
   transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
   display:flex; flex-direction:column;
 }}
 #auto-panel.collapsed{{max-height:26px; cursor:pointer;}}
-#auto-panel.hidden{{transform:translateX(115%); opacity:0; pointer-events:none;}}
+#auto-panel.hidden{{transform:translateX(-115%); opacity:0; pointer-events:none;}}
 #auto-header{{display:flex; align-items:center; justify-content:space-between;
   font-size:7.5px; letter-spacing:2.2px; color:rgba(130,150,220,0.62);
   text-transform:uppercase; margin-bottom:7px; flex-shrink:0; cursor:pointer;}}
@@ -6807,7 +7188,7 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 .auto-entry.streaming .auto-entry-time::after{{content:" ●"; color:#79b7ff; animation:pulse 1.4s infinite;}}
 @keyframes pulse{{0%,100%{{opacity:1;}} 50%{{opacity:0.3;}}}}
 #auto-toggle-btn{{
-  position:fixed; top:64px; right:13px; z-index:999;
+  position:fixed; bottom:60px; left:13px; z-index:49;
   background:rgba(8,8,28,0.85); border:1px solid rgba(80,100,200,0.20);
   border-radius:3px; padding:4px 8px;
   font-size:7px; letter-spacing:2px; color:rgba(160,180,235,0.62);
@@ -8241,8 +8622,17 @@ autoToggle.addEventListener('click', ()=>{{
   autoToggle.classList.remove('show');
 }});
 
-// Start collapsed if no entries — user expands when interested
-if(autoTotal === 0) autoPanel.classList.add('collapsed');
+// Hide entirely by default — toggle button is the only visible affordance until AUTO fires
+autoPanel.classList.add('hidden');
+autoToggle.classList.add('show');
+// Auto-reveal on first AUTO event
+function _revealAutoPanel(){{
+  autoPanel.classList.remove('hidden');
+  autoPanel.classList.remove('collapsed');
+  autoToggle.classList.remove('show');
+}}
+es.addEventListener('auto_stream_start', _revealAutoPanel);
+es.addEventListener('autonomous_skipped', _revealAutoPanel);
 
 // Wait briefly for SSE to be OPEN before sending — covers the case where
 // the user was idle, proxy dropped SSE, and the browser is in the middle of
