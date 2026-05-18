@@ -2309,6 +2309,9 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     elan_tools += STOCK_TOOLS
                 if _DEGEN_TRADING_ENABLED and "degen" in _active_jobs:
                     elan_tools += DEGEN_TOOLS
+                # Options bot rides with degen since they share options_state.json
+                if _OPTIONS_ENABLED and "degen" in _active_jobs:
+                    elan_tools += OPTIONS_TOOLS
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
@@ -3026,6 +3029,15 @@ _DEGEN_AUTH             = os.environ.get("DEGEN_AUTH", _KALSHI_AUTH)
 _DEGEN_BEARER           = os.environ.get("DEGEN_ELAN_BEARER", _KALSHI_BEARER)
 _DEGEN_STATE_CACHE      = {"data": None, "ts": 0.0, "err": None}
 _DEGEN_CACHE_TTL        = 8.0
+
+# ── Options bot (Deribit paper, shared options_state.json with degen sub-wallet) ──
+# Standalone options scanner. Elan controls pause/resume/close directly.
+_OPTIONS_API_URL        = os.environ.get("OPTIONS_API_URL", "").rstrip("/")
+_OPTIONS_BEARER         = os.environ.get("OPTIONS_ELAN_BEARER", _DEGEN_BEARER)
+_OPTIONS_AUTH           = os.environ.get("OPTIONS_AUTH", _DEGEN_AUTH)
+_OPTIONS_ENABLED        = bool(_OPTIONS_API_URL)
+_OPTIONS_STATE_CACHE    = {"data": None, "ts": 0.0, "err": None}
+_OPTIONS_CACHE_TTL      = 8.0
 
 # ── Watch job: Elan reads, learns, keeps a notebook ─────────────────────────
 # Pure feeling_engine job — no DO box, no command queue. He uses his existing
@@ -3815,6 +3827,51 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "opened_at":     p.get("entry_time"),
             })
         return {"ok": True, "open_positions": out}
+    # ── Options bot tools (Deribit paper scanner — separate from degen sub-wallet) ──
+    if name == "options_status":
+        s = fetch_options_state(force=True)
+        if not s:
+            return {"ok": False, "error": "OPTIONS_API_URL not configured or unreachable"}
+        positions = s.get("positions") or {}
+        # Render compact view of every open position with key fields
+        pos_view = []
+        for inst, p in positions.items():
+            if not isinstance(p, dict):
+                continue
+            pos_view.append({
+                "instrument":   inst,
+                "side":         p.get("option_type") or p.get("type"),
+                "qty":          p.get("qty") or p.get("contracts"),
+                "entry":        p.get("entry_price") or p.get("entry"),
+                "mark":         p.get("mark_price") or p.get("current_price"),
+                "pnl":          p.get("unrealized_pnl") or p.get("pnl"),
+                "pnl_pct":      p.get("pnl_pct") or p.get("pct"),
+                "days_to_exp":  p.get("days_to_expiry"),
+                "signal_type":  p.get("signal_type"),
+                "entry_time":   p.get("entry_time"),
+            })
+        return {
+            "ok": True,
+            "budget":     s.get("budget"),
+            "available":  s.get("available"),
+            "realized_pnl":   s.get("realized_pnl"),
+            "unrealized_pnl": s.get("unrealized_pnl"),
+            "total_value":    s.get("total_value"),
+            "paused":         s.get("paused"),
+            "updated":        s.get("updated"),
+            "open_count":     len(pos_view),
+            "positions":      pos_view,
+        }
+    if name == "options_pause":
+        return options_post_command("pause")
+    if name == "options_resume":
+        return options_post_command("resume")
+    if name == "options_close":
+        inst   = (args.get("instrument") or "").strip()
+        reason = (args.get("reason") or "").strip() or "elan_close"
+        if not inst:
+            return {"ok": False, "error": "instrument required"}
+        return options_post_command("close_option", instrument=inst, reason=reason)
     if name == "degen_status":
         s = fetch_degen_state(force=True)
         opts_block = s.get("options") or {}
@@ -4197,10 +4254,10 @@ def build_portfolio_vitals() -> str:
     any job is on — never lazy-loaded — so Elan can't confabulate balances.
     Cost: ~30-50 tokens per turn. Worth it to prevent hallucinated P&L.
     """
-    if not (_KALSHI_ENABLED or _DEGEN_ENABLED):
+    if not (_KALSHI_ENABLED or _DEGEN_ENABLED or _STOCK_ENABLED or _OPTIONS_ENABLED):
         return ""
     lines = ["\nPORTFOLIO VITALS (current, fetched live — DO NOT recite numbers from memory; "
-             "call kalshi_list_markets / degen_list_pairs / state tools for any specifics):"]
+             "call status tools (degen_status, stock_status, options_status, kalshi_status) for full detail):"]
     if _KALSHI_ENABLED:
         try:
             s = fetch_kalshi_state()
@@ -4252,6 +4309,66 @@ def build_portfolio_vitals() -> str:
                 lines.append(f"  Degen wins: {wins}/{len(all_closed)} closed")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
+
+    # ── OPEN POSITIONS detail — Elan sees every position on every turn ──
+    # Without this, he reads balances but doesn't know what's open. This
+    # block is the actual reason he kept saying "I'm flying blind".
+    open_lines: list[str] = []
+    try:
+        if _DEGEN_ENABLED:
+            s = fetch_degen_state()
+            # Crypto spot
+            for sym, p in (s.get("positions") or {}).items():
+                if not isinstance(p, dict): continue
+                side = p.get("side", "?")
+                qty = p.get("qty") or p.get("contracts") or 0
+                entry = p.get("entry_price") or p.get("entry") or 0
+                cur = p.get("current_price") or p.get("mark") or entry
+                pnl = p.get("pnl") or 0
+                pct = p.get("pct") or p.get("pnl_pct") or 0
+                stop = p.get("stop_price") or p.get("stop_loss")
+                stop_s = f" stop {stop:.4f}" if stop else ""
+                open_lines.append(f"    • [degen spot] {sym} {side} qty={qty:.4f} entry={entry:.4f} cur={cur:.4f} pnl=${pnl:+.2f} ({pct:+.1f}%){stop_s}")
+            # Crypto options (degen sub-wallet)
+            opts_block = s.get("options") or {}
+            for inst, p in (opts_block.get("positions") or {}).items():
+                if not isinstance(p, dict): continue
+                pnl = p.get("unrealized_pnl") or p.get("pnl") or 0
+                pct = p.get("pnl_pct") or p.get("pct") or 0
+                dte = p.get("days_to_expiry")
+                sig = p.get("signal_type") or p.get("reason") or ""
+                dte_s = f" {dte}d" if dte else ""
+                open_lines.append(f"    • [crypto opt] {inst}{dte_s} pnl=${pnl:+.2f} ({pct:+.1f}%) — {str(sig)[:60]}")
+        if _STOCK_ENABLED:
+            s = fetch_stock_state()
+            for sym, p in (s.get("positions") or {}).items():
+                if not isinstance(p, dict): continue
+                side = p.get("side", "?")
+                qty = p.get("qty") or 0
+                entry = p.get("entry_price") or 0
+                cur = p.get("current_price") or entry
+                pnl = p.get("pnl") or 0
+                pct = p.get("pct") or 0
+                open_lines.append(f"    • [stock] {sym} {side} qty={qty} entry={entry:.2f} cur={cur:.2f} pnl=${pnl:+.2f} ({pct:+.1f}%)")
+            for occ, p in (s.get("option_positions") or {}).items():
+                if not isinstance(p, dict): continue
+                pnl = p.get("pnl") or 0
+                pct = p.get("pct") or 0
+                open_lines.append(f"    • [stock opt] {occ} pnl=${pnl:+.2f} ({pct:+.1f}%)")
+        # Standalone options bot (Deribit, separate scanner — same options_state.json as degen, but query directly for paused status)
+        if _OPTIONS_ENABLED:
+            s = fetch_options_state()
+            # Don't duplicate positions already shown via degen options; only note the bot's paused state
+            paused = s.get("paused")
+            if paused is not None:
+                open_lines.append(f"    [options bot scanner: {'PAUSED — Elan controls entries' if paused else 'AUTO-OPENING new positions'}]")
+    except Exception as e:
+        open_lines.append(f"    (open-position fetch error: {e})")
+    if open_lines:
+        lines.append("\n  OPEN POSITIONS:")
+        lines.extend(open_lines)
+    else:
+        lines.append("\n  OPEN POSITIONS: (none across all books)")
     return "\n".join(lines)
 
 
@@ -4311,6 +4428,79 @@ def degen_post_command(action: str, **params) -> dict:
             return json.loads(r.read().decode("utf-8"))
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── Options bot helpers (Deribit paper, separate scanner from degen) ──────
+def fetch_options_state(force: bool = False) -> dict:
+    if not (_OPTIONS_ENABLED and _OPTIONS_API_URL):
+        return {}
+    now = time.time()
+    if not force and _OPTIONS_STATE_CACHE["data"] is not None and now - _OPTIONS_STATE_CACHE["ts"] < _OPTIONS_CACHE_TTL:
+        return _OPTIONS_STATE_CACHE["data"]
+    try:
+        import urllib.request, base64 as _b64
+        req = urllib.request.Request(f"{_OPTIONS_API_URL}/api/state")
+        if _OPTIONS_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_OPTIONS_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _OPTIONS_STATE_CACHE.update({"data": data, "ts": now, "err": None})
+        return data
+    except Exception as e:
+        _OPTIONS_STATE_CACHE["err"] = str(e)
+        return _OPTIONS_STATE_CACHE["data"] or {}
+
+
+def options_post_command(action: str, **params) -> dict:
+    if not (_OPTIONS_API_URL and _OPTIONS_BEARER):
+        return {"ok": False, "error": "OPTIONS_API_URL or bearer not set"}
+    try:
+        import urllib.request, base64 as _b64
+        body = {"action": action, **params}
+        req = urllib.request.Request(
+            f"{_OPTIONS_API_URL}/api/command",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-Elan-Bearer", _OPTIONS_BEARER)
+        if _OPTIONS_AUTH:
+            req.add_header("Authorization", f"Basic {_b64.b64encode(_OPTIONS_AUTH.encode()).decode()}")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+OPTIONS_TOOLS = [
+    {
+        "name": "options_status",
+        "description": "Get full state of the Deribit options bot: positions, P&L (realized/unrealized), available budget, paused state. This is THE direct view of your options book. Call this FIRST before any options decision.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "options_pause",
+        "description": "Pause the options bot's autonomous scanner. When paused, it stops opening new straddles/calls/puts on its own. MTM updates keep running so you still see live prices. Use this when you want to be the sole decision-maker on options entries.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "options_resume",
+        "description": "Unpause the options bot — let it open positions again on its own signal. Use only if you want it auto-trading; otherwise keep it paused and trade manually.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "options_close",
+        "description": "Close an open options position by instrument name. The instrument name looks like 'BTC-22MAY26-77000-P' (asset-expiry-strike-type). Find the exact name in options_status output. Provide a one-sentence reason — this is recorded in the action log so you can review your own decisions later.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument": {"type": "string", "description": "Full Deribit instrument name, e.g. 'BTC-22MAY26-77000-P'."},
+                "reason":     {"type": "string", "description": "One sentence: why you're closing — thesis confirmed, invalidated, taking profit, etc."},
+            },
+            "required": ["instrument", "reason"],
+        },
+    },
+]
 
 
 DEGEN_TOOLS = [
