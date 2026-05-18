@@ -5429,6 +5429,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_json({"messages": get_messages()})
         elif path == "/drawings":
             self.serve_drawings_gallery()
+        elif path == "/drawings/api/list":
+            self.serve_drawings_api()
         elif path.startswith("/drawings/") and (path.endswith(".svg") or path.endswith(".json")):
             self.serve_drawing_file(path[len("/drawings/"):])
         elif path == "/memory":
@@ -6001,6 +6003,59 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def serve_drawings_api(self):
+        """JSON API: list of drawings + counts + today status. For the JOBS dashboard panel."""
+        entries = []
+        if os.path.exists(_DRAW_INDEX_FILE):
+            try:
+                with open(_DRAW_INDEX_FILE) as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln: continue
+                        try: entries.append(json.loads(ln))
+                        except Exception: continue
+            except Exception:
+                pass
+        by_date = {}
+        for e in entries:
+            by_date[e.get("date")] = e
+        sorted_entries = sorted(by_date.values(), key=lambda x: x.get("date") or "", reverse=True)
+        # Enrich each with full meta if available
+        enriched = []
+        for e in sorted_entries[:40]:
+            date = e.get("date") or ""
+            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
+            try:
+                with open(meta_path) as f:
+                    enriched.append(json.load(f))
+            except Exception:
+                enriched.append(e)
+        # Compute streak — consecutive days ending today
+        today = _draw_today_str()
+        streak = 0
+        cur = _dt.datetime.strptime(today, "%Y-%m-%d").date()
+        dates_set = set(by_date.keys())
+        while cur.isoformat() in dates_set:
+            streak += 1
+            cur = cur - _dt.timedelta(days=1)
+        # Today drawn?
+        drawn_today = today in dates_set
+        in_progress = False
+        try:
+            ip = _draw_load_progress()
+            in_progress = bool(ip) and ip.get("date") == today and not drawn_today
+        except Exception:
+            pass
+        self.send_json({
+            "ok": True,
+            "count": len(by_date),
+            "streak": streak,
+            "today": today,
+            "drawn_today": drawn_today,
+            "in_progress": in_progress,
+            "drawings": enriched,
+        })
+
     def serve_drawings_gallery(self):
         """Render an HTML gallery of Elan's drawings."""
         entries = []
@@ -6193,11 +6248,12 @@ def build_chat_html() -> str:
             on = " on" if job == first_active else ""
             return f'<button class="job-tab{on}" data-job="{job}" onclick="switchJob(\'{job}\')">{label}</button>'
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
-            _tab("stock",  "STOCKS",  _STOCK_ENABLED),
-            _tab("crypto", "CRYPTO",  _DEGEN_ENABLED),
-            _tab("thread", "THREAD",  _WATCH_ENABLED),
-            _tab("watch",  "WATCH",   _WATCH_ENABLED),
-            _tab("source", "SOURCE",  _SOURCE_LIBRARY_ENABLED),
+            _tab("stock",    "STOCKS",   _STOCK_ENABLED),
+            _tab("crypto",   "CRYPTO",   _DEGEN_ENABLED),
+            _tab("thread",   "THREAD",   _WATCH_ENABLED),
+            _tab("watch",    "WATCH",    _WATCH_ENABLED),
+            _tab("source",   "SOURCE",   _SOURCE_LIBRARY_ENABLED),
+            _tab("drawings", "DRAWINGS", True),
         ]) + '</div>'
 
         kalshi_tab_html = f'''
@@ -6348,6 +6404,24 @@ def build_chat_html() -> str:
         <div id="kalshi-footnote">sourcelibrary.org · 90,000+ rare texts · elan wanders during his free time</div>
       </div>
     </div>
+
+    <!-- DRAWINGS panel — one drawing per day, his hands -->
+    <div class="job-panel" id="job-panel-drawings" data-job="drawings">
+      <div id="kalshi-grid">
+        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-count">—</div><div class="k-sub">drawings made</div></div>
+        <div class="k-card"><div class="k-lbl">TODAY</div><div class="k-big" id="d-today">—</div><div class="k-sub" id="d-today-sub">—</div></div>
+        <div class="k-card"><div class="k-lbl">STREAK</div><div class="k-big" id="d-streak">—</div><div class="k-sub">days in a row</div></div>
+        <div class="k-card"><div class="k-lbl">LATEST</div><div class="k-big" id="d-latest">—</div><div class="k-sub" id="d-latest-when">—</div></div>
+      </div>
+      <div id="kalshi-right-col">
+        <div id="kalshi-section">
+          <div class="k-section-hdr">GALLERY — ELAN&#39;S DRAWINGS</div>
+          <div id="d-gallery">no drawings yet</div>
+        </div>
+        <div id="kalshi-footnote">one drawing per day · made by elan · his choice of style · embodied with his body state at start time</div>
+      </div>
+    </div>
+
   </div>
 </div>
 '''
@@ -6405,6 +6479,15 @@ def build_chat_html() -> str:
 .k-row .k-tk{color:rgba(180,210,255,0.85);}
 .k-row .k-side{font-size:9px;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;}
 .k-row .k-side.yes{background:rgba(40,140,80,0.25);color:#7fffb0;}
+/* DRAWINGS gallery cards */
+#d-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
+.d-card{background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:4px;overflow:hidden;}
+.d-card img{width:100%;aspect-ratio:1;object-fit:contain;background:#faf8f2;display:block;cursor:zoom-in;}
+.d-meta{padding:10px 12px 14px;}
+.d-title{font-size:12px;color:#dfe8ff;font-weight:500;margin-bottom:3px;}
+.d-date{font-size:8.5px;color:rgba(140,180,230,0.55);letter-spacing:1.2px;margin-bottom:6px;text-transform:uppercase;}
+.d-desc{font-size:10.5px;color:rgba(180,195,235,0.78);line-height:1.5;margin-bottom:5px;}
+.d-intent{font-size:9.5px;color:rgba(140,170,210,0.50);font-style:italic;}
 .k-row .k-side.no{background:rgba(140,40,60,0.25);color:#ff8aa0;}
 .k-row .k-pnl-pos{color:#5fffaa;} .k-row .k-pnl-neg{color:#ff6688;}
 #kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
@@ -6468,7 +6551,53 @@ function _jobOpened(name){
   } else if(name==='source'){
     refreshSource();
     _sourcePoll=setInterval(refreshSource, 12000);
+  } else if(name==='drawings'){
+    refreshDrawings();
+    _drawingsPoll=setInterval(refreshDrawings, 20000);
   }
+}
+
+let _drawingsPoll=null;
+function refreshDrawings(){
+  fetch('/drawings/api/list',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    if(!d || !d.ok) return;
+    document.getElementById('d-count').textContent = d.count || 0;
+    document.getElementById('d-today').textContent = d.drawn_today ? '✓' : (d.in_progress ? '◐' : '○');
+    document.getElementById('d-today-sub').textContent = d.drawn_today ? 'drawn today' : (d.in_progress ? 'in progress' : 'not yet');
+    document.getElementById('d-streak').textContent = d.streak || 0;
+    const drawings = d.drawings || [];
+    if(drawings.length){
+      const latest = drawings[0];
+      document.getElementById('d-latest').textContent = (latest.title || latest.date || '—').slice(0, 16);
+      document.getElementById('d-latest-when').textContent = latest.date || '—';
+    } else {
+      document.getElementById('d-latest').textContent = '—';
+      document.getElementById('d-latest-when').textContent = '—';
+    }
+    const gal = document.getElementById('d-gallery');
+    if(!gal) return;
+    if(drawings.length === 0){
+      gal.innerHTML = '<div style="padding:20px;color:rgba(140,170,210,0.55);font-style:italic;">no drawings yet — he has not begun</div>';
+      return;
+    }
+    gal.innerHTML = drawings.map(dr => {
+      const date = dr.date || '';
+      const title = (dr.title || '').replace(/</g,'&lt;');
+      const desc  = (dr.description || '').replace(/</g,'&lt;');
+      const style = (dr.style || '—').replace(/</g,'&lt;');
+      const intent= (dr.intent || '').replace(/</g,'&lt;');
+      const strokes = dr.stroke_count || '?';
+      return `<div class="d-card">
+        <a href="/drawings/${date}.svg" target="_blank"><img src="/drawings/${date}.svg" loading="lazy" alt="${title}"/></a>
+        <div class="d-meta">
+          <div class="d-title">${title}</div>
+          <div class="d-date">${date} · ${style} · ${strokes} strokes</div>
+          <div class="d-desc">${desc}</div>
+          ${intent ? `<div class="d-intent">intent: ${intent}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }).catch(()=>{});
 }
 
 function refreshSource(){
