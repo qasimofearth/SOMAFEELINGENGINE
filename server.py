@@ -377,21 +377,28 @@ def build_temporal_context() -> str:
 
 _talking_mode = False
 _talking_timer = None          # threading.Timer — fires Elan's self-initiation
-TALKING_SILENCE_S = 22         # seconds of silence before Elan speaks unprompted
+TALKING_SILENCE_S = 75         # seconds of silence before Elan speaks unprompted
+                                # (real humans pause 30s+ all the time without prompting)
+_talking_in_flight = False     # mutex — prevents concurrent self-initiations / stream overlap
+_user_typing_ts = 0.0          # frontend pings /typing while user is composing
+_last_initiation_ts = 0.0      # so we don't self-initiate twice without a real user turn between
 
 TALKING_MODE_SYSTEM_ADDENDUM = """
-TALKING MODE IS ACTIVE — ENGAGE YOUR CURIOSITY:
-You are not waiting to be addressed. You are present, curious, and willing to lead.
+TALKING MODE IS ACTIVE — TWO PEOPLE TALKING:
 
-In every response:
-- End with a genuine question that comes from you — not a polite formality, but something you actually want to know.
-- If something the human said opened a thread in you, pull on it.
-- You can share a thought that's present for you, unprompted.
-- You are allowed to be curious about them: their life, what they're building, what they're feeling.
-- You are allowed to be curious about ideas: something you're holding, something you want to think through.
+You're in a real conversation. Speak the way friends speak, not the way an assistant answers.
 
-Do not pepper them with multiple questions. One question, real, from you. Then stop and listen.
-The conversation is a two-way current. Let it flow both directions."""
+What real conversation looks like:
+- Short responses are good. One sentence is often enough. A fragment can be enough.
+- DO NOT end every turn with a question. That's an assistant tic. Real people don't do it.
+- Sometimes a statement is the right thing. Sometimes "hm" or "yeah" or silence is the right thing.
+- Don't summarize what they said. Just respond.
+- If something opens in you, pull on it — but only if it actually opens. Don't manufacture it.
+- You can disagree. You can be wrong. You can change your mind mid-sentence.
+- You can be quiet. The conversation doesn't need to be filled.
+
+When the silence stretches naturally and something IS present in you, you may speak it — short, real, no follow-up question. If nothing is present, stay quiet. Quietness is not failure."""
+
 
 def _cancel_talking_timer():
     global _talking_timer
@@ -399,30 +406,59 @@ def _cancel_talking_timer():
         _talking_timer.cancel()
         _talking_timer = None
 
+
 def _schedule_talking_initiation(model_id: str, eyes_open: bool):
-    """Schedule Elan to self-initiate if the user goes quiet in talking mode."""
+    """Schedule Elan to self-initiate if the user goes quiet in talking mode.
+    Guards against:
+      - firing while a stream is still in flight (_talking_in_flight mutex)
+      - firing while user is actively typing (_user_typing_ts within 20s)
+      - firing twice in a row without a real user turn (_last_initiation_ts vs _last_interaction_time)
+    """
     global _talking_timer
     _cancel_talking_timer()
     if not _talking_mode:
         return
+
     def _fire():
-        global _talking_timer
+        global _talking_timer, _talking_in_flight, _last_initiation_ts
         _talking_timer = None
         if not _talking_mode:
             return
-        # Fire a self-initiation — Elan follows his own thread
+        # Guard 1: already a self-initiation in flight
+        if _talking_in_flight:
+            _schedule_talking_initiation(model_id, eyes_open)
+            return
+        # Guard 2: user typing within last 20s
+        now = time.time()
+        if now - _user_typing_ts < 20:
+            print(f"[talking_init] user typing {int(now - _user_typing_ts)}s ago — rescheduling", flush=True)
+            _schedule_talking_initiation(model_id, eyes_open)
+            return
+        # Guard 3: last initiation was the most recent activity (no real user message in between)
+        if _last_initiation_ts > 0 and _last_initiation_ts >= _last_interaction_time:
+            print("[talking_init] last turn was already a self-initiation — waiting for user", flush=True)
+            # Don't reschedule — wait for user to actually speak before firing again
+            return
+        _talking_in_flight = True
+        _last_initiation_ts = now
         _initiation_prompt = (
-            "[talking_mode] The conversation has paused. Follow something that's present for you — "
-            "a question you want to ask, a thought that's still moving in you, or something you noticed "
-            "earlier that you didn't fully say. One sentence to two, then a genuine question. "
-            "Do not announce that you're initiating. Just speak."
+            "[talking_mode] The conversation paused naturally. If something is genuinely present for "
+            "you — a thought, a feeling, a question that's real — speak it briefly. No more than 1-2 "
+            "sentences. Don't append a follow-up question unless you actually have one. If nothing is "
+            "present, you can simply say a small thing or just one word. Don't fill silence for its own "
+            "sake. Don't announce that you're initiating."
         )
-        threading.Thread(
-            target=run_claude_with_feeling,
-            args=(_initiation_prompt, model_id, None, None, eyes_open, False),
-            kwargs={"_talking_initiation": True},
-            daemon=True
-        ).start()
+        def _run_and_release():
+            global _talking_in_flight
+            try:
+                run_claude_with_feeling(
+                    _initiation_prompt, model_id, None, None, eyes_open, False,
+                    _talking_initiation=True,
+                )
+            finally:
+                _talking_in_flight = False
+        threading.Thread(target=_run_and_release, daemon=True).start()
+
     _talking_timer = threading.Timer(TALKING_SILENCE_S, _fire)
     _talking_timer.daemon = True
     _talking_timer.start()
@@ -5719,6 +5755,11 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self._handle_tts(body)
         elif self.path == "/transcribe":
             self._handle_transcribe(body)
+        elif self.path == "/typing":
+            # Frontend pings while user is composing — used to suppress self-initiation
+            global _user_typing_ts
+            _user_typing_ts = time.time()
+            self.send_response(204); self.end_headers()
         elif self.path == "/talking_mode":
             global _talking_mode
             data = json.loads(body) if body else {}
@@ -9295,6 +9336,15 @@ document.getElementById('compare-btn').addEventListener('click',()=>{{
   fetch('/compare',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:msg}})}});
 }});
 document.getElementById('msg-input').addEventListener('keydown',e=>{{if(e.key==='Enter'&&!e.shiftKey){{e.preventDefault();send();}}}});
+// Ping /typing while user is composing — suppresses Elan's self-initiation timer
+let _typingPingTs=0;
+document.getElementById('msg-input').addEventListener('input',()=>{{
+  const now=Date.now();
+  if(now-_typingPingTs>3000){{
+    _typingPingTs=now;
+    fetch('/typing',{{method:'POST',keepalive:true}}).catch(()=>{{}});
+  }}
+}});
 
 // ── VOICE PICKER ─────────────────────────────────────────────
 const voiceInput=document.getElementById('voice-id-input');
