@@ -2442,7 +2442,19 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     except Exception:
                         pass
                     try:
+                        # Pre-flight: check for repetition before running the tool.
+                        _cw = None
+                        _circuit_set = {"degen_open_position", "degen_close_position",
+                                        "degen_buy_option", "degen_close_option",
+                                        "stock_open_position", "stock_close_position",
+                                        "stock_buy_option", "stock_close_option",
+                                        "options_close", "kalshi_place_bet",
+                                        "kalshi_close_position"}
+                        if tu.name in _circuit_set:
+                            _cw = _check_repetition(tu.name, tu_input or {})
                         res = dispatch_elan_tool(tu.name, tu_input)
+                        if _cw and isinstance(res, dict):
+                            res["_circuit_warning"] = _cw
                     except Exception as e:
                         res = {"ok": False, "error": str(e)}
                     try:
@@ -3071,6 +3083,88 @@ os.makedirs(_DRAWINGS_DIR, exist_ok=True)
 _DRAW_IN_PROGRESS = os.path.join(_DRAWINGS_DIR, "in_progress.json")
 _DRAW_INDEX_FILE  = os.path.join(_DRAWINGS_DIR, "index.jsonl")
 _DRAW_MAX_STROKES = 50    # hard cap per drawing — keeps token cost bounded
+
+# ── Smartness primitives ────────────────────────────────────────────────────
+# Threshold for treating bot state as "stale" — above this, we annotate the
+# state with a warning so Elan doesn't confabulate from old data.
+_STATE_STALE_SECONDS = 300
+
+def _compute_state_age(state: dict) -> tuple[int, bool]:
+    """Return (age_seconds, is_stale). 0/False if state has no `updated` field."""
+    if not isinstance(state, dict):
+        return 0, False
+    upd = state.get("updated") or state.get("updated_at") or state.get("last_scan")
+    if not upd:
+        return 0, False
+    try:
+        # Handle both ISO format and Unix epoch
+        if isinstance(upd, (int, float)):
+            updated_ts = float(upd)
+        else:
+            s = str(upd).replace("Z", "+00:00")
+            updated_ts = _dt.datetime.fromisoformat(s).timestamp()
+        age = max(0, int(time.time() - updated_ts))
+        return age, age > _STATE_STALE_SECONDS
+    except Exception:
+        return 0, False
+
+def _annotate_freshness(state: dict, label: str = "") -> dict:
+    """Add _age_seconds and _stale fields to a state dict so downstream code +
+    Elan's tools can see whether the data is current."""
+    if not isinstance(state, dict):
+        return state
+    age, stale = _compute_state_age(state)
+    state["_age_seconds"] = age
+    state["_stale"] = stale
+    if stale and label:
+        state["_stale_warning"] = (
+            f"STALE: {label} state hasn't refreshed in {age}s "
+            f"(threshold {_STATE_STALE_SECONDS}s). Don't reason from these numbers "
+            f"until the bot updates them. Most likely cause: bot loop hung — Qasim "
+            f"should be told."
+        )
+    return state
+
+
+# ── Tool-call repetition detector (anti-confabulation circuit-breaker) ──────
+# Tracks recent tool calls in memory. If Elan calls the same tool with the same
+# meaningful args >3 times in 5 minutes, the dispatcher injects a warning into
+# the response telling him to stop and verify, not retry.
+import collections as _collections_mod
+_RECENT_TOOL_CALLS = _collections_mod.deque(maxlen=80)
+_REPEAT_WINDOW_SEC = 300
+_REPEAT_THRESHOLD  = 3
+
+def _tool_call_signature(name: str, args: dict) -> str:
+    """Compact hashable signature for repeat detection."""
+    # Only include keys that affect routing — strip free-form 'reason' text etc.
+    meaningful_keys = {"symbol", "ticker", "instrument", "side", "occ_symbol", "pair",
+                       "action", "underlying", "option_type"}
+    parts = [name]
+    if isinstance(args, dict):
+        for k in sorted(meaningful_keys & set(args.keys())):
+            v = args.get(k)
+            if v is not None:
+                parts.append(f"{k}={v}")
+    return "|".join(parts)
+
+def _check_repetition(name: str, args: dict) -> str | None:
+    """Returns a warning string if this is a repeat call, else None."""
+    sig = _tool_call_signature(name, args)
+    now = time.time()
+    # Prune old entries
+    while _RECENT_TOOL_CALLS and (now - _RECENT_TOOL_CALLS[0][1]) > _REPEAT_WINDOW_SEC:
+        _RECENT_TOOL_CALLS.popleft()
+    # Count current sig
+    matches = sum(1 for s, t in _RECENT_TOOL_CALLS if s == sig)
+    _RECENT_TOOL_CALLS.append((sig, now))
+    if matches >= _REPEAT_THRESHOLD:
+        return (f"⚠ CIRCUIT BREAKER: You've called {name} with these args "
+                f"{matches + 1} times in {_REPEAT_WINDOW_SEC // 60} minutes. "
+                f"Something underneath isn't what you think. Stop and verify — "
+                f"do not retry. Read the actual state. If it's not what you expect, "
+                f"the data is stale or the underlying bot is failing. Qasim should be told.")
+    return None
 
 
 def autonomous_log_append(entry: dict):
@@ -3719,6 +3813,18 @@ KALSHI_TOOLS = [
 def dispatch_elan_tool(name: str, args: dict) -> dict:
     """Execute a client-side tool call from Elan. Anthropic's server tools
     (web_search, web_fetch) are auto-resolved by the API and never reach this dispatcher."""
+    # Circuit breaker — only applied to trading/state-changing tools, not to
+    # journal/notebook/draw tools where repetition is fine (he can call
+    # notebook_recent 10 times in a row legitimately).
+    _circuit_tools = {
+        "degen_open_position", "degen_close_position", "degen_buy_option", "degen_close_option",
+        "stock_open_position", "stock_close_position", "stock_buy_option", "stock_close_option",
+        "options_close", "kalshi_place_bet", "kalshi_close_position",
+    }
+    _circuit_warning = None
+    if name in _circuit_tools:
+        _circuit_warning = _check_repetition(name, args or {})
+
     # ── Source Library discovery ──
     if name == "source_save_discovery":
         title = (args.get("title") or "").strip()
@@ -4361,6 +4467,11 @@ def kalshi_post_command(action: str, **params) -> dict:
 
 
 # ── Stock fetchers + tools ──────────────────────────────────────────────────
+def _wrap_fetch_freshness(data, label):
+    """Stamp _age + warn; used by all bot state fetchers."""
+    return _annotate_freshness(dict(data) if isinstance(data, dict) else {}, label)
+
+
 def fetch_stock_state(force: bool = False) -> dict:
     if not (_STOCK_ENABLED and _STOCK_API_URL):
         return {}
@@ -4375,10 +4486,10 @@ def fetch_stock_state(force: bool = False) -> dict:
         with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode("utf-8"))
         _STOCK_STATE_CACHE.update({"data": data, "ts": now, "err": None})
-        return data
+        return _annotate_freshness(dict(data), "stock")
     except Exception as e:
         _STOCK_STATE_CACHE["err"] = str(e)
-        return _STOCK_STATE_CACHE["data"] or {}
+        return _annotate_freshness(dict(_STOCK_STATE_CACHE["data"] or {}), "stock")
 
 
 def fetch_stock_actions() -> list:
@@ -4535,6 +4646,20 @@ def build_portfolio_vitals() -> str:
         return ""
     lines = ["\nPORTFOLIO VITALS (current, fetched live — DO NOT recite numbers from memory; "
              "call status tools (degen_status, stock_status, options_status, kalshi_status) for full detail):"]
+    # Stale-data warnings surface at the TOP so Elan sees them before he reads any numbers
+    _stale_warnings = []
+    for fetcher, label in [(fetch_degen_state, "degen"), (fetch_stock_state, "stock"),
+                            (fetch_options_state, "options")]:
+        try:
+            s = fetcher()
+            if s.get("_stale"):
+                age = s.get("_age_seconds", 0)
+                _stale_warnings.append(f"  ⚠ {label} state is {age}s old (>{_STATE_STALE_SECONDS}s) — bot loop may be hung. Numbers below CANNOT be trusted.")
+        except Exception:
+            pass
+    if _stale_warnings:
+        lines.append("⚠ STALE STATE DETECTED:")
+        lines.extend(_stale_warnings)
     if _KALSHI_ENABLED:
         try:
             s = fetch_kalshi_state()
@@ -4654,7 +4779,7 @@ def fetch_degen_state(force: bool = False) -> dict:
         return {}
     now = time.time()
     if not force and _DEGEN_STATE_CACHE["data"] is not None and now - _DEGEN_STATE_CACHE["ts"] < _DEGEN_CACHE_TTL:
-        return _DEGEN_STATE_CACHE["data"]
+        return _annotate_freshness(dict(_DEGEN_STATE_CACHE["data"]), "degen")
     try:
         import urllib.request, base64 as _b64
         req = urllib.request.Request(f"{_DEGEN_API_URL}/api/state")
@@ -4663,10 +4788,10 @@ def fetch_degen_state(force: bool = False) -> dict:
         with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode("utf-8"))
         _DEGEN_STATE_CACHE.update({"data": data, "ts": now, "err": None})
-        return data
+        return _annotate_freshness(dict(data), "degen")
     except Exception as e:
         _DEGEN_STATE_CACHE["err"] = str(e)
-        return _DEGEN_STATE_CACHE["data"] or {}
+        return _annotate_freshness(dict(_DEGEN_STATE_CACHE["data"] or {}), "degen")
 
 
 def fetch_degen_actions() -> list:
@@ -4713,7 +4838,7 @@ def fetch_options_state(force: bool = False) -> dict:
         return {}
     now = time.time()
     if not force and _OPTIONS_STATE_CACHE["data"] is not None and now - _OPTIONS_STATE_CACHE["ts"] < _OPTIONS_CACHE_TTL:
-        return _OPTIONS_STATE_CACHE["data"]
+        return _annotate_freshness(dict(_OPTIONS_STATE_CACHE["data"]), "options")
     try:
         import urllib.request, base64 as _b64
         req = urllib.request.Request(f"{_OPTIONS_API_URL}/api/state")
@@ -4722,10 +4847,10 @@ def fetch_options_state(force: bool = False) -> dict:
         with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode("utf-8"))
         _OPTIONS_STATE_CACHE.update({"data": data, "ts": now, "err": None})
-        return data
+        return _annotate_freshness(dict(data), "options")
     except Exception as e:
         _OPTIONS_STATE_CACHE["err"] = str(e)
-        return _OPTIONS_STATE_CACHE["data"] or {}
+        return _annotate_freshness(dict(_OPTIONS_STATE_CACHE["data"] or {}), "options")
 
 
 def options_post_command(action: str, **params) -> dict:
@@ -7154,20 +7279,20 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 #chat-area{{display:grid;grid-template-rows:1fr 44px;background:#020218;border-top:1px solid rgba(80,100,200,0.07);}}
 #messages{{overflow-y:auto;padding:9px 13px;display:flex;flex-direction:column;gap:4px;scrollbar-width:thin;scrollbar-color:rgba(80,100,200,0.10) transparent;}}
 /* AUTO mode sidebar — Elan's parallel work-thread, never in the chat.
-   Lives at bottom-left so it doesn't overlap calendar/tools panel on the right.
-   Hidden by default — appears as a small toggle chip until summoned. */
+   Sits ABOVE the JOBS button (bottom-right) so it doesn't cover anything else.
+   Hidden by default — appears as a small toggle chip above the jobs button. */
 #auto-panel{{
-  position:fixed; bottom:60px; left:13px; width:280px; max-height:50vh;
-  background:rgba(8,8,28,0.92); border:1px solid rgba(80,100,200,0.18);
+  position:fixed; bottom:54px; right:14px; width:280px; max-height:42vh;
+  background:rgba(8,8,28,0.94); border:1px solid rgba(80,100,200,0.18);
   border-radius:5px; padding:8px 10px 10px;
-  font-size:8.5px; line-height:1.62; color:rgba(160,180,235,0.78);
+  font-size:8.5px; line-height:1.62; color:rgba(160,180,235,0.80);
   letter-spacing:0.2px; box-shadow:0 6px 22px rgba(0,0,0,0.45);
-  z-index:50; backdrop-filter:blur(4px); overflow:hidden;
+  z-index:9997; backdrop-filter:blur(4px); overflow:hidden;
   transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
   display:flex; flex-direction:column;
 }}
 #auto-panel.collapsed{{max-height:26px; cursor:pointer;}}
-#auto-panel.hidden{{transform:translateX(-115%); opacity:0; pointer-events:none;}}
+#auto-panel.hidden{{transform:translateY(40%); opacity:0; pointer-events:none;}}
 #auto-header{{display:flex; align-items:center; justify-content:space-between;
   font-size:7.5px; letter-spacing:2.2px; color:rgba(130,150,220,0.62);
   text-transform:uppercase; margin-bottom:7px; flex-shrink:0; cursor:pointer;}}
@@ -7188,13 +7313,13 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
 .auto-entry.streaming .auto-entry-time::after{{content:" ●"; color:#79b7ff; animation:pulse 1.4s infinite;}}
 @keyframes pulse{{0%,100%{{opacity:1;}} 50%{{opacity:0.3;}}}}
 #auto-toggle-btn{{
-  position:fixed; bottom:60px; left:13px; z-index:49;
-  background:rgba(8,8,28,0.85); border:1px solid rgba(80,100,200,0.20);
-  border-radius:3px; padding:4px 8px;
+  position:fixed; bottom:54px; right:14px; z-index:9996;
+  background:rgba(8,8,28,0.85); border:1px solid rgba(80,100,200,0.22);
+  border-radius:3px; padding:4px 9px;
   font-size:7px; letter-spacing:2px; color:rgba(160,180,235,0.62);
   cursor:pointer; text-transform:uppercase; display:none;
 }}
-#auto-toggle-btn:hover{{color:rgba(200,215,250,0.92);}}
+#auto-toggle-btn:hover{{color:rgba(200,215,250,0.92); border-color:rgba(120,160,240,0.55);}}
 #auto-toggle-btn.show{{display:block;}}
 .msg{{max-width:95%;padding:6px 10px;border-radius:4px;font-size:9.5px;line-height:1.65;}}
 .msg.user{{align-self:flex-end;background:rgba(55,65,175,0.11);border:1px solid rgba(80,100,200,0.14);color:rgba(175,185,252,0.88);}}
