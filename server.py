@@ -2461,10 +2461,30 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 }
                 if extra_body_arg is not None:
                     stream_kwargs["extra_body"] = extra_body_arg
-                with _get_anthropic_client().messages.stream(**stream_kwargs) as stream:
-                    for text in stream.text_stream:
-                        yield text
-                    final_msg = stream.get_final_message()
+                # Retry transparently on Anthropic 503 overloaded_error and 529 — those are
+                # transient server-side backpressure. Up to 2 retries with 1.5s + 3s backoff.
+                _stream_attempts = 0
+                _max_stream_attempts = 3
+                final_msg = None
+                while _stream_attempts < _max_stream_attempts:
+                    try:
+                        with _get_anthropic_client().messages.stream(**stream_kwargs) as stream:
+                            for text in stream.text_stream:
+                                yield text
+                            final_msg = stream.get_final_message()
+                        break
+                    except Exception as _exc:
+                        _stream_attempts += 1
+                        _emsg = str(_exc).lower()
+                        _is_overload = ("overloaded" in _emsg or "503" in _emsg or
+                                        "529" in _emsg or "server tool validation" in _emsg)
+                        if _is_overload and _stream_attempts < _max_stream_attempts:
+                            _wait = 1.5 if _stream_attempts == 1 else 3.0
+                            print(f"[stream] anthropic overloaded (attempt {_stream_attempts}/{_max_stream_attempts}) "
+                                  f"— retrying in {_wait}s. {_exc}", flush=True)
+                            time.sleep(_wait)
+                            continue
+                        raise
 
                 # Auto-log any server-side tool calls (web_search / web_fetch /
                 # Source Library MCP) Elan made this turn — so the WATCH and
@@ -5575,6 +5595,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.serve_drawings_gallery()
         elif path == "/drawings/api/list":
             self.serve_drawings_api()
+        elif path == "/autonomous/recent":
+            self.send_json({"entries": autonomous_log_read(limit=30)})
         elif path.startswith("/drawings/") and (path.endswith(".svg") or path.endswith(".json")):
             self.serve_drawing_file(path[len("/drawings/"):])
         elif path == "/memory":
@@ -7568,17 +7590,18 @@ body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;heigh
    Sits ABOVE the JOBS button (bottom-right) so it doesn't cover anything else.
    Hidden by default — appears as a small toggle chip above the jobs button. */
 #auto-panel{{
-  position:fixed; bottom:54px; right:14px; width:280px; max-height:42vh;
-  background:rgba(8,8,28,0.94); border:1px solid rgba(80,100,200,0.18);
-  border-radius:5px; padding:8px 10px 10px;
-  font-size:8.5px; line-height:1.62; color:rgba(160,180,235,0.80);
-  letter-spacing:0.2px; box-shadow:0 6px 22px rgba(0,0,0,0.45);
-  z-index:9997; backdrop-filter:blur(4px); overflow:hidden;
-  transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
+  position:fixed; bottom:54px; right:14px; width:460px; max-height:70vh;
+  background:rgba(8,8,28,0.96); border:1px solid rgba(80,100,200,0.22);
+  border-radius:6px; padding:10px 14px 12px;
+  font-size:12px; line-height:1.62; color:rgba(195,210,245,0.92);
+  letter-spacing:0.1px; box-shadow:0 8px 28px rgba(0,0,0,0.55);
+  z-index:9997; backdrop-filter:blur(6px); overflow:hidden;
+  transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease, width 0.25s ease;
   display:flex; flex-direction:column;
 }}
-#auto-panel.collapsed{{max-height:26px; cursor:pointer;}}
+#auto-panel.collapsed{{max-height:28px; width:200px; cursor:pointer;}}
 #auto-panel.hidden{{transform:translateY(40%); opacity:0; pointer-events:none;}}
+@media (max-width: 900px) {{ #auto-panel{{width:90vw; right:5vw;}} }}
 #auto-header{{display:flex; align-items:center; justify-content:space-between;
   font-size:7.5px; letter-spacing:2.2px; color:rgba(130,150,220,0.62);
   text-transform:uppercase; margin-bottom:7px; flex-shrink:0; cursor:pointer;}}
@@ -9031,6 +9054,7 @@ autoToggle.addEventListener('click', ()=>{{
   autoPanel.classList.remove('hidden');
   autoPanel.classList.remove('collapsed');
   autoToggle.classList.remove('show');
+  _loadAutoHistory();
 }});
 
 // Hide entirely by default — toggle button is the only visible affordance until AUTO fires
@@ -9044,6 +9068,45 @@ function _revealAutoPanel(){{
 }}
 es.addEventListener('auto_stream_start', _revealAutoPanel);
 es.addEventListener('autonomous_skipped', _revealAutoPanel);
+
+// Load Elan's recent autonomous-mode thoughts when the panel opens.
+// Without this, expanding the panel between wakes shows nothing — but the
+// thoughts ARE there in /data/elan_autonomous_thread.jsonl. Pull and render.
+let _autoHistoryLoaded = false;
+function _loadAutoHistory(){{
+  if(_autoHistoryLoaded) return;
+  _autoHistoryLoaded = true;
+  fetch('/autonomous/recent',{{cache:'no-store'}}).then(r=>r.json()).then(d=>{{
+    const entries = (d && d.entries) || [];
+    if(entries.length === 0){{
+      const empty = document.createElement('div');
+      empty.className = 'auto-entry';
+      empty.innerHTML = '<div class="auto-entry-time">no auto-mode thoughts yet</div><div class="auto-entry-body" style="opacity:0.55;font-style:italic;">when autonomous mode is enabled and Elan wakes alone, his thinking appears here</div>';
+      autoStream.appendChild(empty);
+      return;
+    }}
+    // Newest first
+    entries.reverse();
+    entries.forEach(e=>{{
+      const el = document.createElement('div');
+      el.className = 'auto-entry';
+      const t = (e.ts || '').slice(0,19).replace('T',' ');
+      const emo = e.emotion ? ` · ${{e.emotion}}` : '';
+      const va = (e.valence !== undefined && e.arousal !== undefined)
+        ? ` · v=${{(+e.valence).toFixed(2)}} a=${{(+e.arousal).toFixed(2)}}` : '';
+      const head = document.createElement('div');
+      head.className = 'auto-entry-time';
+      head.textContent = `${{t}}${{emo}}${{va}}`;
+      const body = document.createElement('div');
+      body.className = 'auto-entry-body';
+      body.textContent = e.text || '';
+      el.appendChild(head); el.appendChild(body);
+      autoStream.appendChild(el);
+      autoTotal++;
+    }});
+    autoCount.textContent = autoTotal;
+  }}).catch(()=>{{}});
+}}
 
 // Wait briefly for SSE to be OPEN before sending — covers the case where
 // the user was idle, proxy dropped SSE, and the browser is in the middle of
