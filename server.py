@@ -4344,8 +4344,23 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    otm_pct=float(args.get("otm_pct", 0.05)),
                                    reason=args.get("reason", ""))
     if name == "degen_close_option":
+        inst = (args.get("instrument") or "").strip()
+        if not inst:
+            # Help him recover: return the open instruments so the next call has a name
+            try:
+                opts = (fetch_degen_state().get("options") or {}).get("positions") or {}
+                open_names = [k for k, v in opts.items() if isinstance(v, dict)]
+            except Exception:
+                open_names = []
+            return {
+                "ok": False,
+                "error": "instrument required — you didn't pass the option name. "
+                         "Call degen_list_options first, then pass the exact 'instrument' "
+                         "field from the result. Open right now: " + (", ".join(open_names) or "(none open)"),
+                "open_instruments": open_names,
+            }
         return degen_post_command("close_option",
-                                   instrument=args.get("instrument"),
+                                   instrument=inst,
                                    reason=args.get("reason", ""))
     if name == "degen_list_options":
         s = fetch_degen_state(force=True)
@@ -4437,7 +4452,18 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         inst   = (args.get("instrument") or "").strip()
         reason = (args.get("reason") or "").strip() or "elan_close"
         if not inst:
-            return {"ok": False, "error": "instrument required"}
+            try:
+                s = fetch_options_state()
+                open_names = [k for k, v in (s.get("positions") or {}).items()
+                              if isinstance(v, dict)]
+            except Exception:
+                open_names = []
+            return {
+                "ok": False,
+                "error": "instrument required — pass the exact Deribit name. "
+                         "Open right now: " + (", ".join(open_names) or "(none open)"),
+                "open_instruments": open_names,
+            }
         return options_post_command("close_option", instrument=inst, reason=reason)
     if name == "degen_status":
         s = fetch_degen_state(force=True)
@@ -5076,12 +5102,12 @@ OPTIONS_TOOLS = [
     },
     {
         "name": "options_close",
-        "description": "Close an open options position by instrument name. The instrument name looks like 'BTC-22MAY26-77000-P' (asset-expiry-strike-type). Find the exact name in options_status output. Provide a one-sentence reason — this is recorded in the action log so you can review your own decisions later.",
+        "description": "Close ONE specific options position. Same as degen_close_option but routes to the standalone options bot. You MUST supply the full instrument name. Call options_status (or degen_list_options) first to get exact names like 'BTC-22MAY26-77000-P'. To close several, call once per instrument. NOTE: degen_close_option and options_close work on the same options book — use whichever you can remember. Don't call without instrument; there's no shortcut.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "instrument": {"type": "string", "description": "Full Deribit instrument name, e.g. 'BTC-22MAY26-77000-P'."},
-                "reason":     {"type": "string", "description": "One sentence: why you're closing — thesis confirmed, invalidated, taking profit, etc."},
+                "instrument": {"type": "string", "description": "REQUIRED. Exact full Deribit instrument name like 'BTC-22MAY26-77000-P'. Copy from options_status output."},
+                "reason":     {"type": "string", "description": "One sentence: why you're closing."},
             },
             "required": ["instrument", "reason"],
         },
@@ -5160,12 +5186,12 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_close_option",
-        "description": "Close an open crypto option position at current mark price.",
+        "description": "Close ONE specific crypto option position. You MUST supply the full instrument name. Call degen_list_options first to see exact names — they look like 'BTC-22MAY26-81000-C' (asset-expiry-strike-type). To close multiple, call this once per option with the exact name each time. Calling without instrument fails — there's no 'close all' shortcut.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "instrument": {"type": "string", "description": "Full instrument name e.g. 'BTC-22MAY26-81000-C'"},
-                "reason":     {"type": "string"},
+                "instrument": {"type": "string", "description": "REQUIRED. The exact full Deribit instrument name like 'BTC-22MAY26-81000-C'. Copy it verbatim from degen_list_options output. Do not abbreviate."},
+                "reason":     {"type": "string", "description": "One-sentence why."},
             },
             "required": ["instrument"],
         },
