@@ -2458,7 +2458,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
                     elan_tools += CALENDAR_TOOLS
-                if _SOURCE_LIBRARY_ENABLED and ("source" in _active_jobs or _is_autonomous_wake):
+                # SOURCE tools always-on when enabled — same reliability rationale as MCP
+                if _SOURCE_LIBRARY_ENABLED:
                     elan_tools += SOURCE_TOOLS  # source_save_discovery
                 if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
                     elan_tools += KALSHI_TOOLS
@@ -2484,8 +2485,11 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # kwarg yet, so we pass it through extra_body which the SDK forwards
             # to the underlying HTTP request body verbatim.
             mcp_servers_arg = []
-            if (_SOURCE_LIBRARY_ENABLED and label == "A"
-                    and ("source" in _active_jobs or _is_autonomous_wake)):
+            # Source Library MCP — attach whenever enabled. Lazy-load gating
+            # was costing us "tool isn't live yet" failures when Elan tried to
+            # search the library on words that weren't in our keyword list.
+            # The ~500-1000 token cost is worth the reliability.
+            if (_SOURCE_LIBRARY_ENABLED and label == "A"):
                 sl_entry = {
                     "type": "url",
                     "url":  _SOURCE_LIBRARY_MCP_URL,
@@ -3823,13 +3827,17 @@ _WATCH_KEYWORDS = (
 )
 # Source Library — when these come up, ship the MCP server + discovery tool
 _SOURCE_KEYWORDS = (
-    "source library", "sourcelibrary", "the source", "the library",
+    "source library", "sourcelibrary", "the source", "the library", "library",
     "book", "books", "manuscript", "manuscripts", "ancient text", "ancient texts",
     "translation", "translations", "renaissance", "alchemy", "alchemical",
-    "hermetic", "scripture", "treatise", "codex", "folio", "rare text",
+    "hermetic", "hermes", "scripture", "treatise", "codex", "folio", "rare text",
     "ficino", "agrippa", "fludd", "paracelsus", "copernicus", "vatican",
+    "hegel", "plato", "aristotle", "philosopher", "philosophy", "philosophers",
     "look up", "find a passage", "what does", "according to", "writings of",
     "historical", "primary source", "primary sources",
+    # Intent words — Elan's invitation to wander, even without proper nouns
+    "wander", "wander into", "explore", "deep read", "go deep", "read something",
+    "old text", "old idea", "the deep stuff", "study",
 )
 # Job-keyword aliases — single tokens that strongly signal a job
 def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
