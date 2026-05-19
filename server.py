@@ -4968,14 +4968,19 @@ def build_portfolio_vitals() -> str:
             pos        = s.get("positions") or {}
             opts       = opts_block.get("positions") or {}
             paused     = " · PAUSED" if s.get("paused") else ""
-            all_closed = (s.get("trades") or []) + (opts_block.get("trades") or [])
-            wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+            # Elan-only record — bot's legacy losses don't count toward his stats
+            elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
+            elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
+            elan_all = elan_spot + elan_opts
+            elan_wins = sum(1 for t in elan_all if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
+            elan_pnl = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in elan_all)
+            elan_wr = (elan_wins / len(elan_all) * 100) if elan_all else 0
             lines.append(
                 f"  Degen SPOT: ${spot_total:.2f} (${spot_cash:.2f} cash · {len(pos)} open){paused}\n"
                 f"  Degen OPTIONS: ${opts_total:.2f} (${opts_avail:.2f} avail · {len(opts)} open) — separate wallet from spot"
             )
-            if all_closed:
-                lines.append(f"  Degen wins: {wins}/{len(all_closed)} closed")
+            if elan_all:
+                lines.append(f"  YOUR record (degen): ${elan_pnl:+,.2f} realized · {elan_wins}/{len(elan_all)} closed · {elan_wr:.1f}% win rate")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
 
