@@ -4799,18 +4799,19 @@ def stock_post_command(action: str, **params) -> dict:
 
 STOCK_TOOLS = [
     {"name": "stock_open_position",
-     "description": "Open a stock position via Alpaca paper. Specify symbol (NVDA, TSLA, SPY, etc.), side (long/short), and optionally qty. If qty omitted the bot sizes from your conviction. ATR-based stops + take-profit auto-set. Market hours only (9:30am-4pm ET).",
+     "description": "Open ONE Alpaca-paper stock position. ALL OF symbol, side, reason ARE REQUIRED. Calling without symbol returns an error — there is no default. ATR-based stops + take-profit auto-set. Market hours only (9:30am-4pm ET).",
      "input_schema": {"type":"object","properties":{
-         "symbol":{"type":"string"},
-         "side":{"type":"string","enum":["long","short"]},
-         "qty":{"type":"integer"},
-         "conviction":{"type":"number","description":"0.30..1.0; higher = larger size"},
-         "reason":{"type":"string"}},
+         "symbol":{"type":"string","description":"REQUIRED. Ticker like 'NVDA', 'TSLA', 'SPY'. Uppercase, no slashes. Never empty or null."},
+         "side":{"type":"string","enum":["long","short"],"description":"REQUIRED. 'long' or 'short'."},
+         "qty":{"type":"integer","description":"Optional. If omitted, sized from conviction."},
+         "conviction":{"type":"number","description":"0.30..1.0; higher = larger size."},
+         "reason":{"type":"string","description":"REQUIRED. 1-2 sentences — your actual thesis."}},
          "required":["symbol","side","reason"]}},
     {"name": "stock_close_position",
-     "description": "Close an open stock position at current market price.",
+     "description": "Close ONE specific Alpaca-paper stock position by ticker. The `symbol` field is REQUIRED. Call stock_list_positions first to get exact tickers. There is no 'close all' shortcut.",
      "input_schema": {"type":"object","properties":{
-         "symbol":{"type":"string"},"reason":{"type":"string"}},"required":["symbol"]}},
+         "symbol":{"type":"string","description":"REQUIRED. Ticker like 'NVDA'. Copy verbatim from stock_list_positions."},
+         "reason":{"type":"string","description":"One sentence: why."}},"required":["symbol"]}},
     {"name": "stock_buy_option",
      "description": "Buy a stock option (call or put) via Alpaca paper options. Specify underlying ticker, option type, and target days-to-expiry. The bot finds the closest matching contract by strike + expiry. Market hours mainly.",
      "input_schema": {"type":"object","properties":{
@@ -5185,26 +5186,26 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_open_position",
-        "description": "Open a leveraged paper position on the degen bot. Conviction determines leverage (5x base, 8x for >=0.80). The bot's stop/take-profit logic will manage it once open.",
+        "description": "Open ONE leveraged paper position on the degen bot. ALL FOUR FIELDS ARE REQUIRED: pair (the symbol), side (long or short), conviction (0.10–1.0), reason (1-2 sentences). Calling this without `pair` returns an error — there is no default and no 'open all' shortcut. Conviction determines leverage (5x base, 8x for >=0.80).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":       {"type": "string", "description": "Pair like BTC/USDT, ETH/USDT, SOL/USDT (USDT is added automatically if you give just 'BTC')."},
-                "side":       {"type": "string", "enum": ["long", "short"]},
-                "conviction": {"type": "number", "description": "Your conviction 0.10..1.0. Higher = more leverage + larger stake."},
-                "reason":     {"type": "string", "description": "1-2 sentence read of the trade."},
+                "pair":       {"type": "string", "description": "REQUIRED. The trading pair like 'BTC/USDT', 'ETH/USDT', 'SOL/USDT'. If you give just 'BTC', /USDT is added. Never empty or null."},
+                "side":       {"type": "string", "enum": ["long", "short"], "description": "REQUIRED. 'long' or 'short'."},
+                "conviction": {"type": "number", "description": "REQUIRED. Your conviction 0.10..1.0. Higher = more leverage + larger stake."},
+                "reason":     {"type": "string", "description": "REQUIRED. 1-2 sentence read of the trade — your actual thesis."},
             },
             "required": ["pair", "side", "conviction", "reason"],
         },
     },
     {
         "name": "degen_close_position",
-        "description": "Manually close an open degen position at current market price.",
+        "description": "Close ONE specific open degen position by pair name. The `pair` field is REQUIRED. Call degen_list_positions first to see your open pairs. To close several, call this once per pair. There is no 'close all' shortcut and no default — calling without pair returns an error listing your open positions.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":   {"type": "string"},
-                "reason": {"type": "string"},
+                "pair":   {"type": "string", "description": "REQUIRED. The pair to close, e.g. 'TON/USDT'. Copy verbatim from degen_list_positions."},
+                "reason": {"type": "string", "description": "One sentence: why you're closing."},
             },
             "required": ["pair", "reason"],
         },
