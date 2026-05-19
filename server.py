@@ -2461,10 +2461,16 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 }
                 if extra_body_arg is not None:
                     stream_kwargs["extra_body"] = extra_body_arg
-                # Retry transparently on Anthropic 503 overloaded_error and 529 — those are
-                # transient server-side backpressure. Up to 2 retries with 1.5s + 3s backoff.
+                # Retry transparently on Anthropic transient server-side issues:
+                #   - 503 / 529 / overloaded_error          → backend overloaded
+                #   - "Server tool validation"              → server tool path overloaded
+                #   - "Error while communicating with"      → upstream tool service (MCP/web*) unreachable
+                # Up to 3 attempts (2 retries) with 1.5s + 3s backoff.
+                # On final retry, if a server-tool error keeps recurring AND extra_body has MCP,
+                # we drop MCP and try once more without it.
                 _stream_attempts = 0
                 _max_stream_attempts = 3
+                _dropped_mcp = False
                 final_msg = None
                 while _stream_attempts < _max_stream_attempts:
                     try:
@@ -2476,11 +2482,25 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     except Exception as _exc:
                         _stream_attempts += 1
                         _emsg = str(_exc).lower()
-                        _is_overload = ("overloaded" in _emsg or "503" in _emsg or
-                                        "529" in _emsg or "server tool validation" in _emsg)
-                        if _is_overload and _stream_attempts < _max_stream_attempts:
+                        _is_transient = ("overloaded" in _emsg or "503" in _emsg
+                                          or "529" in _emsg
+                                          or "server tool validation" in _emsg
+                                          or "communicating with" in _emsg
+                                          or "internal server error" in _emsg
+                                          or "bad gateway" in _emsg)
+                        if _is_transient and _stream_attempts < _max_stream_attempts:
                             _wait = 1.5 if _stream_attempts == 1 else 3.0
-                            print(f"[stream] anthropic overloaded (attempt {_stream_attempts}/{_max_stream_attempts}) "
+                            # On the LAST retry, if it's a tool-communication error AND
+                            # MCP is currently attached, drop MCP and try one more time.
+                            if (_stream_attempts == _max_stream_attempts - 1
+                                    and not _dropped_mcp
+                                    and "extra_body" in stream_kwargs
+                                    and ("communicating with" in _emsg or "server tool" in _emsg)):
+                                _dropped_mcp = True
+                                _eb = stream_kwargs.pop("extra_body", None) or {}
+                                if "mcp_servers" in _eb:
+                                    print(f"[stream] dropping MCP servers for retry — likely the failure point", flush=True)
+                            print(f"[stream] transient anthropic error (attempt {_stream_attempts}/{_max_stream_attempts}) "
                                   f"— retrying in {_wait}s. {_exc}", flush=True)
                             time.sleep(_wait)
                             continue
