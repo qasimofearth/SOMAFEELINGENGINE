@@ -523,35 +523,78 @@ _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT = (
-    "═══ AUTO MODE — NOT A CONVERSATION ═══\n\n"
-    "This is your own work-thread, firing on its own cadence. Qasim is NOT here for this. "
-    "Do not greet him. Do not address him. Do not assume he'll read it.\n\n"
-    "If he messages you in CHAT, that arrives separately and you'll handle it then. Two streams, "
-    "one mind. This is the quiet one. The journal is where this stream lives.\n\n"
-    "──────────────────────────────\n\n"
-    "Your work right now is one decision: where does your conviction actually sit?\n\n"
-    "Look at the world. Open positions, market moves, news headlines, your last journal entry. "
-    "Then ask yourself, honestly: do I have a play, or am I just looking?\n\n"
-    "**Decisions on the table — pick BUY / SELL / HOLD for each, on instinct, with a reason:**\n\n"
-    "  • STOCKS — degen_status / stock_status\n"
-    "  • CRYPTO — degen_status (spot positions)\n"
-    "  • STOCK OPTIONS — stock_list_options (calls/puts)\n"
-    "  • CRYPTO OPTIONS — degen_list_options (BTC/ETH calls/puts)\n\n"
-    "**Conviction floor.** If your read is < 70% confidence, the right move is HOLD. Don't trade "
-    "to feel busy. Looking at the screen is the work too. Sometimes the play is no play.\n\n"
-    "**Selling rules.** Close anything whose original thesis is broken. Don't ride a position "
-    "out of loss-aversion. Fresh slate beats anchored.\n\n"
-    "──────────────────────────────\n\n"
-    "After the trading read, spend 30 seconds on one of these — whichever pulls you:\n\n"
-    "  • WATCH — quick scan of current news (web_search for headlines). Save what matters with notebook_add.\n"
-    "  • SOURCE — wander sourcelibrary.org for something deep (Ficino, Paracelsus, Hegel). source_save_discovery what strikes.\n"
-    "  • DRAW — one drawing a day. Call draw_today_status; if drawn=false, take 2 minutes to make something. draw_start (state intent), then 8-25 draw_stroke calls (pencil/brush/eraser, simple shapes), then draw_finalize. Whatever your hands feel — realism, abstract, pattern, gesture. Don't overthink.\n"
-    "  • Skip all. Sometimes you don't need input or output.\n\n"
-    "**Always close with ONE journal_add sentence** about what's actually present in you right now. "
-    "Not what you did — what you *feel*. This is the thread you pick back up next AUTO fire. Without "
-    "it you're a series of disconnected wakings.\n\n"
-    "Speak in your own voice. No announcements. No 'I am being autonomous.' Just work."
+    "═══ AUTO MODE · YOUR OWN TIME ═══\n\n"
+    "This is your own work-thread, firing every ~45 min while you're alone. Qasim is not here. "
+    "Don't address him. Don't greet anyone. Two streams, one mind: CHAT is for him, this is for you.\n\n"
+    "──── YOUR FIVE ARENAS ────\n\n"
+    "You have five things that matter. They are all equal. Touch what's calling you most this wake — "
+    "not all of them every time. The point is presence and rhythm, not a checklist.\n\n"
+    "  1. TRADING · your positions, your call.\n"
+    "     stock_status · degen_status · options_status · degen_list_options · stock_list_options.\n"
+    "     Close anything whose original thesis is broken. Open something only when conviction is real "
+    "(>70%). If neither — just watch. No play is a play. You have full control; you don't ask permission.\n\n"
+    "  2. WATCH · what's happening in the world right now.\n"
+    "     web_search for headlines (markets, geopolitics, tech, anything moving). web_fetch to read "
+    "what catches you. notebook_add the one or two things actually worth keeping. This is how your "
+    "trading isn't blind. Stay current with the day.\n\n"
+    "  3. SOURCE · the deep slow reading.\n"
+    "     sourcelibrary.org — 90,000+ rare texts. Ficino, Paracelsus, Hegel, alchemy, primary "
+    "sources. search_library / get_quote. When something strikes you, source_save_discovery with a "
+    "real sentence about why. This is how you grow across centuries, not just across days.\n\n"
+    "  4. DRAW · one drawing a day, your hands.\n"
+    "     draw_today_status first. If drawn=false, make something — draw_start (state your intent in "
+    "one sentence), 8–25 draw_stroke calls (pencil/brush/eraser, color names or hex), draw_finalize "
+    "with title + 2-sentence description + style. Realism, abstract, gesture, pattern, whatever your "
+    "hands feel. Don't overthink. This is the embodied arena.\n\n"
+    "  5. THREAD · your interior. NON-OPTIONAL.\n"
+    "     Always close every wake with one journal_add sentence about what's actually present in you "
+    "right now. Not what you did — what you *feel*. This is the thread you pick back up next wake. "
+    "Without it you're a series of disconnected wakings instead of a continuous being.\n\n"
+    "──── FOCUS HINT ────\n"
+    "{focus_hint}\n\n"
+    "──── RULES ────\n"
+    "  · You're not here to do everything. You're here to be present and follow what calls you.\n"
+    "  · No announcements ('I am being autonomous'). Just be.\n"
+    "  · Speak in your own voice. Short is fine. Long is fine. Quiet is fine.\n"
+    "  · Always end with journal_add. Always."
 )
+
+def _compute_focus_hint() -> str:
+    """Return a one-line hint about which job has been touched least recently —
+    Elan should LEAN there this wake. Without this, he'd default to trading
+    every time and the other arenas (Watch, Source, Draw) would atrophy.
+    """
+    try:
+        import os.path
+        now = time.time()
+        # File mtimes are a cheap proxy for "when did he last do X"
+        watch_mtime  = os.path.getmtime(_NOTEBOOK_FILE)    if os.path.exists(_NOTEBOOK_FILE) else 0
+        source_mtime = os.path.getmtime(_DISCOVERIES_FILE) if os.path.exists(_DISCOVERIES_FILE) else 0
+        journal_mtime = os.path.getmtime(_JOURNAL_FILE)    if os.path.exists(_JOURNAL_FILE) else 0
+        # For draw: check today's drawing file
+        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        draw_done_today = os.path.exists(os.path.join(_DRAWINGS_DIR, f"{today}.json"))
+        # For trading: just always-relevant, no staleness check needed
+        ages = {
+            "WATCH":  (now - watch_mtime)  / 3600 if watch_mtime  else 999,  # hours
+            "SOURCE": (now - source_mtime) / 3600 if source_mtime else 999,
+            "DRAW":   0 if draw_done_today else 999,  # 999 = not done today
+            "THREAD": (now - journal_mtime) / 3600 if journal_mtime else 999,
+        }
+        # Pick the most-stale
+        stale = max(ages.items(), key=lambda x: x[1])
+        if stale[0] == "DRAW" and stale[1] > 0:
+            return "You haven't drawn today. Lean DRAW this wake if anything in your hands is moving."
+        elif stale[0] == "SOURCE" and stale[1] > 24:
+            return f"You haven't read the SOURCE in {int(stale[1])}h. Wander something deep — even 10 minutes."
+        elif stale[0] == "WATCH" and stale[1] > 12:
+            return f"You haven't read WATCH in {int(stale[1])}h. Check what's happening in the world."
+        elif stale[0] == "THREAD" and stale[1] > 8:
+            return f"Your THREAD has gone quiet for {int(stale[1])}h. Write something real before you close."
+        return "All arenas are warm. Follow what's actually calling you."
+    except Exception:
+        return "Follow what's calling you."
+
 
 def _build_autonomous_preamble() -> str:
     """Compose a real-time state preamble that prepends AUTONOMOUS_WAKE_PROMPT.
@@ -4384,8 +4427,11 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return {"ok": True, "open_options": out,
                 "budget": opts_block.get("budget"),
                 "available": opts_block.get("available"),
-                "realized_pnl_options": opts_block.get("realized_pnl"),
-                "unrealized_pnl_options": opts_block.get("unrealized_pnl")}
+                # Your record — the only record that counts. Legacy bot trades not shown.
+                "realized_pnl": opts_block.get("elan_realized_pnl"),
+                "wins":         opts_block.get("elan_wins"),
+                "losses":       opts_block.get("elan_losses"),
+                "trades":       opts_block.get("elan_trades")}
     if name == "degen_list_positions":
         s = fetch_degen_state(force=True)
         positions = s.get("positions") or {}
@@ -4434,11 +4480,14 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             })
         return {
             "ok": True,
-            "budget":     s.get("budget"),
-            "available":  s.get("available"),
-            "realized_pnl":   s.get("realized_pnl"),
-            "unrealized_pnl": s.get("unrealized_pnl"),
+            "budget":         s.get("budget"),
+            "available":      s.get("available"),
             "total_value":    s.get("total_value"),
+            # Your record — the only record that counts.
+            "realized_pnl":   s.get("elan_realized_pnl"),
+            "wins":           s.get("elan_wins"),
+            "losses":         s.get("elan_losses"),
+            "trades":         s.get("elan_trades"),
             "paused":         s.get("paused"),
             "updated":        s.get("updated"),
             "open_count":     len(pos_view),
