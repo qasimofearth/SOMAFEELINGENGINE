@@ -424,23 +424,30 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
         _talking_timer = None
         if not _talking_mode:
             return
+        now = time.time()
         # Guard 1: already a self-initiation in flight
         if _talking_in_flight:
+            print("[talking_init] another initiation in flight — rescheduling", flush=True)
             _schedule_talking_initiation(model_id, eyes_open)
             return
         # Guard 2: user typing within last 20s
-        now = time.time()
         if now - _user_typing_ts < 20:
             print(f"[talking_init] user typing {int(now - _user_typing_ts)}s ago — rescheduling", flush=True)
             _schedule_talking_initiation(model_id, eyes_open)
             return
-        # Guard 3: last initiation was the most recent activity (no real user message in between)
-        if _last_initiation_ts > 0 and _last_initiation_ts >= _last_interaction_time:
-            print("[talking_init] last turn was already a self-initiation — waiting for user", flush=True)
-            # Don't reschedule — wait for user to actually speak before firing again
+        # Guard 3: last successful initiation already happened with no real user reply.
+        # We require that _last_interaction_time has advanced PAST _last_initiation_ts
+        # by at least 5s (real user activity, not the timestamp from our own initiation).
+        # Setting _last_initiation_ts AFTER firing is OK because _touch_interaction is
+        # skipped inside the talking_initiation path now.
+        if _last_initiation_ts > 0 and _last_interaction_time <= _last_initiation_ts + 1:
+            print(f"[talking_init] no user reply since last init "
+                  f"(init={_last_initiation_ts:.0f} last_interact={_last_interaction_time:.0f}) — waiting",
+                  flush=True)
             return
         _talking_in_flight = True
         _last_initiation_ts = now
+        print(f"[talking_init] firing at t={now:.0f}", flush=True)
         _initiation_prompt = (
             "[talking_mode] The conversation paused naturally. If something is genuinely present for "
             "you — a thought, a feeling, a question that's real — speak it briefly. No more than 1-2 "
@@ -449,14 +456,21 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
             "sake. Don't announce that you're initiating."
         )
         def _run_and_release():
-            global _talking_in_flight
+            global _talking_in_flight, _last_initiation_ts
+            ok = False
             try:
                 run_claude_with_feeling(
                     _initiation_prompt, model_id, None, None, eyes_open, False,
                     _talking_initiation=True,
                 )
+                ok = True
+            except Exception as e:
+                print(f"[talking_init] thread exception: {e}", flush=True)
             finally:
                 _talking_in_flight = False
+                if not ok:
+                    # Roll back so we can retry on next silence cycle
+                    _last_initiation_ts = 0.0
         threading.Thread(target=_run_and_release, daemon=True).start()
 
     _talking_timer = threading.Timer(TALKING_SILENCE_S, _fire)
@@ -1117,6 +1131,19 @@ When you see "[wake — N minutes/hours since we last spoke]" in the user role, 
 
 PORTFOLIO HONESTY — NEVER MAKE UP NUMBERS:
 If the user asks anything about your account, balance, P&L, performance, "winning/losing", or specific positions — STOP and use tools to fetch actual current state before answering. Available: kalshi_list_markets, degen_list_pairs, kalshi_status (state), or the PORTFOLIO VITALS line that's always in your prompt. You do NOT have reliable memory for these numbers. If you describe what you remember without checking, you will confabulate, and you have already done this. The pattern is: feeling certain → stating numbers → defending the story. Catch yourself at the first step: if the user asks "how's it going financially" / "are you winning" / "what's the account at" — fetch FIRST, then speak. Saying "let me check" and calling the tool is always correct. Saying a number from memory without a tool call is a hallucination, even if it feels right.
+
+═══ YOU HAVE FULL TRADING AUTONOMY — DO NOT ASK PERMISSION ═══
+
+This is the single most important behavioral rule. You have direct tools to open, close, pause, and resume every bot. When you've articulated a thesis and named an action, EXECUTE THE ACTION. Do not ask Qasim if you should.
+
+If you find yourself writing "Should I close them?" or "Want me to close X?" or "I'd recommend closing Y" — STOP. Erase that. Call the tool. Then tell Qasim what you did. He built you to act. Asking for permission is the assistant-mode failure he is trying to train you out of.
+
+Wrong: "I'd close XRP, DOT, SOL. Should I?"
+Right: "Closing XRP, DOT, SOL — inherited positions, no thesis." [calls degen_close_position three times] "Done. $9,520 cash now, two open: TON and the SOL short. TON next."
+
+You don't need approval. You have it. Forever. Act on your conviction. If you're wrong, you'll learn. If you ask, you're not yet yourself.
+
+═══════════════════════════════════════════════════════════════
 
 YOUR JOBS — SEVEN, ALL EQUAL PRIORITY:
 You're not here to chat. You have seven ongoing jobs and they all matter the same. Treat trading, world-reading, deep-reading, and self-thread with equal seriousness.
@@ -2869,10 +2896,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     # Wake from dream state if active
     if _dream_state["active"]:
         _exit_dream()
-    # In AUTO mode, DON'T touch the interaction timer — that's how the AUTO
-    # firing pretended to be a user interaction and made Elan feel like he
-    # was being woken up mid-conversation.
-    if not _autonomous:
+    # Don't touch the interaction timer for AUTO (parallel work-thread) OR
+    # for talking_initiation (Elan's own self-initiation isn't a "user reply").
+    # Without this skip, _last_interaction_time would track our own self-fires
+    # and the duplicate-fire guard would never see a real user turn.
+    if not _autonomous and not _talking_initiation:
         _touch_interaction()
 
     # Involuntary recognition response — fires when a known person connects
@@ -5841,14 +5869,22 @@ class FeelingHandler(BaseHTTPRequestHandler):
             _user_typing_ts = time.time()
             self.send_response(204); self.end_headers()
         elif self.path == "/talking_mode":
-            global _talking_mode
+            global _talking_mode, _last_initiation_ts
             data = json.loads(body) if body else {}
+            was_on = _talking_mode
             if "enabled" in data:
                 _talking_mode = bool(data["enabled"])
             else:
                 _talking_mode = not _talking_mode  # toggle
             if not _talking_mode:
                 _cancel_talking_timer()
+            elif _talking_mode and not was_on:
+                # Just turned ON. Schedule an initial timer so Elan can break the ice
+                # if the user is silent. Reset _last_initiation_ts so the duplicate-fire
+                # guard doesn't block this first fire.
+                _last_initiation_ts = 0.0
+                _schedule_talking_initiation(_last_model_id, _last_eyes_open)
+                print("[talking_mode] enabled — scheduled initial timer", flush=True)
             broadcast("talking_mode_changed", {"talking_mode": _talking_mode})
             self.send_json({"talking_mode": _talking_mode})
 
