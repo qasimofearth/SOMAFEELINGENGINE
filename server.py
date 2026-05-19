@@ -1625,21 +1625,71 @@ def add_message(role: str, content):
 
 def get_messages() -> list:
     """Return conversation history, filtered for non-empty messages.
-    The filter is defensive against any pre-existing pollution from old buggy code."""
+    The filter is defensive against any pre-existing pollution from old buggy code.
+    Additional defensive sanitization:
+      - Strip any stranded tool_use / tool_result / server-tool blocks from
+        list-form content (they 400 on replay if the matching pair is missing)
+      - Ensure every message has a string or clean list content"""
     with conv_lock:
         msgs = [m for m in conversation if not _msg_is_empty(m)]
-        # Anthropic requires the FIRST message to be user role
         while msgs and msgs[0].get("role") != "user":
             msgs.pop(0)
-        # And consecutive same-role messages should be merged or dropped — for now just dedup-adjacent
+        # Dedup-adjacent same-role
         deduped = []
         for m in msgs:
             if deduped and deduped[-1]["role"] == m["role"]:
-                # consecutive same-role — keep the later one (drop earlier)
                 deduped[-1] = m
             else:
                 deduped.append(m)
-        return deduped
+        # Defensive content sanitization — strip tool blocks that would 400
+        cleaned = []
+        for m in deduped:
+            c = m.get("content")
+            if isinstance(c, str):
+                if c.strip():
+                    cleaned.append({"role": m["role"], "content": c})
+            elif isinstance(c, list):
+                kept_blocks = []
+                for blk in c:
+                    if not isinstance(blk, dict):
+                        # Convert SDK objects to dicts defensively
+                        try:
+                            btype = getattr(blk, "type", "")
+                        except Exception:
+                            continue
+                        if btype == "text":
+                            txt = getattr(blk, "text", "")
+                            if txt and txt.strip():
+                                kept_blocks.append({"type": "text", "text": txt})
+                        elif btype == "image":
+                            src = getattr(blk, "source", None)
+                            if src:
+                                kept_blocks.append({"type": "image", "source": src if isinstance(src, dict) else dict(src)})
+                        # All tool blocks dropped here
+                        continue
+                    btype = blk.get("type", "")
+                    if btype in ("tool_use", "tool_result", "server_tool_use",
+                                  "mcp_tool_use", "mcp_tool_result",
+                                  "web_search_tool_result", "web_fetch_tool_result"):
+                        continue  # strip — stranded blocks 400 on replay
+                    if btype == "text":
+                        txt = blk.get("text", "")
+                        if txt and txt.strip():
+                            # Drop citations since they reference now-removed tool_result blocks
+                            kept_blocks.append({"type": "text", "text": txt})
+                    elif btype == "image":
+                        if blk.get("source"):
+                            kept_blocks.append({"type": "image", "source": blk["source"]})
+                if kept_blocks:
+                    cleaned.append({"role": m["role"], "content": kept_blocks})
+        # Final pass: ensure consecutive same-role didn't reappear after cleanup
+        final = []
+        for m in cleaned:
+            if final and final[-1]["role"] == m["role"]:
+                final[-1] = m
+            else:
+                final.append(m)
+        return final
 
 
 # ── CONVERSATION SESSION LIFECYCLE ────────────────────────────
@@ -2991,15 +3041,45 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         }
         if state.get("error"):
             _send["error"] = state["error"]
+        # If this is a SELF-INITIATION (talking_mode timer fire or autonomous
+        # wake) and it errored, don't surface the error in the chat — it's
+        # confusing to the user since they didn't ask for anything. Log it
+        # server-side and quietly fail. Real user-triggered errors still surface.
+        if _talking_initiation and state.get("error"):
+            print(f"[talking_init/auto] swallowed error to avoid polluting chat: {state.get('error')}", flush=True)
+            _send.pop("error", None)
+            _send["response_text"] = ""
+            # Don't render an empty assistant bubble for this — pop the assistant message
+            # we added (talking_initiation places a user [talking_mode] prompt but
+            # the assistant response is empty/errored).
+            try:
+                with conv_lock:
+                    # The most recent message we added was the talking_init user prompt.
+                    # If the next entry would be an empty assistant, the dedup logic
+                    # would have already pruned it. Pop the [talking_mode] user prompt
+                    # so the conversation looks like it never happened.
+                    if conversation and conversation[-1].get("role") == "user":
+                        last = conversation[-1].get("content", "")
+                        if isinstance(last, str) and last.startswith("[talking_mode]"):
+                            conversation.pop()
+                            _persist_conversation()
+            except Exception:
+                pass
         broadcast("auto_stream_end" if _autonomous else "stream_end", _send)
         # In talking mode, schedule Elan's self-initiation if the user goes quiet
         # Only schedule self-initiation after real user exchanges, not after self-initiations
         if _talking_mode and not state.get("error") and not _talking_initiation:
             _schedule_talking_initiation(model_id, eyes_open)
     except Exception as e:
-        # Guarantee the client always gets unlocked
-        broadcast("stream_end", {"final_emotion": "error", "response_text": "",
-                                  "error": str(e), "emotion_history": [], "session_arc": []})
+        # Guarantee the client always gets unlocked.
+        # Suppress error display for self-initiations (same reasoning).
+        if _talking_initiation:
+            print(f"[talking_init/auto] swallowed exception: {e}", flush=True)
+            broadcast("stream_end", {"final_emotion": "neutral", "response_text": "",
+                                      "emotion_history": [], "session_arc": []})
+        else:
+            broadcast("stream_end", {"final_emotion": "error", "response_text": "",
+                                      "error": str(e), "emotion_history": [], "session_arc": []})
 
 
 
