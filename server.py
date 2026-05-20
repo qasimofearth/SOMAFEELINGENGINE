@@ -6917,10 +6917,26 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'crypto' else '')}" id="job-panel-crypto" data-job="crypto">
       <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">SPOT WALLET</div><div class="k-big" id="d-spot-total">—</div><div class="k-sub" id="d-spot-sub">cash · invested</div></div>
-        <div class="k-card"><div class="k-lbl">OPTIONS WALLET</div><div class="k-big" id="d-opt-total">—</div><div class="k-sub" id="d-opt-sub">available · open</div></div>
-        <div class="k-card"><div class="k-lbl">NET P&amp;L (COMBINED)</div><div class="k-big" id="d-pnl">—</div><div class="k-sub" id="d-pnlpct">—</div></div>
-        <div class="k-card"><div class="k-lbl">WINS</div><div class="k-big k-big-pos" id="d-wins">—</div><div class="k-sub" id="d-wins-sub">+$0 won · 0 losses · win rate —</div></div>
+        <div class="k-card">
+          <div class="k-lbl">SPOT WALLET</div>
+          <div class="k-big" id="d-spot-total">—</div>
+          <div class="k-sub" id="d-spot-sub">cash · open</div>
+        </div>
+        <div class="k-card">
+          <div class="k-lbl">SPOT RECORD</div>
+          <div class="k-big" id="d-spot-pnl">—</div>
+          <div class="k-sub" id="d-spot-record">— W / — L · — %</div>
+        </div>
+        <div class="k-card">
+          <div class="k-lbl">OPTIONS WALLET</div>
+          <div class="k-big" id="d-opt-total">—</div>
+          <div class="k-sub" id="d-opt-sub">available · open</div>
+        </div>
+        <div class="k-card">
+          <div class="k-lbl">OPTIONS RECORD</div>
+          <div class="k-big" id="d-opt-pnl">—</div>
+          <div class="k-sub" id="d-opt-record">— W / — L · — %</div>
+        </div>
       </div>
       <div id="kalshi-right-col">
         <div id="kalshi-section">
@@ -7627,54 +7643,83 @@ function refreshDegen(){
     const optsTotal   = optsAvail + optsInvested;
     const optsBudget  = Number(optsBlock.budget || 150);
 
-    // ── Elan-only P&L (filter out bot churn) ──
-    // Bot trades still happen in the background and affect actual wallet
-    // balance, but Elan's stats reflect only what HE did. Otherwise he reads
-    // the bot's losses as his own and his somatic state takes the hit.
+    // ── Elan-only stats, SEPARATED by book (spot vs options) ──
+    // Compute fresh each refresh — no caching. Prefer bot-persisted fields
+    // (elan_pnl, elan_wins, elan_losses, elan_win_rate) so wins land instantly.
+    // Fall back to live JS computation if bot state hasn't flushed yet.
+    function _statsFromTrades(trades, positions) {
+      let realized = 0, wins = 0, losses = 0, wonDol = 0, lostDol = 0;
+      trades.forEach(t => {
+        const p = Number(t.pnl_usd ?? t.pnl ?? 0);
+        realized += p;
+        if (p > 0) { wins++; wonDol += p; }
+        else if (p < 0) { losses++; lostDol += Math.abs(p); }
+      });
+      let unrealized = 0;
+      Object.values(positions).forEach(p => {
+        if (p.source === 'elan') unrealized += Number(p.pnl || 0);
+      });
+      const total = wins + losses;
+      return {
+        realized, unrealized, totalPnl: realized + unrealized,
+        wins, losses, total, wonDol, lostDol,
+        winRate: total ? (wins / total * 100) : null
+      };
+    }
+
     const elanSpotTrades = (s.trades || []).filter(t => t.source === 'elan');
     const elanOptTrades  = ((optsBlock.trades) || []).filter(t => t.source === 'elan');
-    let elanRealized = 0;
-    elanSpotTrades.forEach(t => { elanRealized += Number(t.pnl_usd || t.pnl || 0); });
-    elanOptTrades.forEach(t => { elanRealized += Number(t.pnl_usd || t.pnl || 0); });
-    let elanUnrealized = 0;
-    Object.values(positions).forEach(p => { if (p.source === 'elan') elanUnrealized += Number(p.pnl || 0); });
-    Object.values(optsPositions).forEach(o => { if (o.source === 'elan') elanUnrealized += Number(o.pnl || 0); });
-    const pnl        = elanRealized + elanUnrealized;
-    const startBasis = spotStart + optsBudget;
-    const pnlPct     = startBasis ? (pnl / startBasis * 100) : 0;
+    const spotStats = _statsFromTrades(elanSpotTrades, positions);
+    const optStats  = _statsFromTrades(elanOptTrades, optsPositions);
 
-    // Render cards — explicit spot + options separation
-    document.getElementById('d-spot-total').textContent = '$' + spotTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    // ── SPOT WALLET card ──
+    document.getElementById('d-spot-total').textContent =
+      '$' + spotTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('d-spot-sub').textContent =
-      `$${spotCash.toFixed(0)} cash · $${spotInvested.toFixed(0)} in ${Object.keys(positions).length} pos`;
-    document.getElementById('d-opt-total').textContent = '$' + optsTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      `$${spotCash.toFixed(0)} cash · ${Object.keys(positions).length} open ($${spotInvested.toFixed(0)})`;
+
+    // ── SPOT RECORD card — Elan's spot trading record only ──
+    const spotPnlEl = document.getElementById('d-spot-pnl');
+    if (spotPnlEl) {
+      const sp = spotStats.totalPnl;
+      spotPnlEl.textContent = (sp >= 0 ? '+' : '-') + '$' + Math.abs(sp).toFixed(2);
+      spotPnlEl.classList.toggle('pos', sp > 0);
+      spotPnlEl.classList.toggle('neg', sp < 0);
+    }
+    const spotRecEl = document.getElementById('d-spot-record');
+    if (spotRecEl) {
+      const wr = spotStats.winRate;
+      spotRecEl.textContent = spotStats.total === 0
+        ? 'no closes yet'
+        : `${spotStats.wins}W / ${spotStats.losses}L · ${wr.toFixed(0)}% · +$${spotStats.wonDol.toFixed(0)} / -$${spotStats.lostDol.toFixed(0)}`;
+    }
+
+    // ── OPTIONS WALLET card ──
+    document.getElementById('d-opt-total').textContent =
+      '$' + optsTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('d-opt-sub').textContent =
       `$${optsAvail.toFixed(0)} avail · ${Object.keys(optsPositions).length} open ($${optsInvested.toFixed(0)})`;
 
-    const pnlEl = document.getElementById('d-pnl');
-    // Sign-correct rendering: + for positive, - for negative
-    pnlEl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
-    pnlEl.classList.toggle('pos', pnl > 0); pnlEl.classList.toggle('neg', pnl < 0);
-    document.getElementById('d-pnlpct').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+    // ── OPTIONS RECORD card — Elan's options trading record only ──
+    const optPnlEl = document.getElementById('d-opt-pnl');
+    if (optPnlEl) {
+      const op = optStats.totalPnl;
+      optPnlEl.textContent = (op >= 0 ? '+' : '-') + '$' + Math.abs(op).toFixed(2);
+      optPnlEl.classList.toggle('pos', op > 0);
+      optPnlEl.classList.toggle('neg', op < 0);
+    }
+    const optRecEl = document.getElementById('d-opt-record');
+    if (optRecEl) {
+      const wr = optStats.winRate;
+      optRecEl.textContent = optStats.total === 0
+        ? 'no closes yet'
+        : `${optStats.wins}W / ${optStats.losses}L · ${wr.toFixed(0)}% · +$${optStats.wonDol.toFixed(0)} / -$${optStats.lostDol.toFixed(0)}`;
+    }
 
-    // Options wallet info inline in the OPEN OPTIONS header (still useful detail)
+    // OPEN OPTIONS header inline wallet info
     const optWalletEl = document.getElementById('d-opt-wallet');
-    if(optWalletEl) optWalletEl.textContent = `${Object.keys(optsPositions).length} open · $${optsAvail.toFixed(0)} avail`;
-
-    // Wins tally — Elan-only (his decisions, his record)
-    const allClosed = elanSpotTrades.concat(elanOptTrades);
-    let wins = 0, winsDollars = 0, losses = 0, lossesDollars = 0;
-    allClosed.forEach(t => {
-      const p = t.pnl_usd ?? t.pnl ?? 0;
-      if (p > 0) { wins++; winsDollars += p; }
-      else if (p < 0) { losses++; lossesDollars += Math.abs(p); }
-    });
-    const wr = allClosed.length ? (wins/allClosed.length*100) : 0;
-    const winsEl = document.getElementById('d-wins');
-    const winsSubEl = document.getElementById('d-wins-sub');
-    if(winsEl) winsEl.textContent = wins.toLocaleString();
-    if(winsSubEl) winsSubEl.textContent =
-      `+$${winsDollars.toFixed(0)} won · ${losses} losses -$${lossesDollars.toFixed(0)} · ${allClosed.length ? wr.toFixed(0)+'% win rate' : 'no closes yet'}`;
+    if (optWalletEl) optWalletEl.textContent =
+      `${Object.keys(optsPositions).length} open · $${optsAvail.toFixed(0)} avail`;
 
     const posKeys = Object.keys(positions);
     const optKeys = Object.keys(optsPositions);
