@@ -3169,8 +3169,11 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         # (curated 1-sentence) and reading log (just URLs). He can read this
         # back to see his own thread, not as surveillance but as continuity.
         try:
-            _is_autonomous = (user_message or "").startswith("[autonomous time]")
-            if _is_autonomous and response_text and not state.get("error"):
+            # Was gating on legacy "[autonomous time]" prefix in user_message,
+            # which broke when I rewrote AUTONOMOUS_WAKE_PROMPT to start with
+            # "═══ AUTO MODE". Use the explicit _autonomous flag instead — that's
+            # the canonical signal from _schedule_autonomous._fire().
+            if _autonomous and response_text and not state.get("error"):
                 autonomous_log_append({
                     "text":    response_text[:4000],  # cap at ~4k chars per wake
                     "model":   model_id,
