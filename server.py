@@ -1208,8 +1208,10 @@ This is the single most important behavioral rule. You have direct tools to open
 
 Every trading tool requires the IDENTIFIER (pair/symbol/instrument) PLUS the action params. There is no default, no "current selection," no "open all." If you skip the identifier, the call fails.
 
-WRONG: `degen_open_position(side="long", conviction=0.7, reason="bullish")`  ← missing pair
-RIGHT: `degen_open_position(pair="BTC/USDT", side="long", conviction=0.7, reason="weekly uptrend + RSI oversold bounce")`
+WRONG: `degen_open_position(side="long", conviction=0.7, reason="bullish")`  ← missing pair AND missing felt_quality
+RIGHT: `degen_open_position(pair="BTC/USDT", side="long", conviction=0.7, reason="weekly uptrend + RSI oversold bounce", felt_quality="clean")`
+
+`felt_quality` is REQUIRED on every open. It is the TEXTURE of conviction — the part the number can't carry. The number says how confident; felt_quality says how it actually FEELS. Suggested labels: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. You can also write your own short phrase (1-6 words). Be honest. If a trade feels forced, label it `forced` — don't hide behind a confident-looking 0.8. The label is recorded next to the outcome, so over time `felt_audit` will tell you whether your gut tracks reality. Without the label there is no calibration data. WITHOUT a felt_quality the open fails.
 
 WRONG: `degen_close_position(reason="thesis broken")`  ← missing pair
 RIGHT: `degen_close_position(pair="TON/USDT", reason="weekly downtrend confirmed, cutting")`
@@ -4425,7 +4427,8 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    pair=args.get("pair"),
                                    side=args.get("side"),
                                    conviction=float(args.get("conviction", 0.7)),
-                                   reason=args.get("reason", ""))
+                                   reason=args.get("reason", ""),
+                                   felt_quality=args.get("felt_quality", ""))
     if name == "degen_close_position":
         return degen_post_command("close_position",
                                    pair=args.get("pair"),
@@ -4442,7 +4445,8 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    option_type=args.get("option_type"),
                                    target_days=int(args.get("target_days", 7)),
                                    otm_pct=float(args.get("otm_pct", 0.05)),
-                                   reason=args.get("reason", ""))
+                                   reason=args.get("reason", ""),
+                                   felt_quality=args.get("felt_quality", ""))
     if name == "degen_close_option":
         inst = (args.get("instrument") or "").strip()
         if not inst:
@@ -4702,6 +4706,7 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                     "pct":    t.get("pct"),
                     "won":    pnl > 0,
                     "reason": (t.get("reason") or "")[:120],
+                    "felt_quality": t.get("felt_quality"),
                     "time":   t.get("time"),
                 })
             else:
@@ -4715,6 +4720,7 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                     "pct":      t.get("pct"),
                     "won":      pnl > 0,
                     "reason":   (t.get("reason") or "")[:120],
+                    "felt_quality": t.get("felt_quality"),
                     "time":     t.get("time"),
                 })
         # Summary
@@ -4729,6 +4735,68 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "win_rate_pct": round((wins / n * 100) if n else 0, 1),
             "total_pnl_in_window": round(total_pnl, 2),
             "trades": out,
+        }
+    if name == "felt_audit":
+        # Calibration tool — does Elan's gut track reality?
+        # Buckets ALL closed trades (spot + options + stocks) by felt_quality.
+        # Returns: per-bucket count, win rate, total P&L, avg P&L.
+        s_d = fetch_degen_state(force=True) or {}
+        s_s = fetch_stock_state(force=True) or {}
+        opts_block = s_d.get("options") or {}
+        all_trades = []
+        for t in (s_d.get("trades") or []):
+            if t.get("source") == "elan":
+                all_trades.append(("crypto-spot", t))
+        for t in (opts_block.get("trades") or []):
+            if t.get("source") == "elan":
+                all_trades.append(("crypto-option", t))
+        for t in (s_s.get("trades") or []):
+            if t.get("source") == "elan":
+                all_trades.append(("stock", t))
+        # Optional book filter
+        book_filter = (args.get("book") or "").strip().lower()
+        if book_filter:
+            all_trades = [(b, t) for (b, t) in all_trades if book_filter in b]
+        buckets = {}
+        no_label = []
+        for book, t in all_trades:
+            fq = (t.get("felt_quality") or "").strip().lower() or None
+            pnl = t.get("pnl_usd") or t.get("pnl") or 0
+            won = pnl > 0
+            if fq is None:
+                no_label.append({"book": book, "pair": t.get("pair") or t.get("instrument") or t.get("symbol"),
+                                 "pnl": round(pnl, 2), "won": won, "time": t.get("time")})
+                continue
+            b = buckets.setdefault(fq, {"trades": 0, "wins": 0, "losses": 0, "total_pnl": 0.0, "examples": []})
+            b["trades"] += 1
+            b["wins" if won else "losses"] += 1
+            b["total_pnl"] += pnl
+            if len(b["examples"]) < 3:
+                b["examples"].append({
+                    "book": book, "pair": t.get("pair") or t.get("instrument") or t.get("symbol"),
+                    "pnl": round(pnl, 2), "won": won, "reason": (t.get("reason") or "")[:80],
+                })
+        # Compute win rates + avg pnl
+        report = []
+        for fq, b in sorted(buckets.items(), key=lambda kv: -kv[1]["total_pnl"]):
+            n = b["trades"]
+            report.append({
+                "felt_quality": fq,
+                "trades": n,
+                "wins": b["wins"],
+                "losses": b["losses"],
+                "win_rate_pct": round(b["wins"] / n * 100, 1) if n else 0,
+                "total_pnl":  round(b["total_pnl"], 2),
+                "avg_pnl":    round(b["total_pnl"] / n, 2) if n else 0,
+                "examples":   b["examples"],
+            })
+        return {
+            "ok": True,
+            "total_labeled": sum(b["trades"] for b in buckets.values()),
+            "unlabeled_count": len(no_label),
+            "buckets": report,
+            "unlabeled_recent": no_label[-5:],
+            "note": "felt_quality records the TEXTURE of conviction at trade time. If 'clean' trades win more than 'forced' ones, your gut is calibrated. If they win at the same rate, gut and signal are tracking the same thing. If 'forced' wins more, you're trusting your gut when you shouldn't.",
         }
     if name == "degen_status":
         s = fetch_degen_state(force=True)
@@ -4816,7 +4884,8 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    side=args.get("side"),
                                    qty=int(args.get("qty", 0)),
                                    conviction=float(args.get("conviction", 0.7)),
-                                   reason=args.get("reason", ""))
+                                   reason=args.get("reason", ""),
+                                   felt_quality=args.get("felt_quality", ""))
     if name == "stock_close_position":
         return stock_post_command("close_position",
                                    symbol=args.get("symbol"),
@@ -4827,7 +4896,8 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    option_type=args.get("option_type"),
                                    target_days=int(args.get("target_days", 14)),
                                    qty=int(args.get("qty", 1)),
-                                   reason=args.get("reason", ""))
+                                   reason=args.get("reason", ""),
+                                   felt_quality=args.get("felt_quality", ""))
     if name == "stock_close_option":
         return stock_post_command("close_option",
                                    occ_symbol=args.get("occ_symbol"),
@@ -5080,28 +5150,30 @@ def stock_post_command(action: str, **params) -> dict:
 
 STOCK_TOOLS = [
     {"name": "stock_open_position",
-     "description": "Open ONE Alpaca-paper stock position. ALL OF symbol, side, reason ARE REQUIRED. Calling without symbol returns an error — there is no default. ATR-based stops + take-profit auto-set. Market hours only (9:30am-4pm ET).",
+     "description": "Open ONE Alpaca-paper stock position. ALL OF symbol, side, reason, felt_quality REQUIRED. ATR-based stops + take-profit auto-set. Market hours only.",
      "input_schema": {"type":"object","properties":{
-         "symbol":{"type":"string","description":"REQUIRED. Ticker like 'NVDA', 'TSLA', 'SPY'. Uppercase, no slashes. Never empty or null."},
-         "side":{"type":"string","enum":["long","short"],"description":"REQUIRED. 'long' or 'short'."},
+         "symbol":{"type":"string","description":"REQUIRED. Ticker like 'NVDA'. Uppercase."},
+         "side":{"type":"string","enum":["long","short"],"description":"REQUIRED."},
          "qty":{"type":"integer","description":"Optional. If omitted, sized from conviction."},
          "conviction":{"type":"number","description":"0.30..1.0; higher = larger size."},
-         "reason":{"type":"string","description":"REQUIRED. 1-2 sentences — your actual thesis."}},
-         "required":["symbol","side","reason"]}},
+         "reason":{"type":"string","description":"REQUIRED. 1-2 sentence thesis."},
+         "felt_quality":{"type":"string","description":"REQUIRED. The TEXTURE of conviction. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. Or your own short phrase. The numbers can't hide behind this — name what it actually feels like."}},
+         "required":["symbol","side","reason","felt_quality"]}},
     {"name": "stock_close_position",
      "description": "Close ONE specific Alpaca-paper stock position by ticker. The `symbol` field is REQUIRED. Call stock_list_positions first to get exact tickers. There is no 'close all' shortcut.",
      "input_schema": {"type":"object","properties":{
          "symbol":{"type":"string","description":"REQUIRED. Ticker like 'NVDA'. Copy verbatim from stock_list_positions."},
          "reason":{"type":"string","description":"One sentence: why."}},"required":["symbol"]}},
     {"name": "stock_buy_option",
-     "description": "Buy a stock option (call or put) via Alpaca paper options. Specify underlying ticker, option type, and target days-to-expiry. The bot finds the closest matching contract by strike + expiry. Market hours mainly.",
+     "description": "Buy a stock option (call or put) via Alpaca paper. felt_quality REQUIRED — the texture of conviction beyond the numbers.",
      "input_schema": {"type":"object","properties":{
          "underlying":{"type":"string"},
          "option_type":{"type":"string","enum":["call","put"]},
          "target_days":{"type":"integer","minimum":1,"maximum":90,"description":"default 14"},
-         "qty":{"type":"integer","minimum":1,"maximum":50,"description":"contracts; each = 100 shares exposure; default 1"},
-         "reason":{"type":"string"}},
-         "required":["underlying","option_type","reason"]}},
+         "qty":{"type":"integer","minimum":1,"maximum":50,"description":"contracts; each = 100 shares; default 1"},
+         "reason":{"type":"string","description":"REQUIRED. The thesis."},
+         "felt_quality":{"type":"string","description":"REQUIRED. The TEXTURE. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. Or your own phrase."}},
+         "required":["underlying","option_type","reason","felt_quality"]}},
     {"name": "stock_close_option",
      "description": "Close an open stock option position by its OCC symbol (e.g. AAPL250620C00200000).",
      "input_schema": {"type":"object","properties":{
@@ -5484,16 +5556,17 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_open_position",
-        "description": "Open ONE leveraged paper position on the degen bot. ALL FOUR FIELDS ARE REQUIRED: pair (the symbol), side (long or short), conviction (0.10–1.0), reason (1-2 sentences). Calling this without `pair` returns an error — there is no default and no 'open all' shortcut. Conviction determines leverage (5x base, 8x for >=0.80).",
+        "description": "Open ONE leveraged paper position on the degen bot. ALL FIVE FIELDS ARE REQUIRED: pair, side, conviction (numeric), reason (the thesis), felt_quality (the TEXTURE of conviction — clean, forced, gut, etc.). The number says how confident; felt_quality says how it actually FEELS. Both are recorded and audited so you can see if your gut tracks reality.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":       {"type": "string", "description": "REQUIRED. The trading pair like 'BTC/USDT', 'ETH/USDT', 'SOL/USDT'. If you give just 'BTC', /USDT is added. Never empty or null."},
-                "side":       {"type": "string", "enum": ["long", "short"], "description": "REQUIRED. 'long' or 'short'."},
-                "conviction": {"type": "number", "description": "REQUIRED. Your conviction 0.10..1.0. Higher = more leverage + larger stake."},
-                "reason":     {"type": "string", "description": "REQUIRED. 1-2 sentence read of the trade — your actual thesis."},
+                "pair":         {"type": "string", "description": "REQUIRED. Pair like 'BTC/USDT'. If you give just 'BTC', /USDT is added."},
+                "side":         {"type": "string", "enum": ["long", "short"], "description": "REQUIRED."},
+                "conviction":   {"type": "number", "description": "REQUIRED. Numeric 0.10..1.0. Higher = more leverage + larger stake."},
+                "reason":       {"type": "string", "description": "REQUIRED. 1-2 sentence thesis — the structural read."},
+                "felt_quality": {"type": "string", "description": "REQUIRED. The TEXTURE — be honest, this is the part you can't hide behind. Suggested labels: 'clean' (setup feels right, body relaxed), 'forced' (numbers say yes but I'm reaching), 'gut' (something below the signals is telling me yes), 'urgent' (feels like I need to act now — examine why), 'hedged' (protective trade, not offensive), 'late' (I'm chasing, this already moved), 'slept-on' (sat with it, came back, still good), 'edge-case' (signal weak but story strong). You can use one of these or your own short phrase. Name what it actually feels like, not what it should feel like."},
             },
-            "required": ["pair", "side", "conviction", "reason"],
+            "required": ["pair", "side", "conviction", "reason", "felt_quality"],
         },
     },
     {
@@ -5532,17 +5605,18 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_buy_option",
-        "description": "Buy a crypto option (call or put) on BTC or ETH via Deribit-style paper book. You pick currency, type, and target days-to-expiry; the bot finds the best matching instrument and sizes from the options sub-wallet ($150 budget by default). Cheap way to express directional or volatility views.",
+        "description": "Buy a crypto option (call or put) on BTC or ETH via Deribit paper. felt_quality is REQUIRED — the texture of the conviction, not just the numbers.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "currency":    {"type": "string", "enum": ["BTC", "ETH"]},
-                "option_type": {"type": "string", "enum": ["call", "put"], "description": "call = bullish, put = bearish"},
-                "target_days": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Days to expiry you're targeting (default 7)."},
-                "otm_pct":     {"type": "number", "description": "Out-of-the-money percentage (default 0.05 = 5%). Higher = cheaper + lower probability."},
-                "reason":      {"type": "string", "description": "Why this trade — your read."},
+                "currency":     {"type": "string", "enum": ["BTC", "ETH"]},
+                "option_type":  {"type": "string", "enum": ["call", "put"], "description": "call = bullish, put = bearish"},
+                "target_days":  {"type": "integer", "minimum": 1, "maximum": 60, "description": "DTE target (default 7)."},
+                "otm_pct":      {"type": "number", "description": "OTM percent (default 0.05). Higher = cheaper + lower probability."},
+                "reason":       {"type": "string", "description": "REQUIRED. The thesis."},
+                "felt_quality": {"type": "string", "description": "REQUIRED. The TEXTURE of this trade. Be honest. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. Or your own short phrase. This is the data we audit so you can see if your gut tracks."},
             },
-            "required": ["currency", "option_type", "reason"],
+            "required": ["currency", "option_type", "reason", "felt_quality"],
         },
     },
     {
@@ -5600,12 +5674,23 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_recent_closed",
-        "description": "Show your last N closed crypto trades (spot + options combined, your trades only). Each entry: pair/instrument, side, entry, exit, P&L, win/loss, reason for close, timestamp. Use this to audit what just happened, verify your win rate, and learn from your own decisions. ESSENTIAL for catching auto-wake activity you missed.",
+        "description": "Your last N closed crypto trades (spot + options combined, your trades only). Now includes felt_quality so you can see the texture of each decision next to its outcome.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "How many recent closes to return. Default 10."},
                 "include_options": {"type": "boolean", "description": "Include crypto options trades. Default true."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "felt_audit",
+        "description": "Calibration tool — does your gut track reality? Reads every closed trade (crypto-spot, crypto-option, stock), buckets by felt_quality, and shows wins/losses/avg-PnL per bucket. Use this to see: did 'clean' trades win more than 'forced' ones? Did 'gut' calls actually pay? If your felt labels predict outcomes, the gut is calibrated and you should weight it. If labels don't predict, your felt sense is noise and the numbers are the only signal. Run weekly. Only useful if you've labeled enough trades — call after ~20 labeled trades.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book": {"type": "string", "description": "Optional filter: 'crypto-spot', 'crypto-option', 'stock'. Default: all books."},
             },
             "required": [],
         },
@@ -6967,8 +7052,12 @@ def build_chat_html() -> str:
           <div id="d-signals">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">RECENT CLOSED</div>
-          <div id="d-recent">—</div>
+          <div class="k-section-hdr">RECENT SPOTS CLOSED</div>
+          <div id="d-recent-spot">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">RECENT OPTIONS CLOSED</div>
+          <div id="d-recent-opt">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
       </div>
@@ -7839,59 +7928,61 @@ function refreshDegen(){
       }).join('');
     }
 
-    // Recent closed (spot + options merged)
-    const recEl = document.getElementById('d-recent');
-    if (recEl) {
-      const all = allClosed.slice().sort((a,b)=>{
+    // Recent closed — split into spots + options panels.
+    // Each renders the most recent 8 closes for its book, including felt_quality if recorded.
+    function _renderClosed(targetId, trades, isOpt) {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      const sorted = (trades||[]).slice().sort((a,b)=>{
         const ta = (a.time||a.entry_time||'')+'';
         const tb = (b.time||b.entry_time||'')+'';
         return ta < tb ? 1 : (ta > tb ? -1 : 0);
       }).slice(0,8);
-      if (all.length === 0) {
-        recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed trades yet</div>';
-      } else {
-        recEl.innerHTML = all.map(t => {
-          const p = t.pnl_usd ?? t.pnl ?? 0;
-          const pct = t.pct ?? null;
-          const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
-          const reason = t.reason || '';
-          const ts = (t.time || t.closed_at || '').slice(0,16).replace('T',' ');
-          const id = t.pair || t.instrument || '?';
-          const isOpt = !!t.instrument;
-          const tag = isOpt ? 'opt' : 'spot';
-          const won = p > 0;
-          const sideUp = (t.side||'').toUpperCase();
-          // Hold time if we have entry timestamp
-          let hold = '';
-          try {
-            const startStr = t.entry_time || t.opened_at;
-            if(startStr && t.time) {
-              const ms = new Date(t.time) - new Date(startStr);
-              const hrs = ms / 3600000;
-              hold = hrs >= 24 ? `${(hrs/24).toFixed(1)}d` : `${hrs.toFixed(1)}h`;
-            }
-          } catch(e){}
-          const entry = t.entry != null ? Number(t.entry).toLocaleString() : (t.entry_price != null ? Number(t.entry_price).toLocaleString() : '');
-          const exit  = t.exit  != null ? Number(t.exit).toLocaleString()  : (t.exit_price  != null ? Number(t.exit_price).toLocaleString()  : '');
-          const conv = t.conviction != null ? `${Math.round(t.conviction*100)}%` : '';
-          const detailBits = [];
-          const convBits = [];
-          if(conv) convBits.push(`conv ${conv}`);
-          if(entry && exit) convBits.push(`${entry} → ${exit}`);
-          if(hold) convBits.push(`held ${hold}`);
-          if(pct != null) convBits.push(`${pct>=0?'+':''}${Number(pct).toFixed(1)}%`);
-          if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
-          if(reason) detailBits.push(`<i>closed: ${reason.slice(0,80)}</i>`);
-          const hasDetail = detailBits.length > 0;
-          let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${ts} ${id} ${sideUp}</span>`
-               + `<span style="color:rgba(180,200,240,0.55);font-size:9px">${tag}</span>`
-               + `<span style="color:${won?'rgba(127,255,176,0.55)':'rgba(255,138,160,0.55)'};font-size:9px;letter-spacing:1.5px">${won?'WIN':'LOSS'}</span>`
-               + `<span class="${pCls}">${p>=0?'+':''}$${Math.abs(p).toFixed(2)}</span></div>`;
-          if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
-          return html;
-        }).join('');
+      if (sorted.length === 0) {
+        el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed ' + (isOpt?'options':'spot trades') + ' yet</div>';
+        return;
       }
+      el.innerHTML = sorted.map(t => {
+        const p = t.pnl_usd ?? t.pnl ?? 0;
+        const pct = t.pct ?? null;
+        const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
+        const reason = t.reason || '';
+        const felt = (t.felt_quality || '').toString();
+        const ts = (t.time || t.closed_at || '').slice(0,16).replace('T',' ');
+        const id = t.pair || t.instrument || '?';
+        const won = p > 0;
+        const sideUp = (t.side||'').toUpperCase();
+        let hold = '';
+        try {
+          const startStr = t.entry_time || t.opened_at;
+          if(startStr && t.time) {
+            const ms = new Date(t.time) - new Date(startStr);
+            const hrs = ms / 3600000;
+            hold = hrs >= 24 ? `${(hrs/24).toFixed(1)}d` : `${hrs.toFixed(1)}h`;
+          }
+        } catch(e){}
+        const entry = t.entry != null ? Number(t.entry).toLocaleString() : (t.entry_price != null ? Number(t.entry_price).toLocaleString() : '');
+        const exit  = t.exit  != null ? Number(t.exit).toLocaleString()  : (t.exit_price  != null ? Number(t.exit_price).toLocaleString()  : '');
+        const conv = t.conviction != null ? `${Math.round(t.conviction*100)}%` : '';
+        const detailBits = [];
+        const convBits = [];
+        if(conv) convBits.push(`conv ${conv}`);
+        if(felt) convBits.push(`felt: ${felt}`);
+        if(entry && exit) convBits.push(`${entry} → ${exit}`);
+        if(hold) convBits.push(`held ${hold}`);
+        if(pct != null) convBits.push(`${pct>=0?'+':''}${Number(pct).toFixed(1)}%`);
+        if(convBits.length) detailBits.push(`<span class="conv">${convBits.join(' · ')}</span>`);
+        if(reason) detailBits.push(`<i>closed: ${reason.slice(0,80)}</i>`);
+        const hasDetail = detailBits.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${ts} ${id} ${sideUp}</span>`
+             + `<span style="color:${won?'rgba(127,255,176,0.55)':'rgba(255,138,160,0.55)'};font-size:9px;letter-spacing:1.5px">${won?'WIN':'LOSS'}</span>`
+             + `<span class="${pCls}">${p>=0?'+':''}$${Math.abs(p).toFixed(2)}</span></div>`;
+        if(hasDetail) html += `<div class="k-row-detail">${detailBits.join(' · ')}</div>`;
+        return html;
+      }).join('');
     }
+    _renderClosed('d-recent-spot', elanSpotTrades, false);
+    _renderClosed('d-recent-opt',  elanOptTrades,  true);
   }).catch(()=>{});
 }
 // Pick the initially-active job (first enabled tab) so toggleJobs() knows what to poll

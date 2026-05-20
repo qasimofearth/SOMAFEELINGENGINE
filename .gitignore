@@ -19,3 +19,4 @@ feeling_output/
 # Logs
 *.log
 /tmp/
+.vercel
