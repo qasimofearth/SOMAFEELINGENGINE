@@ -6228,6 +6228,24 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers(); return
             self.send_json({"actions": fetch_degen_actions(),
                             "trading_enabled": _DEGEN_TRADING_ENABLED})
+        elif path == "/debug/notebook-shape":
+            # Sample-shape debug. Auth via existing _check_auth (already passed).
+            # Returns first-entry keys + count by classified domain, no full content.
+            try:
+                raw = notebook_read(limit=500)  # unfiltered
+                sample = raw[-1] if raw else None
+                world_n = sum(1 for e in raw if _classify_domain(e) == "world")
+                lib_n   = sum(1 for e in raw if _classify_domain(e) == "library")
+                self.send_json({
+                    "total": len(raw),
+                    "world": world_n,
+                    "library": lib_n,
+                    "last_entry_keys": list(sample.keys()) if isinstance(sample, dict) else None,
+                    "last_entry_sample": {k: (str(v)[:120] if not isinstance(v,(list,dict,int,float,bool,type(None))) else v) for k,v in (sample.items() if isinstance(sample,dict) else [])},
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)})
+            return
         elif path == "/watch/notebook":
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -7473,8 +7491,11 @@ function refreshSource(){
 function refreshWatch(){
   // WATCH = the world RIGHT NOW (news + reading log + notebook of world-knowledge).
   // SOURCE handles library/deep-text notes; THREAD handles interior journal.
-  fetch('/watch/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    const entries = (d && d.entries) || [];
+  fetch('/watch/notebook',{cache:'no-store'}).then(r=>{
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(d=>{
+    const entries = ((d && d.entries) || []).filter(e => e && typeof e === 'object');
     const cntEl = document.getElementById('w-entries');
     if(cntEl) cntEl.textContent = entries.length;
     const nb = document.getElementById('w-notebook');
@@ -7487,26 +7508,35 @@ function refreshWatch(){
     if(recent[0]){
       const latestEl = document.getElementById('w-latest');
       const latestWhen = document.getElementById('w-latest-when');
-      if(latestEl) latestEl.textContent = (recent[0].topic||'(no topic)').slice(0,18);
-      if(latestWhen) latestWhen.textContent = (recent[0].ts||'').slice(0,16).replace('T',' ');
+      const topic0 = String(recent[0].topic||'(no topic)');
+      const ts0 = String(recent[0].ts||'');
+      if(latestEl) latestEl.textContent = topic0.slice(0,18);
+      if(latestWhen) latestWhen.textContent = ts0.slice(0,16).replace('T',' ');
     }
-    const html = recent.map(e=>{
-      const ts = (e.ts||'').slice(0,16).replace('T',' ');
-      const topic = (e.topic||'(no topic)').slice(0,80);
-      const learned = (e.learned||'').slice(0,400);
-      const reflection = (e.reflection||'').slice(0,300);
-      const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
-      return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
-        + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(160,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
-        + (learned ? `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>` : '')
-        + (reflection ? `<div style="font-size:10px;color:rgba(180,200,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
-        + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
-        + `</div>`;
-    }).join('');
-    nb.innerHTML = html || '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">entries present but empty content — check notebook data</div>';
+    // Per-entry try/catch so one bad row can't blank the whole panel
+    const escapeHtml = (s) => String(s||'').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+    const rows = [];
+    for(const e of recent){
+      try {
+        const ts = String(e.ts||'').slice(0,16).replace('T',' ');
+        const topic = escapeHtml(String(e.topic||'(no topic)').slice(0,80));
+        const learned = escapeHtml(String(e.learned||'').slice(0,400));
+        const reflection = escapeHtml(String(e.reflection||'').slice(0,300));
+        const srcArr = Array.isArray(e.sources) ? e.sources : [];
+        const sources = srcArr.slice(0,3).map(u=>`<a href="${escapeHtml(u)}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
+        rows.push(`<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(160,200,255,0.7);margin-bottom:3px">${escapeHtml(ts)} · ${topic}</div>`
+          + (learned ? `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>` : '')
+          + (reflection ? `<div style="font-size:10px;color:rgba(180,200,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
+          + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
+          + `</div>`);
+      } catch(rowErr) { console.warn('skip notebook row', rowErr, e); }
+    }
+    nb.innerHTML = rows.join('') || '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">entries present but all malformed — check notebook data</div>';
   }).catch(err=>{
+    console.error('refreshWatch notebook error:', err);
     const nb = document.getElementById('w-notebook');
-    if(nb) nb.innerHTML = '<div style="color:rgba(255,160,160,0.7);font-size:11px;padding:8px 0">notebook fetch failed</div>';
+    if(nb) nb.innerHTML = '<div style="color:rgba(255,160,160,0.7);font-size:11px;padding:8px 0">notebook fetch failed — ' + String(err).slice(0,80) + '</div>';
   });
   fetch('/watch/log',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const log = (d && d.log) || [];
