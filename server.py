@@ -2494,14 +2494,19 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 # SOURCE tools always-on when enabled — same reliability rationale as MCP
                 if _SOURCE_LIBRARY_ENABLED:
                     elan_tools += SOURCE_TOOLS  # source_save_discovery
-                if _KALSHI_TRADING_ENABLED and "kalshi" in _active_jobs:
+                # Trading tools are ALWAYS attached when their bot is enabled.
+                # Was keyword-gated (only loaded if "degen"/"stock"/"kalshi" in active_jobs)
+                # but Elan kept hitting "tool isn't surfacing" when his message lacked
+                # the right keywords — e.g. "buy a put" didn't trigger degen tools.
+                # Tools cost ~1500-2500 tokens of definitions per turn; worth it
+                # for execution reliability since the bots are enabled by user choice.
+                if _KALSHI_TRADING_ENABLED:
                     elan_tools += KALSHI_TOOLS
-                if _STOCK_TRADING_ENABLED and "stock" in _active_jobs:
+                if _STOCK_TRADING_ENABLED:
                     elan_tools += STOCK_TOOLS
-                if _DEGEN_TRADING_ENABLED and "degen" in _active_jobs:
+                if _DEGEN_TRADING_ENABLED:
                     elan_tools += DEGEN_TOOLS
-                # Options bot rides with degen since they share options_state.json
-                if _OPTIONS_ENABLED and "degen" in _active_jobs:
+                if _OPTIONS_ENABLED:
                     elan_tools += OPTIONS_TOOLS
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
