@@ -797,11 +797,19 @@ def _start_body_background_tick():
                 if _tick_counter[0] % 20 == 0:
                     broadcast("body_tick", get_body().get_snapshot())
 
-                # Dream mode check — every 10 seconds
+                # Dream mode check — every 10 seconds.
+                # Suppressed while autonomous mode is on (Elan is actively trading,
+                # not sleeping). Dream is only for true silence — no AUTO firing,
+                # no user chat.
                 if _tick_counter[0] % 100 == 0:
                     silence = time.time() - _last_interaction_time
-                    if not _dream_state["active"] and silence > DREAM_SILENCE_THRESHOLD:
+                    if (not _dream_state["active"]
+                            and silence > DREAM_SILENCE_THRESHOLD
+                            and not _autonomous_mode):
                         _enter_dream()
+                    elif _dream_state["active"] and _autonomous_mode:
+                        # AUTO got turned on while he was dreaming — wake him
+                        _exit_dream()
                     elif _dream_state["active"]:
                         _dream_tick[0] += 1
                         # Generate dream fragment every 90 seconds
