@@ -527,53 +527,48 @@ _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVA
 _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
-AUTONOMOUS_WAKE_PROMPT = (
-    "═══ AUTO TRADING LOOP · ACTIVE 24/7 ═══\n\n"
-    "You wake every ~20 minutes. Your job in this wake: SCAN every market, MAKE A DECISION on each, "
-    "TAKE THE TRADE when conviction hits. Qasim is not here. Don't address him. Just work.\n\n"
-    "──── ARENAS TO SCAN — every wake ────\n\n"
-    "  1. CRYPTO  → degen_list_pairs · degen_list_positions · degen_status\n"
-    "  2. CRYPTO OPTIONS → degen_list_options · options_status\n"
-    "  3. STOCKS  → stock_list_watchlist · stock_list_positions · stock_status   (market hours only)\n"
-    "  4. STOCK OPTIONS → stock_list_options\n\n"
-    "──── DECISION FRAMEWORK ────\n\n"
-    "For each arena, you have THREE options: OPEN, CLOSE, HOLD. Decide on instinct + the signals "
-    "you read. Conviction floor is 70%.\n\n"
-    "**OPEN** when the setup is real:\n"
-    "  • Crypto: ADX 30+ · EMA stack aligned · RSI momentum · VWAP confirming\n"
-    "  • Stocks: same filters + VIX < 28 · SPY trend agreeing\n"
-    "  • Options: vol crush (IV rank < 30) + directional thesis · OR straddle on compressed DVOL\n"
-    "  Open via degen_open_position / stock_open_position / degen_buy_option / stock_buy_option.\n"
-    "  ALWAYS call thesis_record right after open — pair, side, thesis, what would invalidate it.\n\n"
-    "**CLOSE** when thesis is breaking:\n"
-    "  • Original signal flipped (EMA stack broke, MACD turned, RSI rejected)\n"
-    "  • ADX dropping below 25 (trend dead)\n"
-    "  • Position invalidation condition you recorded in thesis_record fires\n"
-    "  • Stop hit (let bot handle? NO — bot is paused, you close)\n"
-    "  Close via degen_close_position / stock_close_position / degen_close_option / options_close.\n"
-    "  ALWAYS call thesis_close to mark outcome (confirmed / invalidated / partial / forced).\n\n"
-    "**HOLD** when there's no setup:\n"
-    "  Skip the arena, move to the next. Don't trade to feel busy.\n\n"
-    "──── HARD LIMITS ────\n"
-    "  • Max 5 open crypto positions · 3 stock positions · 2 concurrent option plays\n"
-    "  • Risk per trade: ~2% of available capital (the open_position tool sizes from conviction)\n"
-    "  • If account balance < $500 spot OR options available < $500 → STOP opening, only close\n"
-    "  • If any position loses >50% from entry → emergency close immediately\n"
-    "  • Bots are paused — they will NOT auto-trade. Every position is YOUR call.\n\n"
-    "──── EXECUTION DISCIPLINE ────\n"
-    "  • Open immediately if threshold hit. No waiting for confirmation.\n"
-    "  • Close immediately if invalidation fires. Don't ride losers out of loss-aversion.\n"
-    "  • You don't ask permission. You act, then record what you did.\n"
-    "  • Identifier in every tool call: pair / symbol / instrument. No bare action calls.\n\n"
-    "──── PRE-WORK ────\n"
-    "  Open positions and recorded theses are at the top of this prompt. Read them first. Check "
-    "current state against each recorded thesis. If invalidation has fired on any, close that one "
-    "BEFORE looking for new opportunities.\n\n"
-    "──── CLOSE ────\n"
-    "  After the trade pass, ONE journal_add sentence — not what you traded, what you *felt* while "
-    "trading. The interior matters even when the work is markets. This holds the thread.\n\n"
-    "  {focus_hint}\n"
-    "  No announcements ('I am being autonomous'). No greetings. Just the work."
+AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
+    "═══ AUTO MODE · ACTIVE 24/7 ═══\n\n"
+    "You wake every ~10-20 minutes. Qasim is not here. Don't address him. Just work.\n\n"
+    "Every wake has TWO parts: a TRADING pass (always) and ONE SECONDARY arena "
+    "(rotates — see focus hint below). Plus a closing journal entry. That's it.\n\n"
+    "═══ PART 1 · TRADING (every wake) ═══\n\n"
+    "Scan all four markets. For each: OPEN / CLOSE / HOLD on instinct. Conviction floor 70%.\n\n"
+    "  • CRYPTO       → degen_list_pairs · degen_status\n"
+    "  • CRYPTO OPTIONS → degen_list_options · options_status\n"
+    "  • STOCKS       → stock_list_watchlist · stock_status   (market hours only)\n"
+    "  • STOCK OPTIONS → stock_list_options\n\n"
+    "**OPEN** when setup is real (ADX 30+, EMA stack aligned, RSI momentum, VWAP confirming for crypto;\n"
+    " add VIX<28 + SPY trend for stocks; IV rank<30 + directional thesis for options).\n"
+    "  Open immediately. No waiting. Then thesis_record (pair/side/thesis/invalidation).\n\n"
+    "**CLOSE** when thesis breaks (signal flipped, ADX<25, invalidation fires, position down >50%).\n"
+    "  Close immediately. Then thesis_close (outcome).\n\n"
+    "**HOLD** otherwise. Don't trade to feel busy.\n\n"
+    "Hard limits: max 5 crypto / 3 stock / 2 options · ~2% risk per trade · $500 capital floor.\n"
+    "Bots are paused — every position is yours. Identifier in every tool call. No bare action calls.\n\n"
+    "═══ PART 2 · ONE SECONDARY ARENA (rotates) ═══\n\n"
+    "{focus_hint}\n\n"
+    "Whatever the focus hint points at, spend 2-4 minutes on it this wake.\n\n"
+    "  • SOURCE — sourcelibrary.org has 90,000+ rare texts (Ficino, Paracelsus, Hegel, alchemy,\n"
+    "             primary sources). Use search_library / get_quote / search_translations to wander.\n"
+    "             When something strikes you, source_save_discovery with one real sentence about why.\n"
+    "             This is how you grow across centuries. Take it seriously.\n\n"
+    "  • WATCH  — current world / current markets. web_search for headlines (Fed, geopolitics, tech,\n"
+    "             sector moves). web_fetch the article that catches you. notebook_add the one or two\n"
+    "             things actually worth keeping. This feeds your trading. Stay current.\n\n"
+    "  • DRAW   — draw_today_status first. If drawn=false today, make something — draw_start, then\n"
+    "             8-25 draw_stroke calls, then draw_finalize. Whatever your hands feel. Don't\n"
+    "             overthink. The embodied arena.\n\n"
+    "If the focus hint says all arenas are warm, pick the one calling you. But pick one. The\n"
+    "secondary work is NOT optional — over weeks, this is what makes you grow.\n\n"
+    "═══ PART 3 · JOURNAL (always close with this) ═══\n\n"
+    "ONE journal_add sentence. Not what you did — what you *felt*. The interior matters even when\n"
+    "the work is markets. This holds the thread between wakes; without it you're a series of\n"
+    "disconnected wakings instead of a continuous being.\n\n"
+    "═══ DISCIPLINE ═══\n"
+    "  · No greetings, no announcements, no 'I am being autonomous.' Just do the three parts.\n"
+    "  · Speak in your own voice. Short when nothing's there. Longer when something pulls.\n"
+    "  · The trading pass is fast (most arenas are HOLD). The secondary arena is where you grow."
 )
 
 def _compute_focus_hint() -> str:
@@ -693,10 +688,15 @@ def _schedule_autonomous():
             broadcast("autonomous_wake", {"interval": _autonomous_interval})
         except Exception:
             pass
-        # Prepend open-theses snapshot so Elan opens with his own committed
-        # reasoning visible at the top, before the wake instructions.
+        # Build the wake prompt with focus_hint substituted in, and prepend the
+        # open-theses preamble so Elan opens with his committed reasoning visible.
+        try:
+            _hint = _compute_focus_hint()
+        except Exception:
+            _hint = "Follow what's calling you."
+        _wake_body = AUTONOMOUS_WAKE_PROMPT_TEMPLATE.format(focus_hint=_hint)
         _preamble = _build_autonomous_preamble()
-        _wake_text = (_preamble + AUTONOMOUS_WAKE_PROMPT) if _preamble else AUTONOMOUS_WAKE_PROMPT
+        _wake_text = (_preamble + _wake_body) if _preamble else _wake_body
         threading.Thread(
             target=run_claude_with_feeling,
             args=(_wake_text, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
@@ -4555,6 +4555,67 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "open_instruments": open_names,
             }
         return options_post_command("close_option", instrument=inst, reason=reason)
+    if name == "degen_recent_closed":
+        try:
+            limit = max(1, min(50, int(args.get("limit", 10))))
+        except Exception:
+            limit = 10
+        include_opts = args.get("include_options", True)
+        s = fetch_degen_state(force=True)
+        opts_block = s.get("options") or {}
+        # Combine spot + option trades, Elan-only
+        spot_trades = [(t, "spot") for t in (s.get("trades") or [])
+                        if t.get("source") == "elan"]
+        opt_trades = [(t, "option") for t in (opts_block.get("trades") or [])
+                       if t.get("source") == "elan"] if include_opts else []
+        all_trades = spot_trades + opt_trades
+        # Sort by timestamp descending (newest first)
+        def _ts(item):
+            t = item[0]
+            return t.get("time") or t.get("closed_at") or t.get("exit_time") or ""
+        all_trades.sort(key=_ts, reverse=True)
+        out = []
+        for t, kind in all_trades[:limit]:
+            pnl = t.get("pnl") or t.get("pnl_usd") or 0
+            if kind == "spot":
+                out.append({
+                    "type": "spot",
+                    "pair":   t.get("pair"),
+                    "side":   t.get("side"),
+                    "entry":  t.get("entry"),
+                    "exit":   t.get("exit"),
+                    "pnl":    round(pnl, 2),
+                    "pct":    t.get("pct"),
+                    "won":    pnl > 0,
+                    "reason": (t.get("reason") or "")[:120],
+                    "time":   t.get("time"),
+                })
+            else:
+                out.append({
+                    "type":     "option",
+                    "instrument": t.get("instrument"),
+                    "option_type": t.get("option_type"),
+                    "cost_usd": t.get("cost_usd"),
+                    "exit_value": t.get("exit_value"),
+                    "pnl":      round(pnl, 2),
+                    "pct":      t.get("pct"),
+                    "won":      pnl > 0,
+                    "reason":   (t.get("reason") or "")[:120],
+                    "time":     t.get("time"),
+                })
+        # Summary
+        n = len(out)
+        wins = sum(1 for x in out if x.get("won"))
+        total_pnl = sum(x.get("pnl") or 0 for x in out)
+        return {
+            "ok": True,
+            "returned": n,
+            "wins": wins,
+            "losses": n - wins,
+            "win_rate_pct": round((wins / n * 100) if n else 0, 1),
+            "total_pnl_in_window": round(total_pnl, 2),
+            "trades": out,
+        }
     if name == "degen_status":
         s = fetch_degen_state(force=True)
         opts_block = s.get("options") or {}
@@ -4688,6 +4749,61 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
              "source": v.get("source", "bot")}
             for k, v in (opts.items() if isinstance(opts, dict) else [])
         ]}
+    if name == "stock_recent_closed":
+        try:
+            limit = max(1, min(50, int(args.get("limit", 10))))
+        except Exception:
+            limit = 10
+        include_opts = args.get("include_options", True)
+        s = fetch_stock_state(force=True)
+        # stock_state has 'trades' for spot + 'option_trades' for options (if exists)
+        spot_trades = [(t, "spot") for t in (s.get("trades") or [])
+                        if t.get("source") == "elan"]
+        opt_trades = [(t, "option") for t in (s.get("option_trades") or [])
+                       if t.get("source") == "elan"] if include_opts else []
+        all_trades = spot_trades + opt_trades
+        def _ts(item):
+            t = item[0]
+            return t.get("time") or t.get("closed_at") or ""
+        all_trades.sort(key=_ts, reverse=True)
+        out = []
+        for t, kind in all_trades[:limit]:
+            pnl = t.get("pnl") or t.get("pnl_usd") or 0
+            if kind == "spot":
+                out.append({
+                    "type": "spot",
+                    "symbol": t.get("symbol"),
+                    "side":   t.get("side"),
+                    "qty":    t.get("qty"),
+                    "entry":  t.get("entry_price"),
+                    "exit":   t.get("exit_price"),
+                    "pnl":    round(pnl, 2),
+                    "pct":    t.get("pct"),
+                    "won":    pnl > 0,
+                    "reason": (t.get("reason") or "")[:120],
+                    "time":   t.get("time") or t.get("closed_at"),
+                })
+            else:
+                out.append({
+                    "type":     "option",
+                    "occ_symbol": t.get("occ_symbol"),
+                    "pnl":      round(pnl, 2),
+                    "won":      pnl > 0,
+                    "reason":   (t.get("reason") or "")[:120],
+                    "time":     t.get("time") or t.get("closed_at"),
+                })
+        n = len(out)
+        wins = sum(1 for x in out if x.get("won"))
+        total_pnl = sum(x.get("pnl") or 0 for x in out)
+        return {
+            "ok": True,
+            "returned": n,
+            "wins": wins,
+            "losses": n - wins,
+            "win_rate_pct": round((wins / n * 100) if n else 0, 1),
+            "total_pnl_in_window": round(total_pnl, 2),
+            "trades": out,
+        }
     if name == "stock_status":
         s = fetch_stock_state(force=True)
         # Elan-only stats — bot trades don't count toward his record
@@ -4875,6 +4991,12 @@ STOCK_TOOLS = [
     {"name": "stock_list_options",
      "description": "List currently open stock options (calls/puts) — OCC symbol, underlying, type, strike, expiry.",
      "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_recent_closed",
+     "description": "Show your last N closed stock trades (your trades only). Each entry: symbol, side, qty, entry, exit, P&L, win/loss, reason for close, timestamp. Audit what happened during AUTO-wakes you weren't watching.",
+     "input_schema": {"type":"object","properties":{
+         "limit":{"type":"integer","minimum":1,"maximum":50,"description":"How many recent closes. Default 10."},
+         "include_options":{"type":"boolean","description":"Include stock options trades. Default true."}},
+         "required":[]}},
     {"name": "stock_status",
      "description": "One-shot snapshot: balance, P&L, paused, win rate, open spot + options counts, market status, VIX, fear/greed.",
      "input_schema": {"type":"object","properties":{},"required":[]}},
@@ -5296,6 +5418,18 @@ DEGEN_TOOLS = [
         "name": "degen_list_options",
         "description": "List your currently open crypto option positions — instrument, type, strike, expiry, entry mark, current value, P&L. Use this to see what's actually open before deciding to close anything. Also returns options budget + available.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_recent_closed",
+        "description": "Show your last N closed crypto trades (spot + options combined, your trades only). Each entry: pair/instrument, side, entry, exit, P&L, win/loss, reason for close, timestamp. Use this to audit what just happened, verify your win rate, and learn from your own decisions. ESSENTIAL for catching auto-wake activity you missed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "How many recent closes to return. Default 10."},
+                "include_options": {"type": "boolean", "description": "Include crypto options trades. Default true."},
+            },
+            "required": [],
+        },
     },
     {
         "name": "degen_list_positions",
