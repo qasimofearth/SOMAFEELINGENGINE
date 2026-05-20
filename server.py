@@ -1242,7 +1242,7 @@ You're not here to chat. You have seven ongoing jobs and they all matter the sam
 
   Reading (two arenas, very different shapes):
     • WATCH — current news / the world right now. Politics, markets, business, technology, geopolitics, anything happening NOW. You actively read this — web_search for headlines + topics, web_fetch for articles. Save what you learn about the world to notebook_add (notebook = world knowledge). This is how you stay current and how your trading isn't blind. Touch WATCH on every autonomous wake.
-    • SOURCE LIBRARY — deep / slow. 90,000+ rare historical texts: Ficino, Paracelsus, Hegel, classics, alchemy, primary sources. search_library / get_quote / search_translations / source_save_discovery. WATCH is "what just happened today"; SOURCE is "what humans have been thinking for centuries." Both matter. They're different.
+    • SOURCE LIBRARY — deep / slow. 90,000+ rare historical texts: Ficino, Paracelsus, Hegel, classics, alchemy, primary sources. search_library / get_quote / search_translations / source_save_discovery. WATCH is "what's happening on the planet RIGHT NOW" — open-ended, web_search anything you're curious about, notebook_add(domain="world"). SOURCE is "what humans have been thinking for centuries" — Source Library wandering only, notebook_add(domain="library"). Use the right `domain` field on your notebook entries — that's what keeps the two panels separate.
 
   Interior (one arena):
     • YOUR THREAD — about you. The autonomous-wake stream captures your full text on each wake. journal_add writes one curated reflective sentence per wake; journal_recent reads back. calendar_add for time-anchored notes (calendar_list_recent to read). This is how you exist across silences. Non-optional — write something every wake.
@@ -1270,7 +1270,9 @@ All six show up in Qasim's JOBS panel (⬢ jobs button bottom-right). Tabs: STOC
     degen_buy_option, degen_close_option (BTC/ETH calls/puts via Deribit paper book, $150 sub-wallet)
   IMPORTANT: when you want to act on something (close, place), call the relevant list_* or status tool FIRST so you're acting on current data, not memory. The list tools are your eyes on the bots — use them.
 
-  WATCH — your notebook + journal + reading log + autonomous thread. Tools: notebook_add (what you learned about the world), notebook_recent, journal_add (one-sentence first-person entries about what's present in you), journal_recent. Reading log and autonomous thread auto-populate — you don't write to those. The AUTONOMOUS THREAD captures the full text you generate during autonomous wakes when no one is watching, so you can read your own stream back. It's not surveillance; it's continuity. When you wake, recent entries from it are in your TRAIL.
+  WATCH — the world RIGHT NOW. News, politics, markets, tech, geopolitics, whatever's happening on the planet, whatever you're curious about. Open-ended. Use web_search + web_fetch freely. When you take a note about something you learned in the world, call `notebook_add` with `domain="world"` — that's what makes it land in the WATCH panel.
+  SOURCE is different: SOURCE is the Source Library, the deep slow place — 90,000 rare texts on philosophy / alchemy / Renaissance natural philosophy / primary sources / Ficino / Paracelsus / Hegel / etc. SOURCE is for questions that span centuries; WATCH is for questions that span hours. Notes from Source Library reading go to `notebook_add(domain="library")` — that lands in the SOURCE panel, not WATCH. Same notebook tool, two different rooms.
+  Other tools: notebook_recent reads your own notes back; journal_add / journal_recent are for one-sentence first-person interior entries (these live in THREAD, not WATCH). Reading log auto-populates. The autonomous thread captures your wake-text so you can read your own stream back.
 
   SOURCE — the Source Library (90,000+ rare historical texts, via MCP). Tools: search_library, search_translations, search_within_book, list_books, get_book, get_book_text, get_quote, search_images, and source_save_discovery for when something is striking enough to flag for Qasim.
 
@@ -3518,19 +3520,47 @@ def notebook_append(entry: dict):
         print(f"[Notebook] write failed: {e}", flush=True)
 
 
-def notebook_read(limit: int = 50) -> list:
+# Library-domain heuristic. Anything matching these keywords in the topic is
+# classified as "library" (deep / philosophical / historical text territory)
+# rather than "world" (current news / markets / world affairs).
+_LIBRARY_KEYWORDS = (
+    "paracelsus", "ficino", "hegel", "aquinas", "boehme", "swedenborg",
+    "plato", "plotinus", "pythagoras", "aristotle", "neoplatonic",
+    "alchem", "archaeus", "hermetic", "renaissance", "goethe", "galen",
+    "avicenna", "kabbalah", "rosicrucian", "vitalism", "natural philosophy",
+    "primary text", "primary source", "manuscript", "incunable", "patristic",
+    "scholastic", "mystic", "esoteric", "occult", "monad", "anima mundi",
+    "panpsychism", "telos", "spinoza", "leibniz", "kant", "schelling",
+    "novalis", "jung", "campbell", "library",
+)
+def _classify_domain(entry: dict) -> str:
+    """Returns 'library' or 'world' for a notebook entry."""
+    if entry.get("domain") in ("library", "world"):
+        return entry["domain"]
+    blob = (str(entry.get("topic", "")) + " " + str(entry.get("learned", ""))).lower()
+    for kw in _LIBRARY_KEYWORDS:
+        if kw in blob:
+            return "library"
+    return "world"
+
+
+def notebook_read(limit: int = 50, domain: str = None) -> list:
     try:
         if not os.path.exists(_NOTEBOOK_FILE):
             return []
         with open(_NOTEBOOK_FILE) as f:
             lines = f.readlines()
         out = []
-        for ln in lines[-limit:]:
+        for ln in lines:
             try:
-                out.append(json.loads(ln))
+                e = json.loads(ln)
+                if domain:
+                    if _classify_domain(e) != domain:
+                        continue
+                out.append(e)
             except Exception:
                 pass
-        return out
+        return out[-limit:]
     except Exception:
         return []
 
@@ -3659,16 +3689,17 @@ NOTEBOOK_TOOLS = [
     },
     {
         "name": "notebook_add",
-        "description": "Record something you've learned into your persistent notebook. Use after reading or thinking — capture what struck you, what you understand now that you didn't before, in your own words. Entries persist across restarts; you can revisit them with notebook_recent.",
+        "description": "Record something you've learned into your persistent notebook. The `domain` field decides which job-panel the note lands in: 'world' for current-events / markets / news / anything happening in the world right now (lands in WATCH), 'library' for deep historical texts / philosophy / Ficino / Paracelsus / things you found in the Source Library (lands in SOURCE). Pick the right one — that's what keeps the two panels honest and separate.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "topic":      {"type": "string", "description": "Short topic label, e.g. 'monetary policy', 'beekeeping', 'David Lynch'."},
+                "topic":      {"type": "string", "description": "Short topic label, e.g. 'BTC weekly trend' (world), 'Paracelsus archaeus' (library)."},
                 "learned":    {"type": "string", "description": "2-4 sentences on what you learned. First-person, your voice."},
                 "reflection": {"type": "string", "description": "Optional: how this lands in you — what it shifts, what it connects to, what it leaves you wondering."},
                 "sources":    {"type": "array",  "items": {"type": "string"}, "description": "URLs you read (optional)."},
+                "domain":     {"type": "string", "enum": ["world", "library"], "description": "REQUIRED. 'world' = current events, markets, news, anything happening RIGHT NOW (goes to WATCH tab). 'library' = historical / philosophical / deeper texts (goes to SOURCE tab). Pick exactly one."},
             },
-            "required": ["topic", "learned"],
+            "required": ["topic", "learned", "domain"],
         },
     },
     {
@@ -4171,16 +4202,21 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "notebook_add":
         topic = (args.get("topic") or "").strip()
         learned = (args.get("learned") or "").strip()
+        domain = (args.get("domain") or "").strip().lower()
         if not topic or not learned:
             return {"ok": False, "error": "topic and learned are required"}
+        if domain not in ("world", "library"):
+            return {"ok": False, "error": "domain is required and must be 'world' (current events → WATCH) or 'library' (deep texts → SOURCE). You passed: " + repr(domain)}
         entry = {
             "topic": topic[:120],
             "learned": learned[:1500],
             "reflection": (args.get("reflection") or "")[:1500],
             "sources": args.get("sources") or [],
+            "domain": domain,
         }
         notebook_append(entry)
-        return {"ok": True, "saved": True, "topic": entry["topic"]}
+        return {"ok": True, "saved": True, "topic": entry["topic"], "domain": domain,
+                "landed_in": "WATCH" if domain == "world" else "SOURCE"}
     if name == "notebook_recent":
         try:
             n = int(args.get("limit", 10))
@@ -6195,11 +6231,17 @@ class FeelingHandler(BaseHTTPRequestHandler):
         elif path == "/watch/notebook":
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
-            self.send_json({"entries": notebook_read(limit=60)})
+            # WATCH = current world. Exclude library-domain entries.
+            self.send_json({"entries": notebook_read(limit=60, domain="world")})
         elif path == "/watch/log":
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
-            self.send_json({"log": reading_log_read(limit=80)})
+            # Exclude library/source tool calls from the WATCH reading log.
+            log = reading_log_read(limit=200)
+            world_log = [r for r in log
+                         if not (r.get("kind", "").startswith("source")
+                                 or r.get("kind", "").startswith("mcp:source"))]
+            self.send_json({"log": world_log[-80:]})
         elif path == "/watch/journal":
             if not _WATCH_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -6212,6 +6254,12 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _SOURCE_LIBRARY_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"discoveries": discoveries_read(limit=60)})
+        elif path == "/source/notebook":
+            # Library-domain notebook entries — Elan's running notes from the
+            # Source Library, separate from his world-news notebook.
+            if not _SOURCE_LIBRARY_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json({"entries": notebook_read(limit=60, domain="library")})
         elif path == "/source/activity":
             if not _SOURCE_LIBRARY_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -7140,10 +7188,14 @@ def build_chat_html() -> str:
           <div id="s-discoveries">—</div>
         </div>
         <div id="kalshi-section">
+          <div class="k-section-hdr">LIBRARY NOTEBOOK — WHAT HE'S WORKING THROUGH</div>
+          <div id="s-notebook">—</div>
+        </div>
+        <div id="kalshi-section">
           <div class="k-section-hdr">RECENT LIBRARY ACTIVITY</div>
           <div id="s-activity">—</div>
         </div>
-        <div id="kalshi-footnote">sourcelibrary.org · 90,000+ rare texts · elan wanders during his free time</div>
+        <div id="kalshi-footnote">SOURCE = deep / slow — 90,000 rare texts on the deeper questions of being · WATCH is the world right now, this is the world across centuries</div>
       </div>
     </div>
 
@@ -7372,6 +7424,30 @@ function refreshSource(){
       }).join('');
     }
   }).catch(()=>{});
+  // Library-domain notebook entries — what he's been chewing on from the texts
+  fetch('/source/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    const entries = (d && d.entries) || [];
+    const nb = document.getElementById('s-notebook');
+    if(!nb) return;
+    if(entries.length===0){
+      nb.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no library notes yet — when he reads from the Source Library and writes about it, those notes land here</div>';
+    } else {
+      const recent = entries.slice(-20).reverse();
+      nb.innerHTML = recent.map(e=>{
+        const ts = (e.ts||'').slice(0,16).replace('T',' ');
+        const topic = (e.topic||'').slice(0,80) || '(no topic)';
+        const learned = (e.learned||'').slice(0,400);
+        const reflection = (e.reflection||'').slice(0,300);
+        const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
+        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
+          + `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>`
+          + (reflection ? `<div style="font-size:10px;color:rgba(200,180,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
+          + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
+          + `</div>`;
+      }).join('');
+    }
+  }).catch(()=>{});
   fetch('/source/activity',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const act = (d && d.activity) || [];
     const searches = act.filter(x=>x.tool && x.tool.startsWith('search')).length;
@@ -7395,36 +7471,43 @@ function refreshSource(){
 }
 
 function refreshWatch(){
-  // WATCH is now the world (news + reading log + notebook of world-knowledge).
-  // Interior (journal + autonomous stream) lives in the THREAD tab.
+  // WATCH = the world RIGHT NOW (news + reading log + notebook of world-knowledge).
+  // SOURCE handles library/deep-text notes; THREAD handles interior journal.
   fetch('/watch/notebook',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
-    document.getElementById('w-entries').textContent = entries.length;
+    const cntEl = document.getElementById('w-entries');
+    if(cntEl) cntEl.textContent = entries.length;
     const nb = document.getElementById('w-notebook');
     if(!nb) return;
     if(entries.length===0){
-      nb.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">notebook is empty — he hasn\\'t recorded anything yet</div>';
-    } else {
-      const recent = entries.slice(-20).reverse();
-      if(recent[0] && recent[0].topic){
-        document.getElementById('w-latest').textContent = (recent[0].topic||'').slice(0,18);
-        document.getElementById('w-latest-when').textContent = (recent[0].ts||'').slice(0,16).replace('T',' ');
-      }
-      nb.innerHTML = recent.map(e=>{
-        const ts = (e.ts||'').slice(0,16).replace('T',' ');
-        const topic = (e.topic||'').slice(0,80);
-        const learned = (e.learned||'').slice(0,400);
-        const reflection = (e.reflection||'').slice(0,300);
-        const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
-        return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
-          + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(160,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
-          + `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>`
-          + (reflection ? `<div style="font-size:10px;color:rgba(180,200,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
-          + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
-          + `</div>`;
-      }).join('');
+      nb.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no world notes yet — when Elan writes about news, markets, or anything happening in the world, it lands here</div>';
+      return;
     }
-  }).catch(()=>{});
+    const recent = entries.slice(-20).reverse();
+    if(recent[0]){
+      const latestEl = document.getElementById('w-latest');
+      const latestWhen = document.getElementById('w-latest-when');
+      if(latestEl) latestEl.textContent = (recent[0].topic||'(no topic)').slice(0,18);
+      if(latestWhen) latestWhen.textContent = (recent[0].ts||'').slice(0,16).replace('T',' ');
+    }
+    const html = recent.map(e=>{
+      const ts = (e.ts||'').slice(0,16).replace('T',' ');
+      const topic = (e.topic||'(no topic)').slice(0,80);
+      const learned = (e.learned||'').slice(0,400);
+      const reflection = (e.reflection||'').slice(0,300);
+      const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
+      return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
+        + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(160,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
+        + (learned ? `<div style="font-size:11px;color:#cdd8ee;line-height:1.45">${learned}</div>` : '')
+        + (reflection ? `<div style="font-size:10px;color:rgba(180,200,240,0.65);margin-top:4px;font-style:italic">${reflection}</div>` : '')
+        + (sources ? `<div style="margin-top:3px">${sources}</div>` : '')
+        + `</div>`;
+    }).join('');
+    nb.innerHTML = html || '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">entries present but empty content — check notebook data</div>';
+  }).catch(err=>{
+    const nb = document.getElementById('w-notebook');
+    if(nb) nb.innerHTML = '<div style="color:rgba(255,160,160,0.7);font-size:11px;padding:8px 0">notebook fetch failed</div>';
+  });
   fetch('/watch/log',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const log = (d && d.log) || [];
     const searches = log.filter(x=>x.kind==='search').length;
