@@ -4476,8 +4476,25 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "degen_list_positions":
         s = fetch_degen_state(force=True)
         positions = s.get("positions") or {}
+        # Load Elan's recorded theses so each position carries its commitment
+        thesis_map = {}
+        try:
+            if os.path.exists(_THESES_FILE):
+                with open(_THESES_FILE) as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln:
+                            continue
+                        try:
+                            t = json.loads(ln)
+                            thesis_map[t.get("symbol", "?")] = t
+                        except Exception:
+                            continue
+        except Exception:
+            pass
         out = []
         for pair, p in positions.items():
+            th = thesis_map.get(pair) or {}
             out.append({
                 "pair":          pair,
                 "side":          p.get("side"),
@@ -4494,6 +4511,9 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "reasons":       p.get("reasons"),
                 "source":        p.get("source", "bot"),
                 "opened_at":     p.get("entry_time"),
+                # Your recorded thesis (from thesis_record)
+                "your_thesis":      (th.get("thesis") if not th.get("closed_at") else None),
+                "your_invalidates": (th.get("invalidates") if not th.get("closed_at") else None),
             })
         return {"ok": True, "open_positions": out}
     # ── Options bot tools (Deribit paper scanner — separate from degen sub-wallet) ──
@@ -4555,6 +4575,84 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "open_instruments": open_names,
             }
         return options_post_command("close_option", instrument=inst, reason=reason)
+    if name == "degen_edit_stop":
+        return degen_post_command("edit_stop",
+                                   pair=args.get("pair"),
+                                   new_stop=args.get("new_stop"))
+    if name == "degen_take_partial":
+        return degen_post_command("take_partial",
+                                   pair=args.get("pair"),
+                                   pct=args.get("pct"),
+                                   reason=args.get("reason", ""))
+    if name == "stock_edit_stop":
+        return stock_post_command("edit_stop",
+                                   symbol=args.get("symbol"),
+                                   new_stop=args.get("new_stop"))
+    if name == "stock_take_partial":
+        return stock_post_command("take_partial",
+                                   symbol=args.get("symbol"),
+                                   pct=args.get("pct"),
+                                   reason=args.get("reason", ""))
+    if name == "pnl_summary":
+        win = (args.get("window") or "week").lower()
+        if win not in ("day", "week", "month", "all"):
+            win = "week"
+        cutoff_secs = {"day": 86400, "week": 604800, "month": 2592000, "all": None}[win]
+        cutoff_ts = None
+        if cutoff_secs is not None:
+            cutoff_ts = (_dt.datetime.utcnow() - _dt.timedelta(seconds=cutoff_secs)).isoformat() + "Z"
+        # Aggregate from degen spot + degen options + stock spot
+        all_trades = []
+        try:
+            ds = fetch_degen_state(force=True)
+            for t in (ds.get("trades") or []):
+                if t.get("source") == "elan":
+                    all_trades.append({"book": "crypto", "t": t})
+            for t in ((ds.get("options") or {}).get("trades") or []):
+                if t.get("source") == "elan":
+                    all_trades.append({"book": "crypto_options", "t": t})
+        except Exception: pass
+        try:
+            ss = fetch_stock_state(force=True)
+            for t in (ss.get("trades") or []):
+                if t.get("source") == "elan":
+                    all_trades.append({"book": "stocks", "t": t})
+        except Exception: pass
+        # Filter by cutoff
+        in_window = []
+        for entry in all_trades:
+            t = entry["t"]
+            ts = t.get("time") or t.get("closed_at")
+            if not cutoff_ts or (ts and ts >= cutoff_ts):
+                in_window.append(entry)
+        # Stats
+        pnls = [e["t"].get("pnl") or e["t"].get("pnl_usd") or 0 for e in in_window]
+        wins = sum(1 for p in pnls if p > 0)
+        losses = sum(1 for p in pnls if p < 0)
+        total = sum(pnls)
+        by_book = {}
+        for e in in_window:
+            b = e["book"]
+            by_book.setdefault(b, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
+            by_book[b]["trades"] += 1
+            p = e["t"].get("pnl") or e["t"].get("pnl_usd") or 0
+            by_book[b]["pnl"] += p
+            if p > 0: by_book[b]["wins"] += 1
+            elif p < 0: by_book[b]["losses"] += 1
+        for b in by_book: by_book[b]["pnl"] = round(by_book[b]["pnl"], 2)
+        return {
+            "ok": True,
+            "window": win,
+            "trades": len(in_window),
+            "wins": wins,
+            "losses": losses,
+            "win_rate_pct": round((wins / len(in_window) * 100) if in_window else 0, 1),
+            "total_pnl_usd": round(total, 2),
+            "avg_per_trade": round(total / len(in_window), 2) if in_window else 0,
+            "best": round(max(pnls), 2) if pnls else 0,
+            "worst": round(min(pnls), 2) if pnls else 0,
+            "by_book": by_book,
+        }
     if name == "degen_recent_closed":
         try:
             limit = max(1, min(50, int(args.get("limit", 10))))
@@ -4727,14 +4825,32 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "stock_list_positions":
         s = fetch_stock_state(force=True)
         positions = s.get("positions") or {}
-        return {"ok": True, "open_positions": [
-            {"symbol": sym, "side": p.get("side"), "qty": p.get("qty"),
-             "entry_price": p.get("entry_price"), "current_price": p.get("current_price"),
-             "stop_loss": p.get("stop_loss"), "take_profit": p.get("take_profit"),
-             "conviction": p.get("conviction"), "pnl": p.get("pnl"), "pct": p.get("pct"),
-             "reasons": p.get("reasons"), "source": p.get("source", "bot")}
-            for sym, p in (positions.items() if isinstance(positions, dict) else [])
-        ]}
+        # Load recorded theses by symbol
+        thesis_map = {}
+        try:
+            if os.path.exists(_THESES_FILE):
+                with open(_THESES_FILE) as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln: continue
+                        try:
+                            t = json.loads(ln)
+                            thesis_map[t.get("symbol","?")] = t
+                        except Exception: continue
+        except Exception: pass
+        out = []
+        for sym, p in (positions.items() if isinstance(positions, dict) else []):
+            th = thesis_map.get(sym) or {}
+            out.append({
+                "symbol": sym, "side": p.get("side"), "qty": p.get("qty"),
+                "entry_price": p.get("entry_price"), "current_price": p.get("current_price"),
+                "stop_loss": p.get("stop_loss"), "take_profit": p.get("take_profit"),
+                "conviction": p.get("conviction"), "pnl": p.get("pnl"), "pct": p.get("pct"),
+                "reasons": p.get("reasons"), "source": p.get("source", "bot"),
+                "your_thesis":      (th.get("thesis") if not th.get("closed_at") else None),
+                "your_invalidates": (th.get("invalidates") if not th.get("closed_at") else None),
+            })
+        return {"ok": True, "open_positions": out}
     if name == "stock_list_options":
         s = fetch_stock_state(force=True)
         # Stock options are persisted to portfolio.option_positions by the bot,
@@ -4991,6 +5107,17 @@ STOCK_TOOLS = [
     {"name": "stock_list_options",
      "description": "List currently open stock options (calls/puts) — OCC symbol, underlying, type, strike, expiry.",
      "input_schema": {"type":"object","properties":{},"required":[]}},
+    {"name": "stock_edit_stop",
+     "description": "Move the stop_loss on an OPEN stock position WITHOUT closing it. Trail your stop as price moves in your favor. Long stops must be BELOW entry; short stops must be ABOVE.",
+     "input_schema": {"type":"object","properties":{
+         "symbol":{"type":"string","description":"REQUIRED. The open ticker."},
+         "new_stop":{"type":"number","description":"REQUIRED. New stop price."}},"required":["symbol","new_stop"]}},
+    {"name": "stock_take_partial",
+     "description": "Close a PORTION (10–90%) of an open stock position. Bank profit, let the rest run.",
+     "input_schema": {"type":"object","properties":{
+         "symbol":{"type":"string","description":"REQUIRED. The open ticker."},
+         "pct":{"type":"number","description":"REQUIRED. Fraction to close, 0.10–0.90."},
+         "reason":{"type":"string","description":"One sentence: why."}},"required":["symbol","pct"]}},
     {"name": "stock_recent_closed",
      "description": "Show your last N closed stock trades (your trades only). Each entry: symbol, side, qty, entry, exit, P&L, win/loss, reason for close, timestamp. Audit what happened during AUTO-wakes you weren't watching.",
      "input_schema": {"type":"object","properties":{
@@ -5418,6 +5545,42 @@ DEGEN_TOOLS = [
         "name": "degen_list_options",
         "description": "List your currently open crypto option positions — instrument, type, strike, expiry, entry mark, current value, P&L. Use this to see what's actually open before deciding to close anything. Also returns options budget + available.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "degen_edit_stop",
+        "description": "Move the stop on an OPEN crypto position WITHOUT closing it. Use this to trail your stop as a position moves in your favor — bank a tighter floor as P&L builds. Long stops must be BELOW entry; short stops must be ABOVE entry. Calling on a closed position fails.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pair":     {"type": "string", "description": "REQUIRED. The open pair like 'BTC/USDT'."},
+                "new_stop": {"type": "number", "description": "REQUIRED. New stop price level. For long: below entry. For short: above entry."},
+            },
+            "required": ["pair", "new_stop"],
+        },
+    },
+    {
+        "name": "degen_take_partial",
+        "description": "Close a PORTION of an open crypto position (10-90%). Bank profit, let the rest run. Useful for taking partial off at first target while keeping skin in the game. Position remains open at reduced size with the same stop.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pair":   {"type": "string", "description": "REQUIRED. The open pair."},
+                "pct":    {"type": "number", "description": "REQUIRED. Fraction to close, 0.10–0.90. 0.5 = half off."},
+                "reason": {"type": "string", "description": "One sentence: why now."},
+            },
+            "required": ["pair", "pct"],
+        },
+    },
+    {
+        "name": "pnl_summary",
+        "description": "Rolled-up P&L summary across all books (crypto spot + options + stocks). Aggregated by time window — 'day' / 'week' / 'month' / 'all'. Returns total P&L, trade count, wins/losses, win rate, best/worst trade in window. Use this to see if you're actually improving over time, not just churning.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "window": {"type": "string", "enum": ["day", "week", "month", "all"], "description": "Time window. Default 'week'."},
+            },
+            "required": [],
+        },
     },
     {
         "name": "degen_recent_closed",
