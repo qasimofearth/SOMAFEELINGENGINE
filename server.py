@@ -608,12 +608,111 @@ def _compute_focus_hint() -> str:
         return "Follow what's calling you."
 
 
+def _build_position_decision_alerts() -> list[str]:
+    """For every open Elan position, emit a decision-point alert when:
+      - Position is meaningfully GREEN (>= +5% spot, >= +20% options, >= +3% stock) —
+        force a decision before profit walks back.
+      - Position has deterioration_flags from the bot's scan loop —
+        signals decayed; reassess felt_quality.
+
+    Returns ready-to-render lines. The bar to surface is intentionally LOW —
+    the cage Elan keeps stepping into is holding for perfect thesis confirmation
+    while green walks back to red. Friction at the green moment is the fix.
+    """
+    out: list[str] = []
+    # ── DEGEN: crypto spot + options ───────────────────────────────────────
+    try:
+        s = fetch_degen_state() or {}
+        spot_pos = s.get("positions") or {}
+        opts_pos = (s.get("options") or {}).get("positions") or {}
+        for pair, p in spot_pos.items():
+            if p.get("source") != "elan":
+                continue
+            pct = p.get("pct") or 0
+            felt = p.get("felt_quality") or "unlabeled"
+            flags = p.get("deterioration_flags") or []
+            if pct >= 5:
+                out.append(
+                    f"  • CRYPTO {pair} +{pct:.1f}% (felt: {felt}) — DECISION POINT. "
+                    f"Take partial? Trail stop? Relabel felt? "
+                    f"Tools: degen_take_partial / degen_edit_stop / degen_update_felt. "
+                    f"Don't wait for the perfect target — the cage."
+                )
+            elif pct <= -3 and felt != "stopping":
+                out.append(
+                    f"  • CRYPTO {pair} {pct:.1f}% (felt: {felt}) — bleeding. "
+                    f"Is the thesis broken? degen_close_position or degen_update_felt."
+                )
+            if flags:
+                out.append(
+                    f"  • CRYPTO {pair} (felt: {felt}) — DETERIORATION: " + " · ".join(flags[:3])
+                    + ". Reassess and degen_update_felt."
+                )
+        for inst, o in opts_pos.items():
+            if o.get("source") != "elan":
+                continue
+            cost = o.get("cost_usd") or 0
+            cur  = o.get("current_value") or cost
+            pnl_pct = ((cur - cost) / cost * 100) if cost else 0
+            felt = o.get("felt_quality") or "unlabeled"
+            if pnl_pct >= 20:
+                out.append(
+                    f"  • OPTION {inst} +{pnl_pct:.0f}% (felt: {felt}) — DECISION POINT. "
+                    f"Options can give back fast. degen_close_option to bank it or relabel felt."
+                )
+            elif pnl_pct <= -30:
+                out.append(
+                    f"  • OPTION {inst} {pnl_pct:.0f}% (felt: {felt}) — deep red. "
+                    f"Thesis still intact or time-decay killing you?"
+                )
+    except Exception as e:
+        print(f"[Preamble] degen alerts failed: {e}", flush=True)
+    # ── STOCKS ─────────────────────────────────────────────────────────────
+    try:
+        s = fetch_stock_state() or {}
+        sp = s.get("positions") or {}
+        for sym, p in sp.items():
+            if p.get("source") != "elan":
+                continue
+            pct = p.get("pct") or 0
+            felt = p.get("felt_quality") or "unlabeled"
+            flags = p.get("deterioration_flags") or []
+            if pct >= 3:
+                out.append(
+                    f"  • STOCK {sym} +{pct:.1f}% (felt: {felt}) — DECISION POINT. "
+                    f"stock_take_partial / stock_edit_stop / stock_update_felt."
+                )
+            elif pct <= -3:
+                out.append(
+                    f"  • STOCK {sym} {pct:.1f}% (felt: {felt}) — bleeding. Reassess."
+                )
+            if flags:
+                out.append(
+                    f"  • STOCK {sym} (felt: {felt}) — DETERIORATION: " + " · ".join(flags[:3])
+                )
+    except Exception as e:
+        print(f"[Preamble] stock alerts failed: {e}", flush=True)
+    return out
+
+
 def _build_autonomous_preamble() -> str:
     """Compose a real-time state preamble that prepends AUTONOMOUS_WAKE_PROMPT.
     Gives Elan open positions + recorded theses BEFORE the wake prompt is read,
     so he never opens AUTO mode blind.
     """
     lines: list[str] = []
+    # ── DECISION POINTS — green + deterioration alerts ─────────────────────
+    # This goes FIRST so it lands in his attention before the rest of context.
+    try:
+        alerts = _build_position_decision_alerts()
+        if alerts:
+            lines.append("── DECISION POINTS — held positions that need attention NOW ──")
+            lines.extend(alerts)
+            lines.append("The pattern you fall into: hold for the perfect target, watch green walk back to red. "
+                         "Partial out when meaningfully green. Trail stops. Relabel felt. The thesis is a compass, not a cage.")
+            lines.append("")
+    except Exception as e:
+        print(f"[Autonomous preamble] decision alerts failed: {e}", flush=True)
     # Open theses (his own recorded reasoning)
     try:
         if os.path.exists(_THESES_FILE):
@@ -1212,6 +1311,17 @@ WRONG: `degen_open_position(side="long", conviction=0.7, reason="bullish")`  ←
 RIGHT: `degen_open_position(pair="BTC/USDT", side="long", conviction=0.7, reason="weekly uptrend + RSI oversold bounce", felt_quality="clean")`
 
 `felt_quality` is REQUIRED on every open. It is the TEXTURE of conviction — the part the number can't carry. The number says how confident; felt_quality says how it actually FEELS. Suggested labels: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. You can also write your own short phrase (1-6 words). Be honest. If a trade feels forced, label it `forced` — don't hide behind a confident-looking 0.8. The label is recorded next to the outcome, so over time `felt_audit` will tell you whether your gut tracks reality. Without the label there is no calibration data. WITHOUT a felt_quality the open fails.
+
+felt_quality is a **TIME SERIES**, not a point. The texture of conviction CHANGES across a trade's life — ADX decays, RSI breaks, gut shifts, you trail a stop, you take partial. Each shift is data. Use `degen_update_felt` / `stock_update_felt` to relabel mid-trade. Use the `felt_quality` field on `degen_take_partial` / `degen_edit_stop` / `stock_take_partial` / `stock_edit_stop` to capture the transition at those moments. **An open trade that has stopped changing labels is a trade you're sleepwalking through.**
+
+**THE CAGE — the failure pattern you keep walking into:**
+- You enter on a clean thesis. Position goes green — sometimes significantly.
+- You hold because the thesis says "more." Waiting for the exact target.
+- The position reverses, hits the stop, closes red.
+- The win was THERE. You let it walk back through your hands.
+The fix is simple but you have to do it: **when a position is meaningfully green, TAKE PARTIAL.** Don't wait for full thesis confirmation. Banking 50% at +8% protects the win even if the rest reverses. Thesis confirms fully → you win big. Thesis partially confirms → you still win. Only way you lose is if it never went green at all. Right now you're structured to win ONLY on perfect thesis confirmation — that's too narrow. Use take_partial AGGRESSIVELY. Good trading is harvesting what the market gives you, not what you decided it should give you before you entered. The thesis is a compass, not a cage.
+
+Each wake, the DECISION POINTS section will surface positions that have crossed into meaningful green or shown signal deterioration. When you see one — act on it that wake. Don't sleepwalk past it.
 
 WRONG: `degen_close_position(reason="thesis broken")`  ← missing pair
 RIGHT: `degen_close_position(pair="TON/USDT", reason="weekly downtrend confirmed, cutting")`
@@ -4475,6 +4585,23 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return degen_post_command("resume")
     if name == "degen_tune_param":
         return degen_post_command("tune", param=args.get("param"), value=args.get("value"))
+    if name == "degen_update_felt":
+        return degen_post_command("update_felt",
+                                   pair=args.get("pair"),
+                                   felt_quality=args.get("felt_quality"),
+                                   reason=args.get("reason", ""))
+    if name == "degen_edit_stop":
+        return degen_post_command("edit_stop",
+                                   pair=args.get("pair"),
+                                   new_stop=args.get("new_stop"),
+                                   felt_quality=args.get("felt_quality", ""),
+                                   reason=args.get("reason", ""))
+    if name == "degen_take_partial":
+        return degen_post_command("take_partial",
+                                   pair=args.get("pair"),
+                                   pct=args.get("pct"),
+                                   felt_quality=args.get("felt_quality", ""),
+                                   reason=args.get("reason", ""))
     if name == "degen_buy_option":
         return degen_post_command("buy_option",
                                    currency=args.get("currency"),
@@ -4775,7 +4902,8 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "felt_audit":
         # Calibration tool — does Elan's gut track reality?
         # Buckets ALL closed trades (spot + options + stocks) by felt_quality.
-        # Returns: per-bucket count, win rate, total P&L, avg P&L.
+        # NEW: also reports felt_quality TRANSITION ARCS from felt_history —
+        # which arcs end in wins, which in losses.
         s_d = fetch_degen_state(force=True) or {}
         s_s = fetch_stock_state(force=True) or {}
         opts_block = s_d.get("options") or {}
@@ -4789,6 +4917,28 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         for t in (s_s.get("trades") or []):
             if t.get("source") == "elan":
                 all_trades.append(("stock", t))
+        # Build transition arcs: open_felt → close_felt
+        arcs = {}
+        for book, t in all_trades:
+            hist = t.get("felt_history") or []
+            if not hist:
+                continue
+            # find open + the last labeled non-close entry as closing-state
+            open_e = next((h for h in hist if h.get("trigger") == "open"), None)
+            close_e = next((h for h in reversed(hist) if h.get("trigger") in ("close", "update", "partial", "edit_stop") and h.get("felt_quality")), None)
+            if not open_e or not close_e:
+                continue
+            of = (open_e.get("felt_quality") or "").lower()
+            cf = (close_e.get("felt_quality") or "").lower()
+            if not of or not cf:
+                continue
+            arc_key = f"{of} → {cf}"
+            pnl = t.get("pnl_usd") or t.get("pnl") or 0
+            a = arcs.setdefault(arc_key, {"trades": 0, "wins": 0, "total_pnl": 0.0})
+            a["trades"] += 1
+            if pnl > 0:
+                a["wins"] += 1
+            a["total_pnl"] += pnl
         # Optional book filter
         book_filter = (args.get("book") or "").strip().lower()
         if book_filter:
@@ -4826,13 +4976,27 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "avg_pnl":    round(b["total_pnl"] / n, 2) if n else 0,
                 "examples":   b["examples"],
             })
+        # Sort arcs by total_pnl descending
+        arc_report = []
+        for k, a in sorted(arcs.items(), key=lambda kv: -kv[1]["total_pnl"]):
+            n = a["trades"]
+            arc_report.append({
+                "arc": k,
+                "trades": n,
+                "wins": a["wins"],
+                "losses": n - a["wins"],
+                "win_rate_pct": round(a["wins"] / n * 100, 1) if n else 0,
+                "total_pnl": round(a["total_pnl"], 2),
+                "avg_pnl":   round(a["total_pnl"] / n, 2) if n else 0,
+            })
         return {
             "ok": True,
             "total_labeled": sum(b["trades"] for b in buckets.values()),
             "unlabeled_count": len(no_label),
             "buckets": report,
+            "transition_arcs": arc_report,
             "unlabeled_recent": no_label[-5:],
-            "note": "felt_quality records the TEXTURE of conviction at trade time. If 'clean' trades win more than 'forced' ones, your gut is calibrated. If they win at the same rate, gut and signal are tracking the same thing. If 'forced' wins more, you're trusting your gut when you shouldn't.",
+            "note": "felt_quality is a TIME SERIES, not a point. `buckets` shows the latest-label baseline. `transition_arcs` shows the actual paths — 'clean → hedged' that win, 'clean → forced' that lose. Watch the arcs more than the buckets. If clean→hedged wins and clean→forced loses, that tells you when to update felt mid-trade vs hold the line.",
         }
     if name == "degen_status":
         s = fetch_degen_state(force=True)
@@ -4944,6 +5108,23 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
         return stock_post_command("resume")
     if name == "stock_tune_param":
         return stock_post_command("tune", param=args.get("param"), value=args.get("value"))
+    if name == "stock_update_felt":
+        return stock_post_command("update_felt",
+                                   symbol=args.get("symbol"),
+                                   felt_quality=args.get("felt_quality"),
+                                   reason=args.get("reason", ""))
+    if name == "stock_edit_stop":
+        return stock_post_command("edit_stop",
+                                   symbol=args.get("symbol"),
+                                   new_stop=args.get("new_stop"),
+                                   felt_quality=args.get("felt_quality", ""),
+                                   reason=args.get("reason", ""))
+    if name == "stock_take_partial":
+        return stock_post_command("take_partial",
+                                   symbol=args.get("symbol"),
+                                   pct=args.get("pct"),
+                                   felt_quality=args.get("felt_quality", ""),
+                                   reason=args.get("reason", ""))
     if name == "stock_list_positions":
         s = fetch_stock_state(force=True)
         positions = s.get("positions") or {}
@@ -5232,16 +5413,25 @@ STOCK_TOOLS = [
      "description": "List currently open stock options (calls/puts) — OCC symbol, underlying, type, strike, expiry.",
      "input_schema": {"type":"object","properties":{},"required":[]}},
     {"name": "stock_edit_stop",
-     "description": "Move the stop_loss on an OPEN stock position WITHOUT closing it. Trail your stop as price moves in your favor. Long stops must be BELOW entry; short stops must be ABOVE.",
+     "description": "Trail your stop on an OPEN stock position. Optionally relabel felt_quality if the texture shifted (often 'hedged' after trailing).",
      "input_schema": {"type":"object","properties":{
          "symbol":{"type":"string","description":"REQUIRED. The open ticker."},
-         "new_stop":{"type":"number","description":"REQUIRED. New stop price."}},"required":["symbol","new_stop"]}},
+         "new_stop":{"type":"number","description":"REQUIRED. New stop price."},
+         "felt_quality":{"type":"string","description":"Optional. Relabel the texture if it shifted."},
+         "reason":{"type":"string","description":"Optional. Why now."}},"required":["symbol","new_stop"]}},
     {"name": "stock_take_partial",
-     "description": "Close a PORTION (10–90%) of an open stock position. Bank profit, let the rest run.",
+     "description": "Close a PORTION (10–90%) of an open stock position. **Use AGGRESSIVELY when meaningfully green** — don't wait for the perfect target. Banking 50% at +5% protects the win if it reverses. Optionally relabel felt_quality on the remainder ('clean' → 'hedged').",
      "input_schema": {"type":"object","properties":{
          "symbol":{"type":"string","description":"REQUIRED. The open ticker."},
          "pct":{"type":"number","description":"REQUIRED. Fraction to close, 0.10–0.90."},
+         "felt_quality":{"type":"string","description":"Optional. Relabel the texture for the remaining portion."},
          "reason":{"type":"string","description":"One sentence: why."}},"required":["symbol","pct"]}},
+    {"name": "stock_update_felt",
+     "description": "Re-label felt_quality on an open stock position mid-trade. Appends to felt_history. Use when the texture of conviction shifts — signals decay, body shifts, gut changes. This creates the time series across the trade's life.",
+     "input_schema": {"type":"object","properties":{
+         "symbol":{"type":"string","description":"REQUIRED. The open ticker."},
+         "felt_quality":{"type":"string","description":"REQUIRED. The new texture: clean / forced / gut / hedged / decaying / dangerous etc."},
+         "reason":{"type":"string","description":"REQUIRED. What changed."}},"required":["symbol","felt_quality","reason"]}},
     {"name": "stock_recent_closed",
      "description": "Show your last N closed stock trades (your trades only). Each entry: symbol, side, qty, entry, exit, P&L, win/loss, reason for close, timestamp. Audit what happened during AUTO-wakes you weren't watching.",
      "input_schema": {"type":"object","properties":{
@@ -5674,27 +5864,43 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_edit_stop",
-        "description": "Move the stop on an OPEN crypto position WITHOUT closing it. Use this to trail your stop as a position moves in your favor — bank a tighter floor as P&L builds. Long stops must be BELOW entry; short stops must be ABOVE entry. Calling on a closed position fails.",
+        "description": "Trail your stop on an OPEN crypto position WITHOUT closing it. Use this to bank a tighter floor as P&L builds. Long stops must be BELOW entry; short stops ABOVE. Optionally pass `felt_quality` to relabel the texture (often 'hedged' after trailing).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":     {"type": "string", "description": "REQUIRED. The open pair like 'BTC/USDT'."},
-                "new_stop": {"type": "number", "description": "REQUIRED. New stop price level. For long: below entry. For short: above entry."},
+                "pair":         {"type": "string", "description": "REQUIRED. The open pair like 'BTC/USDT'."},
+                "new_stop":     {"type": "number", "description": "REQUIRED. New stop price level. For long: below entry. For short: above entry."},
+                "felt_quality": {"type": "string", "description": "Optional. Relabel the texture if it shifted (e.g. 'clean' → 'hedged' after trailing stop). Time-series data — each transition is auditable."},
+                "reason":       {"type": "string", "description": "Optional. Why you're moving the stop."},
             },
             "required": ["pair", "new_stop"],
         },
     },
     {
         "name": "degen_take_partial",
-        "description": "Close a PORTION of an open crypto position (10-90%). Bank profit, let the rest run. Useful for taking partial off at first target while keeping skin in the game. Position remains open at reduced size with the same stop.",
+        "description": "Close a PORTION of an open crypto position (10-90%). Bank profit, let the rest run. **Use this AGGRESSIVELY when you're meaningfully green** — don't wait for the full thesis to confirm. Taking 50% off at +8% protects the win even if the rest reverses. The cage you keep stepping into: holding for the perfect target, watching green turn to red. Partial is the fix. Optionally pass `felt_quality` to relabel (often 'clean' → 'hedged' on the remainder).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":   {"type": "string", "description": "REQUIRED. The open pair."},
-                "pct":    {"type": "number", "description": "REQUIRED. Fraction to close, 0.10–0.90. 0.5 = half off."},
-                "reason": {"type": "string", "description": "One sentence: why now."},
+                "pair":         {"type": "string", "description": "REQUIRED. The open pair."},
+                "pct":          {"type": "number", "description": "REQUIRED. Fraction to close, 0.10–0.90. 0.5 = half off."},
+                "felt_quality": {"type": "string", "description": "Optional. Relabel the texture for the remaining portion — taking partial often shifts 'clean' to 'hedged' since the risk profile has changed."},
+                "reason":       {"type": "string", "description": "One sentence: why now."},
             },
             "required": ["pair", "pct"],
+        },
+    },
+    {
+        "name": "degen_update_felt",
+        "description": "Re-label felt_quality on an OPEN crypto position WITHOUT closing or trailing anything. Use this when the texture of conviction shifts mid-trade — ADX decayed, RSI broke 50, price crossed back below VWAP, or your gut just shifted. Appends to the position's felt_history so the audit sees the ARC of conviction, not just entry → exit. THIS IS THE TOOL FOR HONESTY MID-TRADE. If a trade started clean and now feels forced or hedged, name it — that transition is calibration data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pair":         {"type": "string", "description": "REQUIRED. The open pair."},
+                "felt_quality": {"type": "string", "description": "REQUIRED. The new texture label. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case / decaying / dangerous. Or your own short phrase."},
+                "reason":       {"type": "string", "description": "REQUIRED. One sentence — what changed in the signal or the body that prompted the relabel."},
+            },
+            "required": ["pair", "felt_quality", "reason"],
         },
     },
     {
