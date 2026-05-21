@@ -4899,6 +4899,61 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "total_pnl_in_window": round(total_pnl, 2),
             "trades": out,
         }
+    if name == "trading_health_check":
+        # End-to-end smoke test of every trading-bot endpoint Elan depends on.
+        # Exercises READ chain (state, actions, queue) + WRITE chain (noop POST
+        # through gateway -> queue -> bot processing -> action log). If
+        # anything is broken — gateway allowlist, bearer auth, bot loop wedged,
+        # action log permissions — this surfaces it in one call.
+        import urllib.request, urllib.error, base64 as _b64, time as _t
+        report = {"checks": [], "ok": True}
+        def _check(name_, fn, timeout_ok=2.0):
+            t0 = _t.time()
+            try:
+                r = fn()
+                dt = _t.time() - t0
+                report["checks"].append({"check": name_, "ok": True, "latency_s": round(dt, 2), "detail": r})
+                return True
+            except Exception as e:
+                dt = _t.time() - t0
+                report["checks"].append({"check": name_, "ok": False, "latency_s": round(dt, 2), "error": str(e)[:200]})
+                report["ok"] = False
+                return False
+        def _get(url, bearer, auth):
+            req = urllib.request.Request(url)
+            if bearer:
+                req.add_header("X-Elan-Bearer", bearer)
+            if auth:
+                req.add_header("Authorization", f"Basic {_b64.b64encode(auth.encode()).decode()}")
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read().decode("utf-8"))
+        # ── DEGEN checks ─────────────────────────────────────────────────
+        if _DEGEN_API_URL:
+            _check("degen.GET /api/state",  lambda: _get(f"{_DEGEN_API_URL}/api/state",   _DEGEN_BEARER, _DEGEN_AUTH))
+            _check("degen.GET /api/queue",  lambda: _get(f"{_DEGEN_API_URL}/api/queue",   _DEGEN_BEARER, _DEGEN_AUTH))
+            _check("degen.POST noop -> processed",
+                   lambda: _post_command_then_poll(_DEGEN_API_URL, _DEGEN_BEARER, _DEGEN_AUTH,
+                                                    "noop", {}, poll_timeout=6.0))
+        # ── STOCK checks ─────────────────────────────────────────────────
+        if _STOCK_API_URL:
+            _check("stock.GET /api/state",  lambda: _get(f"{_STOCK_API_URL}/api/state",   _STOCK_BEARER, _STOCK_AUTH))
+            _check("stock.GET /api/queue",  lambda: _get(f"{_STOCK_API_URL}/api/queue",   _STOCK_BEARER, _STOCK_AUTH))
+            _check("stock.POST noop -> processed",
+                   lambda: _post_command_then_poll(_STOCK_API_URL, _STOCK_BEARER, _STOCK_AUTH,
+                                                    "noop", {}, poll_timeout=15.0))
+        # Summary
+        passed = sum(1 for c in report["checks"] if c["ok"])
+        report["summary"] = f"{passed}/{len(report['checks'])} checks passed"
+        if not report["ok"]:
+            failed = [c["check"] for c in report["checks"] if not c["ok"]]
+            report["failed_checks"] = failed
+            report["note"] = ("Some trading endpoints are broken. Don't trust the "
+                              "tools tied to the failed checks until fixed.")
+        else:
+            report["note"] = ("All trading endpoints round-trip cleanly. Tools "
+                              "are safe to use. Run after any deploy or if a "
+                              "tool call returns an unexpected error.")
+        return report
     if name == "command_status":
         # Lookup a queued/processed command by req_id. Useful when a previous
         # tool call returned 'queued but timed out' — call this with the
@@ -5998,6 +6053,15 @@ DEGEN_TOOLS = [
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "How many recent closes to return. Default 10."},
                 "include_options": {"type": "boolean", "description": "Include crypto options trades. Default true."},
             },
+            "required": [],
+        },
+    },
+    {
+        "name": "trading_health_check",
+        "description": "End-to-end smoke test of every trading-bot endpoint. Hits READ chain (state, queue) and WRITE chain (POST noop -> gateway -> queue -> bot -> action log) on both degen and stock bots. Returns per-check pass/fail with latency. Run this if a tool just returned an error, after a deploy, or whenever you're not sure the trading chain is alive. Cheap to call — takes ~10s and has zero side effects on positions or state.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
             "required": [],
         },
     },
