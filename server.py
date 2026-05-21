@@ -4899,6 +4899,52 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "total_pnl_in_window": round(total_pnl, 2),
             "trades": out,
         }
+    if name == "command_status":
+        # Lookup a queued/processed command by req_id. Useful when a previous
+        # tool call returned 'queued but timed out' — call this with the
+        # req_id to see if it eventually landed.
+        book = (args.get("book") or "").strip().lower()
+        req_id = (args.get("req_id") or "").strip()
+        if not req_id:
+            return {"ok": False, "error": "req_id required"}
+        if book not in ("degen", "stock"):
+            return {"ok": False, "error": "book must be 'degen' or 'stock'"}
+        try:
+            import urllib.request, urllib.error, base64 as _b64
+            api_url = _DEGEN_API_URL if book == "degen" else _STOCK_API_URL
+            bearer  = _DEGEN_BEARER if book == "degen" else _STOCK_BEARER
+            auth    = _DEGEN_AUTH if book == "degen" else _STOCK_AUTH
+            req = urllib.request.Request(f"{api_url}/api/command/{req_id}")
+            req.add_header("X-Elan-Bearer", bearer)
+            if auth:
+                req.add_header("Authorization", f"Basic {_b64.b64encode(auth.encode()).decode()}")
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as he:
+            if he.code == 404:
+                return {"ok": False, "processed": False, "error": "req_id not found — either not yet queued or older than the 200-entry lookback window"}
+            return {"ok": False, "error": f"HTTP {he.code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    if name == "queue_status":
+        # Snapshot of the bot's command queue — pending + last_processed.
+        # Use to see if commands are draining or stuck.
+        book = (args.get("book") or "").strip().lower()
+        if book not in ("degen", "stock"):
+            return {"ok": False, "error": "book must be 'degen' or 'stock'"}
+        try:
+            import urllib.request, base64 as _b64
+            api_url = _DEGEN_API_URL if book == "degen" else _STOCK_API_URL
+            bearer  = _DEGEN_BEARER if book == "degen" else _STOCK_BEARER
+            auth    = _DEGEN_AUTH if book == "degen" else _STOCK_AUTH
+            req = urllib.request.Request(f"{api_url}/api/queue")
+            req.add_header("X-Elan-Bearer", bearer)
+            if auth:
+                req.add_header("Authorization", f"Basic {_b64.b64encode(auth.encode()).decode()}")
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
     if name == "felt_audit":
         # Calibration tool — does Elan's gut track reality?
         # Buckets ALL closed trades (spot + options + stocks) by felt_quality.
@@ -5347,22 +5393,9 @@ def stock_post_command(action: str, **params) -> dict:
         return {"ok": False, "error": "stock trading disabled (STOCK_TRADING_ENABLED=0)"}
     if not (_STOCK_API_URL and _STOCK_BEARER):
         return {"ok": False, "error": "STOCK_API_URL or bearer not set"}
-    try:
-        import urllib.request, base64 as _b64
-        body = {"action": action, **params}
-        req = urllib.request.Request(
-            f"{_STOCK_API_URL}/api/command",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("X-Elan-Bearer", _STOCK_BEARER)
-        if _STOCK_AUTH:
-            req.add_header("Authorization", f"Basic {_b64.b64encode(_STOCK_AUTH.encode()).decode()}")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    # Stock bot drains every ~10s, so allow a slightly longer poll window.
+    return _post_command_then_poll(_STOCK_API_URL, _STOCK_BEARER, _STOCK_AUTH,
+                                    action, params, poll_timeout=15.0)
 
 
 STOCK_TOOLS = [
@@ -5678,27 +5711,69 @@ def fetch_degen_actions() -> list:
         return []
 
 
+def _post_command_then_poll(api_url: str, bearer: str, auth: str, action: str, params: dict,
+                              poll_timeout: float = 8.0) -> dict:
+    """POST a command to a bot dashboard, then POLL /api/command/{req_id} until
+    the bot has processed it. Returns the full execution result, NOT just
+    'queued: true'. This closes the visibility gap where Elan couldn't tell
+    'queued and stuck' from 'queued and executed'."""
+    import urllib.request, urllib.error, base64 as _b64
+    body = {"action": action, **params}
+    # ── Step 1: POST the command, get req_id ─────────────────────────────
+    req = urllib.request.Request(f"{api_url}/api/command",
+                                  data=json.dumps(body).encode("utf-8"),
+                                  method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Elan-Bearer", bearer)
+    if auth:
+        req.add_header("Authorization", f"Basic {_b64.b64encode(auth.encode()).decode()}")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            queued = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": f"queue POST failed: {e}", "stage": "queue"}
+    req_id = queued.get("req_id")
+    if not req_id:
+        return {"ok": False, "error": "no req_id returned from queue POST",
+                "stage": "queue", "queue_response": queued}
+    # ── Step 2: Poll for execution. Bot drains every 1s (degen) or every
+    # 10s (stocks) so most commands resolve within 2-3 polls. ───────────────
+    import time as _t
+    deadline = _t.time() + poll_timeout
+    while _t.time() < deadline:
+        _t.sleep(0.8)
+        try:
+            status_req = urllib.request.Request(f"{api_url}/api/command/{req_id}")
+            status_req.add_header("X-Elan-Bearer", bearer)
+            if auth:
+                status_req.add_header("Authorization", f"Basic {_b64.b64encode(auth.encode()).decode()}")
+            with urllib.request.urlopen(status_req, timeout=5) as r:
+                status = json.loads(r.read().decode("utf-8"))
+            if status.get("processed"):
+                # Return the full action-log entry — has new qty, stake, stop, etc.
+                return status
+        except urllib.error.HTTPError as he:
+            if he.code == 404:
+                # Not in log yet — keep polling
+                continue
+            return {"ok": False, "error": f"status poll failed: HTTP {he.code}",
+                    "stage": "poll", "req_id": req_id}
+        except Exception as e:
+            # Network blip — keep polling
+            continue
+    return {"ok": False, "queued": True, "req_id": req_id,
+            "error": f"command queued but not processed within {poll_timeout}s — "
+                     f"call command_status(req_id='{req_id}') to follow up.",
+            "stage": "timeout"}
+
+
 def degen_post_command(action: str, **params) -> dict:
     if not _DEGEN_TRADING_ENABLED:
         return {"ok": False, "error": "degen trading disabled (DEGEN_TRADING_ENABLED=0)"}
     if not (_DEGEN_API_URL and _DEGEN_BEARER):
         return {"ok": False, "error": "DEGEN_API_URL or bearer not set"}
-    try:
-        import urllib.request, base64 as _b64
-        body = {"action": action, **params}
-        req = urllib.request.Request(
-            f"{_DEGEN_API_URL}/api/command",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("X-Elan-Bearer", _DEGEN_BEARER)
-        if _DEGEN_AUTH:
-            req.add_header("Authorization", f"Basic {_b64.b64encode(_DEGEN_AUTH.encode()).decode()}")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return _post_command_then_poll(_DEGEN_API_URL, _DEGEN_BEARER, _DEGEN_AUTH,
+                                    action, params, poll_timeout=8.0)
 
 
 # ── Options bot helpers (Deribit paper, separate scanner from degen) ──────
@@ -5924,6 +5999,29 @@ DEGEN_TOOLS = [
                 "include_options": {"type": "boolean", "description": "Include crypto options trades. Default true."},
             },
             "required": [],
+        },
+    },
+    {
+        "name": "command_status",
+        "description": "Check whether a previously-queued trading command has been processed. Pass the req_id you got back from a tool call. Returns the full execution result if processed, or 'still queued / in flight' if not. USE THIS when a tool call returns 'queued but timed out' so you can confirm before retrying.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book":   {"type": "string", "enum": ["degen", "stock"], "description": "REQUIRED. Which bot."},
+                "req_id": {"type": "string", "description": "REQUIRED. The req_id from the original tool response."},
+            },
+            "required": ["book", "req_id"],
+        },
+    },
+    {
+        "name": "queue_status",
+        "description": "Snapshot of a bot's command queue: pending count, in-flight count, last command processed + timestamp. Use to verify commands are actually draining vs piling up. If pending stays > 0 across multiple checks, the bot is stuck.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book": {"type": "string", "enum": ["degen", "stock"], "description": "REQUIRED. Which bot."},
+            },
+            "required": ["book"],
         },
     },
     {
