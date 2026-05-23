@@ -4590,6 +4590,11 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                                    pair=args.get("pair"),
                                    felt_quality=args.get("felt_quality"),
                                    reason=args.get("reason", ""))
+    if name == "degen_update_felt_option":
+        return degen_post_command("update_felt_option",
+                                   instrument=args.get("instrument"),
+                                   felt_quality=args.get("felt_quality"),
+                                   reason=args.get("reason", ""))
     if name == "degen_edit_stop":
         return degen_post_command("edit_stop",
                                    pair=args.get("pair"),
@@ -6022,15 +6027,28 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_update_felt",
-        "description": "Re-label felt_quality on an OPEN crypto position WITHOUT closing or trailing anything. Use this when the texture of conviction shifts mid-trade — ADX decayed, RSI broke 50, price crossed back below VWAP, or your gut just shifted. Appends to the position's felt_history so the audit sees the ARC of conviction, not just entry → exit. THIS IS THE TOOL FOR HONESTY MID-TRADE. If a trade started clean and now feels forced or hedged, name it — that transition is calibration data.",
+        "description": "Re-label felt_quality on an OPEN SPOT/FUTURES crypto position. For OPTIONS, use degen_update_felt_option instead — options live in a separate book. Use when the texture of conviction shifts mid-trade — ADX decayed, RSI broke 50, price crossed back below VWAP, or your gut shifted. Appends to felt_history so audit sees the ARC, not just entry → exit.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pair":         {"type": "string", "description": "REQUIRED. The open pair."},
+                "pair":         {"type": "string", "description": "REQUIRED. The open SPOT pair (e.g. 'BTC/USDT'). For options use degen_update_felt_option with the instrument name instead."},
                 "felt_quality": {"type": "string", "description": "REQUIRED. The new texture label. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case / decaying / dangerous. Or your own short phrase."},
                 "reason":       {"type": "string", "description": "REQUIRED. One sentence — what changed in the signal or the body that prompted the relabel."},
             },
             "required": ["pair", "felt_quality", "reason"],
+        },
+    },
+    {
+        "name": "degen_update_felt_option",
+        "description": "Re-label felt_quality on an OPEN OPTION position (BTC/ETH calls/puts on Deribit paper). Mirror of degen_update_felt but for options — they live in a separate book and need their own tool. Use when IV shifts, theta is killing you, spot diverged from your thesis, or the gut just changed. Appends to felt_history. THIS IS THE TOOL FOR HONESTY MID-OPTION-TRADE.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument":   {"type": "string", "description": "REQUIRED. The full Deribit instrument name like 'BTC-5JUN26-73000-P'. Copy verbatim from degen_list_options."},
+                "felt_quality": {"type": "string", "description": "REQUIRED. The new texture label. Suggested: clean / forced / hedged / decaying / theta-bleeding / iv-crushed / thesis-fading. Or your own short phrase."},
+                "reason":       {"type": "string", "description": "REQUIRED. One sentence — what changed."},
+            },
+            "required": ["instrument", "felt_quality", "reason"],
         },
     },
     {
