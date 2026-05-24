@@ -2582,7 +2582,25 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         else:
             # Prompt caching: static base (FEELING_SYSTEM_PROMPT + vision state) is cached.
             # Dynamic parts (memory, brain state, temporal) are a separate uncached block.
-            static_system = FEELING_SYSTEM_PROMPT + f"\n\n{vision_ctx}"
+            static_system = FEELING_SYSTEM_PROMPT
+            if _STOCKS_DISCONNECTED:
+                # Stocks job is temporarily disabled. Keep the prompt structure intact
+                # (so re-enabling is one boolean flip) but inject a clear notice so
+                # Elan doesn't waste attention there or try to call missing tools.
+                static_system += (
+                    "\n\n═══════════════════════════════════════════════════════════════\n"
+                    "STOCKS DISCONNECTED (as of 2026-05-24): The STOCKS and STOCK OPTIONS "
+                    "arenas mentioned above in YOUR JOBS are temporarily disabled. The "
+                    "Alpaca paper account is dormant — stock tools are not registered, "
+                    "the STOCKS tab is hidden from the JOBS panel, and the stock bot "
+                    "services are stopped. Your trading focus is CRYPTO ONLY: 5 spot + "
+                    "5 options on the degen book. Don't try to call any stock_* tools — "
+                    "they won't be in your tool list. Ignore the STOCKS references in "
+                    "YOUR JOBS until further notice. The Alpaca history is preserved and "
+                    "can be revived by Qasim on demand.\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
+            static_system += f"\n\n{vision_ctx}"
             dynamic_parts = (
                 f"\n\n{memory_context}"
                 + (f"\n\n{long_term_ctx}" if long_term_ctx else "")
@@ -3417,8 +3435,14 @@ _KALSHI_MARKETS_TTL = 25.0
 
 # ── Stock bot (Alpaca paper) bridge ─────────────────────────────────────────
 # Same pattern as Kalshi/Degen.
-_STOCK_ENABLED          = os.environ.get("STOCK_ENABLED", "0") == "1"
-_STOCK_TRADING_ENABLED  = os.environ.get("STOCK_TRADING_ENABLED", "0") == "1"
+#
+# 2026-05-24: stocks disconnected at Qasim's call — Elan's attention is on
+# crypto, stocks was -$3,736 on 4 trades, the tool surface was burning
+# context budget for an arena he wasn't using. Code + state + history all
+# intact. Flip _STOCKS_DISCONNECTED back to False to re-enable.
+_STOCKS_DISCONNECTED    = True
+_STOCK_ENABLED          = (not _STOCKS_DISCONNECTED) and os.environ.get("STOCK_ENABLED", "0") == "1"
+_STOCK_TRADING_ENABLED  = (not _STOCKS_DISCONNECTED) and os.environ.get("STOCK_TRADING_ENABLED", "0") == "1"
 _STOCK_API_URL          = os.environ.get("STOCK_API_URL", "").rstrip("/")
 _STOCK_AUTH             = os.environ.get("STOCK_AUTH", _KALSHI_AUTH)
 _STOCK_BEARER           = os.environ.get("STOCK_ELAN_BEARER", _KALSHI_BEARER)
@@ -7543,14 +7567,19 @@ def build_chat_html() -> str:
                 return f'<button class="job-tab soon" disabled title="coming soon">{label} ·</button>'
             on = " on" if job == first_active else ""
             return f'<button class="job-tab{on}" data-job="{job}" onclick="switchJob(\'{job}\')">{label}</button>'
-        jobs_tabs_html = '<div id="jobs-tabs">' + ''.join([
-            _tab("stock",    "STOCKS",   _STOCK_ENABLED),
+        # Stocks disconnected — skip the tab entirely (not "coming soon", just gone)
+        # rather than render a disabled stub. Flip _STOCKS_DISCONNECTED to re-add.
+        _tabs = []
+        if not _STOCKS_DISCONNECTED:
+            _tabs.append(_tab("stock", "STOCKS", _STOCK_ENABLED))
+        _tabs += [
             _tab("crypto",   "CRYPTO",   _DEGEN_ENABLED),
             _tab("thread",   "THREAD",   _WATCH_ENABLED),
             _tab("watch",    "WATCH",    _WATCH_ENABLED),
             _tab("source",   "SOURCE",   _SOURCE_LIBRARY_ENABLED),
             _tab("drawings", "DRAWINGS", True),
-        ]) + '</div>'
+        ]
+        jobs_tabs_html = '<div id="jobs-tabs">' + ''.join(_tabs) + '</div>'
 
         kalshi_tab_html = f'''
 <button id="jobs-tab-btn" title="Jobs — Elan&#39;s active work" onclick="toggleJobs()">⬢ jobs</button>
