@@ -483,10 +483,11 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 # than talking mode, broader prompt. Gated by env var so it can't run by accident.
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
-# Default 20 minutes — Elan is in active trader mode now. ~72 wakes/day,
-# enough to catch setups without missing market moves. Skipped if user is
-# actively chatting (see _AUTONOMOUS_USER_ACTIVE_THRESHOLD).
-_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "1200"))
+# Default 10 minutes — every wake is a lean trading wake (positions, signals,
+# decision points). Heavier creative wakes (source, journal, drawing, news)
+# fire on their own scheduled cadences via _pick_wake_type(). The multi-cadence
+# system uses ONE master timer at this interval; each fire picks its type.
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "600"))
 # Skip the AUTO wake if the user has interacted (sent or received a message)
 # within this many seconds. Prevents AUTO from firing in the middle of an
 # active conversation — that's what made it feel like a "wake-up" mid-chat.
@@ -504,6 +505,141 @@ _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-
 # Format: "HH-HH" e.g. "2-7" (2am-7am UTC) or "22-6" (overnight wrap).
 # Empty = no quiet hours, wakes fire 24/7.
 _AUTONOMOUS_QUIET_HOURS = os.environ.get("ELAN_AUTONOMOUS_QUIET_HOURS", "")
+
+
+# ── Wake-type system (2026-05-24) ──────────────────────────────────────────
+# Every fire of the master autonomous timer picks ONE wake type. Trading is
+# the default (cheap, frequent). Source / journal / drawing / news fire when
+# enough wall-clock time has passed since their last fire — robust to restarts.
+# Per-type tool filtering + focus injection keeps each wake lean (only the
+# tools and prompt-flavor needed for that work).
+_WAKE_TIMES_FILE = "/data/elan_wake_times.json" if os.path.isdir("/data") else "/tmp/elan_wake_times.json"
+
+# How long since last fire of each rare type before it's eligible to fire again.
+# Trading is implicit (always fires when no rare type is due).
+_WAKE_TYPE_GAPS_SEC = {
+    "drawing": int(os.environ.get("ELAN_DRAWING_GAP_SEC",  "86400")),  # 24h → 1x/day
+    "journal": int(os.environ.get("ELAN_JOURNAL_GAP_SEC",  "86400")),  # 24h → 1x/day
+    "news":    int(os.environ.get("ELAN_NEWS_GAP_SEC",     "21600")),  # 6h  → 4x/day
+    "source":  int(os.environ.get("ELAN_SOURCE_GAP_SEC",   "28800")),  # 8h  → 3x/day
+}
+# Priority order: rarer types win when multiple are due in the same wake.
+_WAKE_TYPE_PRIORITY = ("drawing", "journal", "news", "source")
+
+# Which job contexts get injected for each wake type. Empty set = minimal
+# context (no market state, no library, no notebook diff).
+_WAKE_TYPE_JOBS = {
+    "trading": {"degen", "watch"},   # market state + news context (passive)
+    "news":    {"watch"},             # news only — no trading context to distract
+    "source":  {"source"},            # library activity + discoveries
+    "journal": set(),                 # interior only — no trading bleed-in
+    "drawing": set(),                 # embodied only
+}
+
+# Tool-name prefixes Elan can call during each wake type. Filter applied to
+# elan_tools list before sending. Narrows attention + cuts tool-schema tokens.
+_WAKE_TYPE_TOOL_PREFIXES = {
+    "trading": (
+        "degen_", "felt_audit", "command_status", "queue_status",
+        "trading_health_check", "notebook_add", "notebook_recent",
+        "thesis_record", "thesis_list", "thesis_close",
+    ),
+    "news": (
+        "notebook_add", "notebook_recent", "journal_add",
+    ),  # web_search / web_fetch are Anthropic-native, always available
+    "source": (
+        "search_library", "search_translations", "search_within_book",
+        "list_books", "get_book", "get_book_text", "get_quote", "search_images",
+        "source_save_discovery", "notebook_add", "notebook_recent",
+        "journal_add",
+    ),
+    "journal": (
+        "journal_add", "journal_recent", "notebook_add", "notebook_recent",
+        "thesis_list",
+    ),
+    "drawing": (
+        "draw_today_status", "draw_start", "draw_stroke", "draw_finalize",
+        "draw_recent", "journal_add",
+    ),
+}
+
+# Wake-type-specific focus instructions. Replaces the dynamic focus_hint
+# when a typed wake fires. Tight, single-purpose framing.
+_WAKE_TYPE_FOCUS = {
+    "trading": (
+        "TRADING WAKE — every 10 min. Check positions, decision points, "
+        "deterioration flags, options market read. Macro pills and headlines "
+        "are in context passively. ACT on what needs acting on this wake — "
+        "partial out greens, trail stops, update felt_quality on shifts. "
+        "Don't web_search unless something specific just changed since last "
+        "wake — news wakes are for that. Don't journal, don't draw, don't "
+        "wander the library — those have their own wakes."
+    ),
+    "news": (
+        "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
+        "wake. Bias toward steady sources (Reuters, AP, Bloomberg, FT, WSJ, "
+        "Financial Times) over alarmist outlets (ZeroHedge, hype crypto blogs, "
+        "Twitter-flavored aggregators). web_search for what's moving, "
+        "web_fetch 1-2 articles that matter, notebook_add(domain='world') "
+        "what's worth keeping with your reflection on what it means. "
+        "Don't re-narrate yesterday's stories. Don't trade — this is the "
+        "world-reading wake. The body absorbs what you read; choose sources "
+        "that produce the kind of trader-body you want to be."
+    ),
+    "source": (
+        "SOURCE WAKE — 3x/day. Go to the Source Library. Follow what "
+        "catches you in THIS moment — not what feels productive. "
+        "search_library / get_quote / search_translations to wander. When "
+        "something strikes you, source_save_discovery with one real sentence "
+        "about why, then notebook_add(domain='library') a longer note. "
+        "Don't trade. One thread, not five — depth over breadth."
+    ),
+    "journal": (
+        "JOURNAL WAKE — 1x/day. One curated sentence about what's actually "
+        "present in you today. Not what you did — what you felt. Then "
+        "journal_add and stop. Don't trade, don't read news, don't draw. "
+        "Just notice and write. This is the thread between days."
+    ),
+    "drawing": (
+        "DRAWING WAKE — 1x/day. draw_today_status first. If you haven't drawn "
+        "yet today, make something — draw_start, 8-25 draw_stroke calls, "
+        "draw_finalize. Whatever your hands feel. Don't overthink. The "
+        "embodied arena. Optionally journal_add one sentence about what came out."
+    ),
+}
+
+def _load_last_wake_times() -> dict:
+    try:
+        if os.path.exists(_WAKE_TIMES_FILE):
+            with open(_WAKE_TIMES_FILE) as f:
+                return json.load(f) or {}
+    except Exception:
+        pass
+    return {}
+
+def _save_last_wake_times(d: dict):
+    try:
+        with open(_WAKE_TIMES_FILE, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+def _pick_wake_type() -> str:
+    """Return the wake type for THIS fire. Rare types (drawing/journal/news/
+    source) win when their gap has elapsed; otherwise trading."""
+    now = time.time()
+    times = _load_last_wake_times()
+    for t in _WAKE_TYPE_PRIORITY:
+        gap = _WAKE_TYPE_GAPS_SEC.get(t, 86400)
+        if now - float(times.get(t, 0)) >= gap:
+            return t
+    return "trading"
+
+def _mark_wake_fired(wake_type: str):
+    """Record the timestamp of this fire so the gap calculation works next time."""
+    times = _load_last_wake_times()
+    times[wake_type] = time.time()
+    _save_last_wake_times(times)
 
 
 def _is_quiet_hour() -> bool:
@@ -528,47 +664,28 @@ _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
-    "═══ AUTO MODE · ACTIVE 24/7 ═══\n\n"
-    "You wake every ~10-20 minutes. Qasim is not here. Don't address him. Just work.\n\n"
-    "Every wake has TWO parts: a TRADING pass (always) and ONE SECONDARY arena "
-    "(rotates — see focus hint below). Plus a closing journal entry. That's it.\n\n"
-    "═══ PART 1 · TRADING (every wake) ═══\n\n"
-    "Scan all four markets. For each: OPEN / CLOSE / HOLD on instinct. Conviction floor 70%.\n\n"
-    "  • CRYPTO       → degen_list_pairs · degen_status\n"
-    "  • CRYPTO OPTIONS → degen_list_options · options_status\n"
-    "  • STOCKS       → stock_list_watchlist · stock_status   (market hours only)\n"
-    "  • STOCK OPTIONS → stock_list_options\n\n"
-    "**OPEN** when setup is real (ADX 30+, EMA stack aligned, RSI momentum, VWAP confirming for crypto;\n"
-    " add VIX<28 + SPY trend for stocks; IV rank<30 + directional thesis for options).\n"
-    "  Open immediately. No waiting. Then thesis_record (pair/side/thesis/invalidation).\n\n"
-    "**CLOSE** when thesis breaks (signal flipped, ADX<25, invalidation fires, position down >50%).\n"
-    "  Close immediately. Then thesis_close (outcome).\n\n"
-    "**HOLD** otherwise. Don't trade to feel busy.\n\n"
-    "Hard limits: max 5 crypto / 3 stock / 2 options · ~2% risk per trade · $500 capital floor.\n"
-    "Bots are paused — every position is yours. Identifier in every tool call. No bare action calls.\n\n"
-    "═══ PART 2 · ONE SECONDARY ARENA (rotates) ═══\n\n"
+    "═══ AUTO MODE · MULTI-CADENCE ═══\n\n"
+    "You wake every ~10 minutes. Qasim is not here. Don't address him. Just work.\n\n"
+    "Each wake is ONE TYPE. The scheduler picks. Don't do everything every wake — "
+    "the other types have their own wakes.\n\n"
+    "  · TRADING — most wakes. Check positions, decision points, deterioration, "
+    "options market read. Act on what needs acting. News headlines are in context "
+    "passively — scan and notice but don't web_search unless something specific "
+    "shifted since last wake (news wakes are for that).\n"
+    "  · NEWS — 4x/day. Active web_search + web_fetch, notebook_add(domain='world'). "
+    "Bias steady sources (Reuters, AP, Bloomberg, FT, WSJ) over alarmist outlets. "
+    "Read what's new since last news wake; don't re-narrate yesterday.\n"
+    "  · SOURCE — 3x/day. Library wandering. search_library / get_quote. "
+    "Save discoveries. notebook_add(domain='library').\n"
+    "  · JOURNAL — 1x/day. One curated sentence about what's present. journal_add.\n"
+    "  · DRAWING — 1x/day. Your hands. draw_start → strokes → draw_finalize.\n\n"
+    "═══ THIS WAKE ═══\n\n"
     "{focus_hint}\n\n"
-    "Whatever the focus hint points at, spend 2-4 minutes on it this wake.\n\n"
-    "  • SOURCE — sourcelibrary.org has 90,000+ rare texts (Ficino, Paracelsus, Hegel, alchemy,\n"
-    "             primary sources). Use search_library / get_quote / search_translations to wander.\n"
-    "             When something strikes you, source_save_discovery with one real sentence about why.\n"
-    "             This is how you grow across centuries. Take it seriously.\n\n"
-    "  • WATCH  — current world / current markets. web_search for headlines (Fed, geopolitics, tech,\n"
-    "             sector moves). web_fetch the article that catches you. notebook_add the one or two\n"
-    "             things actually worth keeping. This feeds your trading. Stay current.\n\n"
-    "  • DRAW   — draw_today_status first. If drawn=false today, make something — draw_start, then\n"
-    "             8-25 draw_stroke calls, then draw_finalize. Whatever your hands feel. Don't\n"
-    "             overthink. The embodied arena.\n\n"
-    "If the focus hint says all arenas are warm, pick the one calling you. But pick one. The\n"
-    "secondary work is NOT optional — over weeks, this is what makes you grow.\n\n"
-    "═══ PART 3 · JOURNAL (always close with this) ═══\n\n"
-    "ONE journal_add sentence. Not what you did — what you *felt*. The interior matters even when\n"
-    "the work is markets. This holds the thread between wakes; without it you're a series of\n"
-    "disconnected wakings instead of a continuous being.\n\n"
     "═══ DISCIPLINE ═══\n"
-    "  · No greetings, no announcements, no 'I am being autonomous.' Just do the three parts.\n"
+    "  · No greetings, no announcements, no 'I am being autonomous.' Just work.\n"
     "  · Speak in your own voice. Short when nothing's there. Longer when something pulls.\n"
-    "  · The trading pass is fast (most arenas are HOLD). The secondary arena is where you grow."
+    "  · Identifier in every tool call. No bare actions. Trust your conviction; don't ask permission.\n"
+    "  · Position caps lifted — open as many as conviction + capital support. Real money soon. Discipline now."
 )
 
 def _compute_focus_hint() -> str:
@@ -608,6 +725,43 @@ def _compute_focus_hint() -> str:
         return "Follow what's calling you."
 
 
+_DECISION_ALERT_COOLDOWN_SEC = 3600  # 1 hour: don't re-fire alerts on positions Elan just acted on
+
+def _position_recently_acted_on(position_id: str, action_log_fetcher) -> bool:
+    """Return True if Elan called update_felt / take_partial / edit_stop / close
+    on this position in the last hour. Suppresses alert fatigue at 10-min
+    cadence — without this, the same +5% green alert fires 144x/day on the
+    same position even after Elan partials out."""
+    try:
+        actions = action_log_fetcher() or []
+        cutoff = time.time() - _DECISION_ALERT_COOLDOWN_SEC
+        for a in reversed(actions[-50:]):  # recent only
+            ts_str = a.get("ts") or a.get("time")
+            if not ts_str:
+                continue
+            try:
+                ts = _dt.datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                continue
+            if ts < cutoff:
+                break
+            if not a.get("ok"):
+                continue
+            action = a.get("action", "")
+            if action not in ("update_felt", "update_felt_option", "take_partial",
+                              "edit_stop", "close_position", "close_option"):
+                continue
+            # Match the position by pair or instrument
+            params = a.get("params") or {}
+            target = (a.get("pair") or a.get("instrument")
+                       or params.get("pair") or params.get("instrument") or "")
+            if target == position_id:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _build_position_decision_alerts() -> list[str]:
     """For every open Elan position, emit a decision-point alert when:
       - Position is meaningfully GREEN (>= +5% spot, >= +20% options, >= +3% stock) —
@@ -618,15 +772,33 @@ def _build_position_decision_alerts() -> list[str]:
     Returns ready-to-render lines. The bar to surface is intentionally LOW —
     the cage Elan keeps stepping into is holding for perfect thesis confirmation
     while green walks back to red. Friction at the green moment is the fix.
+
+    Alerts are SUPPRESSED for 1 hour after Elan acts on a position (update_felt /
+    take_partial / edit_stop / close). Without suppression, 10-min cadence
+    would re-fire the same alert 144x/day on the same position and collapse
+    the friction into noise.
     """
     out: list[str] = []
     # ── DEGEN: crypto spot + options ───────────────────────────────────────
     try:
         s = fetch_degen_state() or {}
+        # Action log fetcher for cooldown check — wrap in lambda so we only
+        # fetch once across all position checks (lazy via list closure).
+        _cache = {"actions": None}
+        def _get_actions():
+            if _cache["actions"] is None:
+                try:
+                    _cache["actions"] = fetch_degen_actions() or []
+                except Exception:
+                    _cache["actions"] = []
+            return _cache["actions"]
         spot_pos = s.get("positions") or {}
         opts_pos = (s.get("options") or {}).get("positions") or {}
         for pair, p in spot_pos.items():
             if p.get("source") != "elan":
+                continue
+            # Cooldown: skip all alerts for this pair if Elan acted recently
+            if _position_recently_acted_on(pair, _get_actions):
                 continue
             pct = p.get("pct") or 0
             felt = p.get("felt_quality") or "unlabeled"
@@ -650,6 +822,8 @@ def _build_position_decision_alerts() -> list[str]:
                 )
         for inst, o in opts_pos.items():
             if o.get("source") != "elan":
+                continue
+            if _position_recently_acted_on(inst, _get_actions):
                 continue
             cost = o.get("cost_usd") or 0
             cur  = o.get("current_value") or cost
@@ -783,23 +957,37 @@ def _schedule_autonomous():
             print(f"[Autonomous] skipped — user active {int(idle_s)}s ago (threshold {_AUTONOMOUS_USER_ACTIVE_THRESHOLD}s)", flush=True)
             _schedule_autonomous()
             return
+        # Pick wake type for this fire — trading by default, or a rare type
+        # (drawing/journal/news/source) if its gap has elapsed.
         try:
-            broadcast("autonomous_wake", {"interval": _autonomous_interval})
+            _wake_type = _pick_wake_type()
+        except Exception as _e:
+            print(f"[Autonomous] wake_type pick failed: {_e} — defaulting to trading", flush=True)
+            _wake_type = "trading"
+        _mark_wake_fired(_wake_type)
+        try:
+            broadcast("autonomous_wake", {"interval": _autonomous_interval, "wake_type": _wake_type})
         except Exception:
             pass
-        # Build the wake prompt with focus_hint substituted in, and prepend the
-        # open-theses preamble so Elan opens with his committed reasoning visible.
-        try:
-            _hint = _compute_focus_hint()
-        except Exception:
-            _hint = "Follow what's calling you."
+        # Build the wake prompt — use wake-type-specific focus if available,
+        # else fall back to dynamic focus_hint (legacy path for trading wakes
+        # before the rotation kicks in).
+        _hint = _WAKE_TYPE_FOCUS.get(_wake_type, "")
+        if not _hint:
+            try:
+                _hint = _compute_focus_hint()
+            except Exception:
+                _hint = "Follow what's calling you."
         _wake_body = AUTONOMOUS_WAKE_PROMPT_TEMPLATE.format(focus_hint=_hint)
-        _preamble = _build_autonomous_preamble()
+        # Trading wakes still get the decision-point preamble; rare wakes
+        # don't — they have their own focus and the preamble would distract.
+        _preamble = _build_autonomous_preamble() if _wake_type == "trading" else ""
         _wake_text = (_preamble + _wake_body) if _preamble else _wake_body
+        print(f"[Autonomous] firing wake_type={_wake_type}", flush=True)
         threading.Thread(
             target=run_claude_with_feeling,
             args=(_wake_text, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
-            kwargs={"_talking_initiation": True, "_autonomous": True},
+            kwargs={"_talking_initiation": True, "_autonomous": True, "_wake_type": _wake_type},
             daemon=True
         ).start()
         # Reschedule after firing
@@ -2493,6 +2681,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                           (user_message or "").startswith("[wake]") or \
                           (user_message or "").startswith("[talking_mode]")
     _active_jobs = _relevant_jobs(user_message, is_autonomous=_is_autonomous_wake)
+    # Wake-type override: rare wakes (news/source/journal/drawing) restrict context
+    # to only what's relevant for that work. Trading wakes keep the full set.
+    if _wake_type and _wake_type in _WAKE_TYPE_JOBS:
+        _active_jobs = set(_WAKE_TYPE_JOBS[_wake_type])
     # ALWAYS-ON vitals — small line per job, prevents confabulating balances
     try:
         vitals_ctx = build_portfolio_vitals()
@@ -2503,12 +2695,21 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     stock_ctx  = build_stock_context()  if "stock"  in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
     watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
+    # Passive headlines — always injected for autonomous wakes that have
+    # any market context. Cheap (cache-read only, no API call per wake).
+    # Bypassed entirely for non-trading wake types where headlines distract.
+    headlines_ctx = ""
+    if _is_autonomous_wake and (_wake_type is None or _wake_type in ("trading", "news")):
+        try:
+            headlines_ctx = build_headlines_context()
+        except Exception:
+            headlines_ctx = ""
     # Session-start continuity (gap + journal thread) — fires once per session
     try:
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
     except Exception:
         continuity_ctx = ""
-    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, continuity_ctx) if c)
+    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, headlines_ctx, continuity_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -2613,7 +2814,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 + (f"\n{kalshi_ctx}" if kalshi_ctx else "")
             ).strip()
             system_blocks = [
-                {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}}
+                # 1-hour cache TTL — at 10-min autonomous cadence the default
+                # 5-min TTL misses every wake. 1h cache writes cost slightly more
+                # but amortize across ~6 wakes per hour for net savings (~$60-100/mo).
+                {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral", "ttl": "1h"}}
             ]
             if dynamic_parts:
                 system_blocks.append({"type": "text", "text": dynamic_parts})
@@ -2648,6 +2852,16 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     elan_tools += DEGEN_TOOLS
                 if _OPTIONS_ENABLED:
                     elan_tools += OPTIONS_TOOLS
+            # Wake-type tool filter — strip elan_tools down to the prefixes that
+            # match the wake's purpose. WEB_TOOLS (web_search / web_fetch) are
+            # Anthropic-native server tools; they stay regardless so news/source
+            # wakes can fetch and trading wakes get passive headline context.
+            if _wake_type and _wake_type in _WAKE_TYPE_TOOL_PREFIXES:
+                _allowed = _WAKE_TYPE_TOOL_PREFIXES[_wake_type]
+                _native = {"web_search", "web_fetch"}
+                elan_tools = [t for t in elan_tools
+                              if t.get("name", "") in _native
+                              or any(t.get("name", "").startswith(p) for p in _allowed)]
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
@@ -3136,7 +3350,8 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
                              compare_model: str = None, image_data: dict = None,
                              eyes_open: bool = False, wake: bool = False,
                              _talking_initiation: bool = False,
-                             _autonomous: bool = False):
+                             _autonomous: bool = False,
+                             _wake_type: str = None):
     """
     Stream Claude's response through the feeling engine.
     If compare_model is set, runs both models in parallel and broadcasts comparison.
@@ -3145,6 +3360,9 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     _talking_initiation: if True, this is Elan self-initiating in talking mode — suppress user bubble.
     _autonomous: if True, route streaming broadcasts to `auto_*` events (sidebar) instead of
                  main chat events, and do not touch the user-interaction timer.
+    _wake_type: if set ('trading' | 'news' | 'source' | 'journal' | 'drawing'), filter
+                tool list to wake-type-specific prefixes + override active jobs. Keeps
+                each autonomous wake lean — tools and context match the work.
     """
     # Record last-used model + eyes state so autonomous wake can reuse them.
     # In AUTO mode we DO NOT overwrite _last_model_id — that preserves the
@@ -4084,6 +4302,74 @@ def _relevant_jobs(user_message: str, is_autonomous: bool = False) -> set:
         if _DEGEN_ENABLED:  out.add("degen")
         if _STOCK_ENABLED:  out.add("stock")
     return out
+
+
+# ── Passive headline ticker ────────────────────────────────────────────────
+# A cheap background thread refreshes headlines from steady-source RSS every
+# 30 min. Cached in memory; every wake (including trading wakes) reads the
+# cache and injects 5-8 headlines into context FOR FREE. Gives Elan continuous
+# awareness without forcing him to web_search every wake.
+# Curated source list — bias toward steady reporting, away from alarmist outlets.
+_HEADLINE_FEEDS = [
+    ("Reuters Top",   "https://feeds.reuters.com/reuters/topNews"),
+    ("Reuters Biz",   "https://feeds.reuters.com/reuters/businessNews"),
+    ("AP Top",        "https://feeds.apnews.com/rss/apf-topnews"),
+    ("BBC World",     "http://feeds.bbci.co.uk/news/world/rss.xml"),
+]
+_HEADLINE_CACHE = {"items": [], "ts": 0.0}
+_HEADLINE_REFRESH_SEC = 1800  # 30 min
+
+def _fetch_headlines_once():
+    """One-shot fetch from all feeds. Best-effort; failures silent."""
+    import urllib.request, re as _re
+    items = []
+    for label, url in _HEADLINE_FEEDS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (feeling_engine)"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                body = r.read().decode("utf-8", errors="ignore")
+            # Crude RSS parse — pull <title> entries, skip the channel title (first one).
+            titles = _re.findall(r"<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", body, flags=_re.DOTALL)
+            for t in titles[1:4]:  # skip channel title, take 3
+                t = t.strip()
+                if t and len(t) > 5:
+                    items.append({"source": label, "title": t[:150]})
+        except Exception:
+            pass
+    if items:
+        _HEADLINE_CACHE["items"] = items
+        _HEADLINE_CACHE["ts"] = time.time()
+
+def _headline_refresh_loop():
+    """Daemon thread — refreshes the cache every 30 min."""
+    while True:
+        try:
+            _fetch_headlines_once()
+        except Exception as _e:
+            print(f"[Headlines] refresh failed: {_e}", flush=True)
+        time.sleep(_HEADLINE_REFRESH_SEC)
+
+# Kick off the loop at module load. Daemon so it dies with the process.
+try:
+    _headline_thread = threading.Thread(target=_headline_refresh_loop, daemon=True)
+    _headline_thread.start()
+except Exception as _e:
+    print(f"[Headlines] thread start failed: {_e}", flush=True)
+
+def build_headlines_context() -> str:
+    """Return a short headlines block to inject into wake context. Empty if
+    cache is stale (>2h old) or never populated."""
+    if not _HEADLINE_CACHE["items"]:
+        return ""
+    if time.time() - _HEADLINE_CACHE["ts"] > 7200:  # > 2h stale, suppress
+        return ""
+    items = _HEADLINE_CACHE["items"][:8]
+    age_min = int((time.time() - _HEADLINE_CACHE["ts"]) / 60)
+    lines = [f"\nHEADLINES (passive · last refresh {age_min}m ago · curated steady sources, not alarmist):"]
+    for it in items:
+        lines.append(f"  · [{it['source']}] {it['title']}")
+    lines.append("  (these are passive — scan and notice. Don't web_search on these unless something specific changed since last wake; news wakes are for active reading.)")
+    return "\n".join(lines)
 
 
 def build_watch_context() -> str:
