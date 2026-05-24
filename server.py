@@ -6253,19 +6253,19 @@ def build_degen_context() -> str:
     paused = s.get("paused", False)
 
     role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
-            "They have separate budgets, separate balances, separate accounting, AND separate position caps. "
-            "5 spot positions + 5 options positions = up to 10 concurrent crypto trades. "
-            "The caps don't share — opening an option doesn't take a slot from spot, or vice versa. "
+            "They have separate budgets, separate balances, separate accounting. "
+            "POSITION CAPS ARE LIFTED — open as many spot or option positions as your conviction + capital support. "
+            "It's your discretion now. The only enforcement is balance + sane sizing. "
             "Spot uses leverage 5-8x with stop/take-profit. Options are BTC/ETH calls/puts via Deribit paper. "
-            "Paper only.") \
+            "Paper only — but build trade discipline like it's real, because soon it will be.") \
            if _DEGEN_TRADING_ENABLED else \
            "you can comment on positions and strategy; you cannot trade yet."
 
     lines = [
         f"\nDEGEN CRYPTO (paper) — TWO WALLETS, ACCOUNTED SEPARATELY:",
-        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)}/5 open positions · pnl ${spot_pnl:+.2f}",
-        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)}/5 open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
-        f"  position caps are SEPARATE: 5 spot + 5 options = up to 10 concurrent crypto positions across the two books.",
+        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
+        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  position caps LIFTED — open as many spot or option positions as your conviction + capital support. Your discretion. The only floor is balance check + sane sizing.",
     ]
     # ── OPTIONS MARKET READ — IV regime, DVOL trend, signal, suggested DTE ──
     # The spot signals (ADX/RSI/conviction in `pairs`) tell you direction.
