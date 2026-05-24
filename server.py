@@ -2606,7 +2606,7 @@ def _consolidate_session_async(session_id: str):
 def _stream_one_model(model_id: str, user_message: str, messages: list,
                       tracker: "EmotionalStateTracker", memory: "FeelingMemory",
                       out: dict, label: str, eyes_open: bool = False,
-                      autonomous: bool = False):
+                      autonomous: bool = False, _wake_type: str = None):
     """Stream a single model, fill out[label] with final state.
 
     When autonomous=True, text chunks broadcast to `auto_text_chunk` instead
@@ -3517,7 +3517,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         results = {}
         _stream_one_model(model_id, effective_message, get_messages(),
                           tracker_a, memory_a, results, "A", eyes_open,
-                          autonomous=_autonomous)
+                          autonomous=_autonomous, _wake_type=_wake_type)
         state = results.get("A", {})
         add_message("assistant", state.get("response_text", ""))
         # AYA's OWN response can trigger body changes — motor agency + asterisk actions
