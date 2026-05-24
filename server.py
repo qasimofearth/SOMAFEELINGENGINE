@@ -6168,16 +6168,19 @@ def build_degen_context() -> str:
     paused = s.get("paused", False)
 
     role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
-            "They have separate budgets, separate balances, separate accounting. You can trade in either. "
-            "Spot uses leverage 5-8x with stop/take-profit auto-management. Options are calls/puts on BTC/ETH "
-            "via Deribit paper book — different sizing logic, different lifecycle. Paper only.") \
+            "They have separate budgets, separate balances, separate accounting, AND separate position caps. "
+            "5 spot positions + 5 options positions = up to 10 concurrent crypto trades. "
+            "The caps don't share — opening an option doesn't take a slot from spot, or vice versa. "
+            "Spot uses leverage 5-8x with stop/take-profit. Options are BTC/ETH calls/puts via Deribit paper. "
+            "Paper only.") \
            if _DEGEN_TRADING_ENABLED else \
            "you can comment on positions and strategy; you cannot trade yet."
 
     lines = [
         f"\nDEGEN CRYPTO (paper) — TWO WALLETS, ACCOUNTED SEPARATELY:",
-        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
-        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)}/5 open positions · pnl ${spot_pnl:+.2f}",
+        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)}/5 open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  position caps are SEPARATE: 5 spot + 5 options = up to 10 concurrent crypto positions across the two books.",
         f"  combined: pnl ${combined_pnl:+.2f} · {wins} wins / {len(all_closed)} closed · {'PAUSED' if paused else 'live'}",
         f"  role: {role}",
     ]
