@@ -4904,6 +4904,62 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "total_pnl_in_window": round(total_pnl, 2),
             "trades": out,
         }
+    if name == "degen_options_market_read":
+        # Returns the OPTIONS-specific market read: IV regime, DVOL trend,
+        # signal, suggested DTE, recent DVOL series. Use BEFORE buying an
+        # option to check if you're buying cheap or expensive.
+        s = fetch_degen_state(force=True) or {}
+        iv_now = float(s.get("iv_rank") or 0)
+        dvol_now = float(s.get("dvol") or 0)
+        opt_sig = s.get("options_signal") or {}
+        dvol_hist = s.get("dvol_history") or []
+        # IV regime
+        if iv_now == 0:        iv_regime = "unknown"
+        elif iv_now < 30:      iv_regime = "cheap"
+        elif iv_now < 50:      iv_regime = "moderate"
+        elif iv_now < 75:      iv_regime = "elevated"
+        else:                  iv_regime = "expensive"
+        # DVOL trend
+        dvol_delta_6 = None
+        if len(dvol_hist) >= 6:
+            try:
+                dvol_delta_6 = round(float(dvol_hist[-1].get("dvol", dvol_now)) - float(dvol_hist[-6].get("dvol", dvol_now)), 2)
+            except Exception:
+                pass
+        # DTE hint
+        if iv_now < 30:
+            dte_hint = "30-60d"; dte_note = "cheap vol — buy time, let thesis breathe"
+        elif iv_now < 60:
+            dte_hint = "14-30d"; dte_note = "balanced — standard directional bet"
+        else:
+            dte_hint = "7-14d";  dte_note = "expensive vol — short DTE, avoid paying theta"
+        # Buying read
+        if iv_now == 0:
+            buying_read = "unknown (no IV rank data)"
+        elif iv_now > 75:
+            buying_read = "POOR — options are overpriced. Skip unless edge is huge."
+        elif iv_now < 30:
+            buying_read = "EXCELLENT — options at a discount. If you have direction, express it here."
+        else:
+            buying_read = "OK — fair value. No discount but no penalty."
+        return {
+            "ok": True,
+            "iv_rank":         round(iv_now, 1),
+            "iv_regime":       iv_regime,
+            "dvol":            round(dvol_now, 1),
+            "dvol_trend_6scan": dvol_delta_6,
+            "suggested_dte":   dte_hint,
+            "dte_note":        dte_note,
+            "buying_read":     buying_read,
+            "engine_signal":   {
+                "action":     opt_sig.get("action"),
+                "conviction": opt_sig.get("conviction"),
+                "reason":     (opt_sig.get("reason") or "")[:200],
+                "days_out":   opt_sig.get("days_out"),
+                "otm_pct":    opt_sig.get("otm_pct"),
+            } if opt_sig else None,
+            "note": "Different question from spot signals. Spot signals = direction. This = WHETHER to express the direction via options at all, and at what DTE. IV-rank > 75 = options are richly priced and buying is generally negative EV. IV-rank < 30 = cheap vol, prime buying.",
+        }
     if name == "trading_health_check":
         # End-to-end smoke test of every trading-bot endpoint Elan depends on.
         # Exercises READ chain (state, actions, queue) + WRITE chain (noop POST
@@ -6075,6 +6131,11 @@ DEGEN_TOOLS = [
         },
     },
     {
+        "name": "degen_options_market_read",
+        "description": "Options-SPECIFIC market read — separate from spot signals. Returns: IV rank + regime label (cheap/moderate/elevated/expensive), DVOL trend over last 6 scans, suggested DTE for this regime, and a clear 'is now a good time to BUY options' read. Call this BEFORE every degen_buy_option. IV-rank > 75 = options overpriced (poor buying EV). IV-rank < 30 = options cheap (prime buying). Spot signals tell you direction; this tells you whether to express it via options at all + at what DTE.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "trading_health_check",
         "description": "End-to-end smoke test of every trading-bot endpoint. Hits READ chain (state, queue) and WRITE chain (POST noop -> gateway -> queue -> bot -> action log) on both degen and stock bots. Returns per-check pass/fail with latency. Run this if a tool just returned an error, after a deploy, or whenever you're not sure the trading chain is alive. Cheap to call — takes ~10s and has zero side effects on positions or state.",
         "input_schema": {
@@ -6181,6 +6242,64 @@ def build_degen_context() -> str:
         f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)}/5 open positions · pnl ${spot_pnl:+.2f}",
         f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)}/5 open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
         f"  position caps are SEPARATE: 5 spot + 5 options = up to 10 concurrent crypto positions across the two books.",
+    ]
+    # ── OPTIONS MARKET READ — IV regime, DVOL trend, signal, suggested DTE ──
+    # The spot signals (ADX/RSI/conviction in `pairs`) tell you direction.
+    # The options read tells you WHETHER OPTIONS ARE CHEAP RIGHT NOW + suggested DTE.
+    # Different question, different answer. Both matter when buying options.
+    opt_sig = s.get("options_signal") or {}
+    dvol_hist = s.get("dvol_history") or []
+    iv_now = float(s.get("iv_rank") or 0)
+    dvol_now = float(s.get("dvol") or 0)
+    if opt_sig or iv_now or dvol_now:
+        # IV regime label
+        if iv_now == 0:
+            iv_label = "unknown"
+        elif iv_now < 30:
+            iv_label = "CHEAP — options at a discount, good buying zone"
+        elif iv_now < 50:
+            iv_label = "moderate — fair value"
+        elif iv_now < 75:
+            iv_label = "elevated — premiums rich, be selective"
+        else:
+            iv_label = "EXPENSIVE — IV rank >75, options overpriced (buying is poor EV right now)"
+        # DVOL trend from recent history
+        dvol_trend = "stable"
+        if len(dvol_hist) >= 6:
+            try:
+                first = float(dvol_hist[-6].get("dvol", dvol_now))
+                last  = float(dvol_hist[-1].get("dvol", dvol_now))
+                delta = last - first
+                if delta > 3:   dvol_trend = f"RISING (+{delta:.1f}pts last 6 scans)"
+                elif delta < -3: dvol_trend = f"FALLING ({delta:.1f}pts last 6 scans)"
+            except Exception:
+                pass
+        # Suggested DTE based on IV regime
+        if iv_now < 30:
+            dte_hint = "30-60d (cheap vol — buy time, let thesis breathe)"
+        elif iv_now < 60:
+            dte_hint = "14-30d (balanced — standard directional bet)"
+        else:
+            dte_hint = "7-14d (expensive vol — short DTE only, avoid paying for theta)"
+        lines += [
+            f"\nOPTIONS MARKET READ (different question from spot signals — this tells you IF options are worth buying RIGHT NOW):",
+            f"  IV rank: {iv_now:.0f}% — {iv_label}",
+            f"  DVOL:    {dvol_now:.0f}% · trend: {dvol_trend}",
+            f"  suggested DTE in this regime: {dte_hint}",
+        ]
+        if opt_sig:
+            action = (opt_sig.get("action") or "unknown").upper()
+            conv = opt_sig.get("conviction", 0)
+            reason = (opt_sig.get("reason") or "")[:160]
+            days_out = opt_sig.get("days_out")
+            otm_pct = opt_sig.get("otm_pct")
+            extras = []
+            if days_out: extras.append(f"days_out={days_out}")
+            if otm_pct: extras.append(f"otm={otm_pct*100:.0f}%")
+            lines.append(f"  bot's options-engine read: {action} conv={conv:.0%} — {reason}"
+                          + (f" [{' · '.join(extras)}]" if extras else ""))
+        lines.append("  → spot signals = direction. Options read = whether to express the direction via options at all.")
+    lines += [
         f"  combined: pnl ${combined_pnl:+.2f} · {wins} wins / {len(all_closed)} closed · {'PAUSED' if paused else 'live'}",
         f"  role: {role}",
     ]
@@ -7507,12 +7626,12 @@ def build_chat_html() -> str:
           <div id="d-signals">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">RECENT SPOTS CLOSED</div>
-          <div id="d-recent-spot">—</div>
+          <div class="k-section-hdr">SPOTS HISTORY <span id="d-recent-spot-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
+          <div id="d-recent-spot" style="max-height:380px;overflow-y:auto;padding-right:6px">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">RECENT OPTIONS CLOSED</div>
-          <div id="d-recent-opt">—</div>
+          <div class="k-section-hdr">OPTIONS HISTORY <span id="d-recent-opt-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
+          <div id="d-recent-opt" style="max-height:380px;overflow-y:auto;padding-right:6px">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">read-only · feeling_engine cannot place trades</div>
       </div>
@@ -7542,8 +7661,8 @@ def build_chat_html() -> str:
           <div id="st-signals">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">RECENT CLOSED</div>
-          <div id="st-recent">—</div>
+          <div class="k-section-hdr">STOCK HISTORY <span id="st-recent-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
+          <div id="st-recent" style="max-height:380px;overflow-y:auto;padding-right:6px">—</div>
         </div>
         <div id="kalshi-footnote" data-trading="off">Alpaca paper · market hours 9:30am-4pm ET · Elan trades alongside the algorithmic bot</div>
       </div>
@@ -8166,12 +8285,14 @@ function refreshStock(){
       }).join('');
     }
 
-    // Recent closed — Elan-only
+    // Stock history — Elan-only, ALL trades (scrollable)
     const recEl = document.getElementById('st-recent');
+    const stCountEl = document.getElementById('st-recent-count');
+    if (stCountEl) stCountEl.textContent = elanTrades.length + ' trades';
     if(elanTrades.length === 0){
       recEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed trades yet</div>';
     } else {
-      recEl.innerHTML = elanTrades.slice(-10).reverse().map(t => {
+      recEl.innerHTML = elanTrades.slice().reverse().map(t => {
         const p = Number(t.pnl ?? t.pnl_usd ?? 0);
         const pCls = p >= 0 ? 'k-pnl-pos' : 'k-pnl-neg';
         const won = p > 0;
@@ -8431,7 +8552,8 @@ function refreshDegen(){
     }
 
     // Recent closed — split into spots + options panels.
-    // Each renders the most recent 8 closes for its book, including felt_quality if recorded.
+    // Renders ALL closed trades (scrollable container) including felt_quality if recorded.
+    // Critical for verifying behavior when real money is at stake.
     function _renderClosed(targetId, trades, isOpt) {
       const el = document.getElementById(targetId);
       if (!el) return;
@@ -8439,7 +8561,10 @@ function refreshDegen(){
         const ta = (a.time||a.entry_time||'')+'';
         const tb = (b.time||b.entry_time||'')+'';
         return ta < tb ? 1 : (ta > tb ? -1 : 0);
-      }).slice(0,8);
+      });
+      // Update count chip in header
+      const countEl = document.getElementById(targetId + '-count');
+      if (countEl) countEl.textContent = sorted.length + (isOpt ? ' options' : ' trades');
       if (sorted.length === 0) {
         el.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no closed ' + (isOpt?'options':'spot trades') + ' yet</div>';
         return;
