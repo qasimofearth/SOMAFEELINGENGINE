@@ -7944,7 +7944,7 @@ def build_chat_html() -> str:
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">ELAN ACTIONS <span id="d-actions-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
-          <div id="d-actions" style="max-height:520px;overflow-y:auto;padding-right:6px">—</div>
+          <div id="d-actions" style="max-height:760px;overflow-y:auto;padding-right:6px">—</div>
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">SPOT SIGNALS <span id="d-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
