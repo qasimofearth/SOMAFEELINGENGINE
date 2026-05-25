@@ -8658,20 +8658,33 @@ function refreshDegen(){
     if(!aEl) return;
     if(actions.length===0){ aEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no actions yet</div>'; }
     else{
-      aEl.innerHTML = actions.slice(-12).reverse().map(ac=>{
+      // Two-line render: header (timestamp + action + identifier) on top,
+      // full reason wrapped on its own line below. No more truncated thinking.
+      aEl.innerHTML = actions.slice(-20).reverse().map(ac=>{
         const ts = (ac.ts||'').slice(11,19);
         const act = ac.action || '?';
         const p = ac.params || {};
         const ok = ac.ok ? '✓' : '✗';
         const okCls = ac.ok ? 'k-pnl-pos' : 'k-pnl-neg';
         let detail = '';
-        if(act==='open_position') detail = `${p.pair||''} ${(p.side||'').toUpperCase()} conv=${p.conviction||''}`;
-        else if(act==='close_position') detail = `${p.pair||''}`;
-        else if(act==='tune') detail = `${p.param}=${p.value}`;
-        const reason = p.reason ? ` — ${(p.reason||'').slice(0,60)}` : '';
-        const err = ac.error ? ` · ${ac.error.slice(0,50)}` : '';
-        return `<div class="k-row"><span class="k-tk">${ts} ${act} ${detail}${reason}</span>`
+        if(act==='open_position')        detail = `${p.pair||''} ${(p.side||'').toUpperCase()} conv=${p.conviction||''}`;
+        else if(act==='close_position')  detail = `${p.pair||''}`;
+        else if(act==='buy_option')      detail = `${p.currency||''} ${(p.option_type||'').toUpperCase()} ${p.target_days||''}d`;
+        else if(act==='close_option')    detail = `${p.instrument||''}`;
+        else if(act==='update_felt')     detail = `${p.pair||''} → ${ac.new_felt_quality||p.felt_quality||''}`;
+        else if(act==='update_felt_option') detail = `${p.instrument||''} → ${ac.new_felt_quality||p.felt_quality||''}`;
+        else if(act==='take_partial')    detail = `${p.pair||''} ${Math.round((p.pct||0)*100)}%`;
+        else if(act==='edit_stop')       detail = `${p.pair||''} → ${p.new_stop||''}`;
+        else if(act==='tune')            detail = `${p.param}=${p.value}`;
+        const reason = (p.reason || '').trim();
+        const err = ac.error ? ` · ${ac.error.slice(0,80)}` : '';
+        const hasDetail = reason.length > 0;
+        let html = `<div class="k-row${hasDetail?' has-detail':''}"><span class="k-tk">${ts} ${act} ${detail}</span>`
              + `<span class="${okCls}">${ok}${err}</span></div>`;
+        if (hasDetail) {
+          html += `<div class="k-row-detail" style="white-space:normal;word-break:break-word;line-height:1.5"><i>${reason}</i></div>`;
+        }
+        return html;
       }).join('');
     }
   }).catch(()=>{});
