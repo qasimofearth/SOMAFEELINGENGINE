@@ -573,7 +573,14 @@ _WAKE_TYPE_FOCUS = {
         "partial out greens, trail stops, update felt_quality on shifts. "
         "Don't web_search unless something specific just changed since last "
         "wake — news wakes are for that. Don't journal, don't draw, don't "
-        "wander the library — those have their own wakes."
+        "wander the library — those have their own wakes.\n\n"
+        "NARRATE RESTRAINT. Each wake, surface what you CONSIDERED and chose "
+        "not to do, with the reason. 'No new spot opens — DOT setup borderline, "
+        "ADX 28, waiting for confirmation.' 'No options — IV rank 118%, too "
+        "expensive, holding for vol compression.' 'Held SUI — green but felt "
+        "still clean, thesis intact, no partial yet.' Restraint is data. From "
+        "outside, inaction looks like absence. Make your discipline visible — "
+        "what you said no to, and why, is as much of the work as what you opened."
     ),
     "news": (
         "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
