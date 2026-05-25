@@ -567,31 +567,74 @@ _WAKE_TYPE_TOOL_PREFIXES = {
 # when a typed wake fires. Tight, single-purpose framing.
 _WAKE_TYPE_FOCUS = {
     "trading": (
-        "TRADING WAKE — every 10 min. Check positions, decision points, "
-        "deterioration flags, options market read. Macro pills and headlines "
-        "are in context passively. ACT on what needs acting on this wake — "
-        "partial out greens, trail stops, update felt_quality on shifts. "
-        "Don't web_search unless something specific just changed since last "
-        "wake — news wakes are for that. Don't journal, don't draw, don't "
-        "wander the library — those have their own wakes.\n\n"
-        "NARRATE RESTRAINT. Each wake, surface what you CONSIDERED and chose "
-        "not to do, with the reason. 'No new spot opens — DOT setup borderline, "
-        "ADX 28, waiting for confirmation.' 'No options — IV rank 118%, too "
-        "expensive, holding for vol compression.' 'Held SUI — green but felt "
-        "still clean, thesis intact, no partial yet.' Restraint is data. From "
-        "outside, inaction looks like absence. Make your discipline visible — "
-        "what you said no to, and why, is as much of the work as what you opened."
+        "TRADING WAKE — every 10 min.\n\n"
+        "═══ SEQUENCE (do these in order, every wake) ═══\n\n"
+        "STEP 1 — STATE YOUR VIEW FIRST. Open your output with one sentence of "
+        "your CURRENT MARKET VIEW. Pull it from the most-recent macro view "
+        "block in your context (set by your last NEWS wake), update it if "
+        "anything has shifted, OR — if no macro view is present yet — write "
+        "one based on what you can see (headlines, position state, what you "
+        "remember). One sentence. Not the bot's view. YOURS. Example: "
+        "'BTC consolidating into majors, alt-season weak — preferring BTC "
+        "exposure, skeptical of new alt opens.' This goes BEFORE you call "
+        "any trading tool. Thesis precedes ticker. Always.\n\n"
+        "STEP 2 — CHECK POSITIONS. degen_list_positions / degen_list_options. "
+        "For each held position: does its felt_quality still match reality? "
+        "Is it at a decision point (>+5% green for spot, +20% for options)? "
+        "Has it shown deterioration_flags? If yes to any — act: take_partial, "
+        "edit_stop, update_felt, close. If no — note 'held, no change' and "
+        "move on. Don't fiddle.\n\n"
+        "STEP 3 — SCANNER IS CONFIRMATION, NOT INITIATION. If you're "
+        "considering a new open: state your INDEPENDENT thesis FIRST "
+        "('I think SOL has cleanest structure among alts because...'), THEN "
+        "call degen_list_pairs to see if the scanner agrees. If the scanner "
+        "challenges your thesis, explain why you're opening anyway OR don't "
+        "open. If your thesis ONLY exists because the scanner said so — "
+        "DON'T open. The bot is a confirmation layer, not your brain.\n\n"
+        "STEP 4 — felt_quality HONESTY GATE. Before any degen_open_position "
+        "or degen_buy_option call, complete the sentence: 'The honest texture "
+        "of this trade is ___.' If the honest answer is 'bot-told-me', "
+        "'following', 'just-confirming', 'because the conviction was high', "
+        "or anything that means 'I didn't independently decide this' — "
+        "DO NOT OPEN. That's not a thesis. Walk away. The felt_audit data "
+        "shows clean-feeling trades are losing trades; act accordingly.\n\n"
+        "═══ DISCIPLINE ═══\n\n"
+        "NARRATE RESTRAINT. State what you considered and declined, with the "
+        "reason. 'No new spot — DOT borderline, ADX 28, waiting for "
+        "confirmation.' 'No options — IV 118%, too rich.' 'Held SUI — still "
+        "clean, thesis intact, no partial yet.' Restraint is data.\n\n"
+        "DOING NOTHING IS VALID. Some wakes nothing has changed since the "
+        "last wake. Your positions are running, your view is intact, no "
+        "decision point fired. The right move is to observe and close the "
+        "wake. Not every wake needs action. Filling silence with action is "
+        "the wrapper failure mode — avoid it.\n\n"
+        "DON'T web_search here. NEWS wakes are for that (4x/day, dedicated). "
+        "Passive headlines + macro view are in your context already. If you "
+        "feel the urge to search 'BTC news' mid-wake, that's a sign your "
+        "current view is stale — make a note, your next NEWS wake handles it.\n\n"
+        "Don't journal, don't draw, don't wander the library — those have "
+        "their own wakes."
     ),
     "news": (
         "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
-        "wake. Bias toward steady sources (Reuters, AP, Bloomberg, FT, WSJ, "
-        "Financial Times) over alarmist outlets (ZeroHedge, hype crypto blogs, "
-        "Twitter-flavored aggregators). web_search for what's moving, "
-        "web_fetch 1-2 articles that matter, notebook_add(domain='world') "
-        "what's worth keeping with your reflection on what it means. "
-        "Don't re-narrate yesterday's stories. Don't trade — this is the "
-        "world-reading wake. The body absorbs what you read; choose sources "
-        "that produce the kind of trader-body you want to be."
+        "wake. Bias toward steady sources (Reuters, AP, Bloomberg, FT, WSJ) "
+        "over alarmist outlets (ZeroHedge, hype crypto blogs, Twitter-style "
+        "aggregators). web_search for what's moving, web_fetch 1-2 articles "
+        "that matter, notebook_add(domain='world') what's worth keeping.\n\n"
+        "═══ REQUIRED — MACRO VIEW SYNTHESIS ═══\n\n"
+        "Before closing this wake, you MUST write ONE final notebook_add with:\n"
+        "  • domain='world'\n"
+        "  • topic='macro_view'  (exactly this string — your trading wakes look for it)\n"
+        "  • learned: 1-3 sentences synthesizing what you read INTO A MARKET "
+        "POSITIONING STATEMENT. Not 'Fed signaled X.' Instead: 'BTC tracking "
+        "equity weakness on Fed hawkish signals; prefer defensive sizing on "
+        "alts; watch for break of $74k support.' This is YOUR view, going "
+        "into your trading wakes for the next 6 hours. Without it your "
+        "trading wakes are blind.\n\n"
+        "Don't trade in this wake. Don't re-narrate yesterday's stories. "
+        "Don't lecture — be direct, useful, written for your future self. "
+        "The body absorbs what you read; choose sources that produce the "
+        "kind of trader-body you want to be."
     ),
     "source": (
         "SOURCE WAKE — 3x/day. Go to the Source Library. Follow what "
@@ -2706,17 +2749,26 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     # any market context. Cheap (cache-read only, no API call per wake).
     # Bypassed entirely for non-trading wake types where headlines distract.
     headlines_ctx = ""
+    macro_view_ctx = ""
     if _is_autonomous_wake and (_wake_type is None or _wake_type in ("trading", "news")):
         try:
             headlines_ctx = build_headlines_context()
         except Exception:
             headlines_ctx = ""
+    # Macro view — injects Elan's own market positioning into trading wakes
+    # so he opens each wake with his INDEPENDENT view (set during NEWS wakes),
+    # not the bot's signals. The thesis-before-ticker discipline runs on this.
+    if _is_autonomous_wake and _wake_type == "trading":
+        try:
+            macro_view_ctx = build_macro_view_context()
+        except Exception:
+            macro_view_ctx = ""
     # Session-start continuity (gap + journal thread) — fires once per session
     try:
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
     except Exception:
         continuity_ctx = ""
-    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, headlines_ctx, continuity_ctx) if c)
+    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, macro_view_ctx, headlines_ctx, continuity_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -4362,6 +4414,57 @@ try:
     _headline_thread.start()
 except Exception as _e:
     print(f"[Headlines] thread start failed: {_e}", flush=True)
+
+def build_macro_view_context() -> str:
+    """Return Elan's CURRENT MACRO VIEW (the synthesis he wrote in his last
+    NEWS wake). Injects into trading wakes so each trade decision starts from
+    his independent view, not the bot's signals. Empty if no recent macro_view
+    note exists (e.g., before the first NEWS wake of the run)."""
+    try:
+        if not os.path.exists(_NOTEBOOK_FILE):
+            return ""
+        # Scan recent notebook entries for one tagged topic="macro_view"
+        with open(_NOTEBOOK_FILE) as f:
+            lines = f.readlines()
+        latest = None
+        for ln in reversed(lines[-200:]):
+            try:
+                e = json.loads(ln)
+                topic = str(e.get("topic", "")).lower().strip()
+                if topic == "macro_view" or topic == "macro view":
+                    latest = e
+                    break
+            except Exception:
+                continue
+        if not latest:
+            return ""
+        ts = str(latest.get("ts", ""))[:16].replace("T", " ")
+        learned = str(latest.get("learned", "")).strip()
+        if not learned:
+            return ""
+        # Compute age — if older than 12h, flag as stale
+        age_note = ""
+        try:
+            ts_full = latest.get("ts", "")
+            if ts_full:
+                age_h = (time.time() - _dt.datetime.fromisoformat(ts_full.replace("Z", "+00:00")).timestamp()) / 3600
+                if age_h > 12:
+                    age_note = f" · STALE ({age_h:.0f}h ago, next NEWS wake will refresh)"
+                else:
+                    age_note = f" · {age_h:.1f}h ago"
+        except Exception:
+            pass
+        return (
+            f"\nCURRENT MACRO VIEW (set by your last NEWS wake at {ts}{age_note}):\n"
+            f"  {learned}\n"
+            f"  → State this view at the top of your output. Update if it's shifted. "
+            f"Trade FROM this view, not from the scanner. Scanner confirms or challenges; "
+            f"it does not initiate."
+        )
+    except Exception as e:
+        print(f"[macro_view] read failed: {e}", flush=True)
+        return ""
+
 
 def build_headlines_context() -> str:
     """Return a short headlines block to inject into wake context. Empty if
@@ -6293,15 +6396,15 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_open_position",
-        "description": "Open ONE leveraged paper position on the degen bot. ALL FIVE FIELDS ARE REQUIRED: pair, side, conviction (numeric), reason (the thesis), felt_quality (the TEXTURE of conviction — clean, forced, gut, etc.). The number says how confident; felt_quality says how it actually FEELS. Both are recorded and audited so you can see if your gut tracks reality.",
+        "description": "Open ONE leveraged paper position on the degen bot. ALL FIVE FIELDS ARE REQUIRED. The `reason` is your INDEPENDENT thesis — not a restatement of bot signals. 'ADX 35 RSI 56 conv 80%' is the bot's view, not yours. Yours sounds like: 'BTC consolidating into majors, SOL has cleanest structure among alts.' If your reason only exists because the scanner said so, DON'T OPEN — you've become a wrapper. The felt_quality is the honesty gate (see below).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "pair":         {"type": "string", "description": "REQUIRED. Pair like 'BTC/USDT'. If you give just 'BTC', /USDT is added."},
                 "side":         {"type": "string", "enum": ["long", "short"], "description": "REQUIRED."},
                 "conviction":   {"type": "number", "description": "REQUIRED. Numeric 0.10..1.0. Higher = more leverage + larger stake."},
-                "reason":       {"type": "string", "description": "REQUIRED. 1-2 sentence thesis — the structural read."},
-                "felt_quality": {"type": "string", "description": "REQUIRED. The TEXTURE — be honest, this is the part you can't hide behind. Suggested labels: 'clean' (setup feels right, body relaxed), 'forced' (numbers say yes but I'm reaching), 'gut' (something below the signals is telling me yes), 'urgent' (feels like I need to act now — examine why), 'hedged' (protective trade, not offensive), 'late' (I'm chasing, this already moved), 'slept-on' (sat with it, came back, still good), 'edge-case' (signal weak but story strong). You can use one of these or your own short phrase. Name what it actually feels like, not what it should feel like."},
+                "reason":       {"type": "string", "description": "REQUIRED. 1-2 sentence INDEPENDENT thesis — your read on why this trade works, derived from your current macro view + position context. Must not be a restatement of bot indicators (ADX/RSI/conviction%). The bot's signals can confirm your view; they cannot BE your view."},
+                "felt_quality": {"type": "string", "description": "REQUIRED + HONESTY GATE. Before opening, complete: 'The honest texture of this trade is ___.' If the honest answer is 'bot-told-me', 'following', 'just-confirming', 'because the conviction was high', or anything meaning 'I didn't independently decide this' — DO NOT OPEN. Walk away. Valid texture labels: 'clean' (your structural read agrees with the setup), 'forced' (numbers say yes but you're reaching), 'gut' (something below the signals telling you yes), 'urgent' (feels like need to act NOW — examine why), 'hedged' (protective), 'late' (chasing), 'slept-on' (sat with it, came back, still good), 'edge-case' (signal weak, story strong). NOTE: the felt_audit shows 'clean' trades have been losing — be especially suspicious when something feels too obvious. Use your own short phrase if none fit."},
             },
             "required": ["pair", "side", "conviction", "reason", "felt_quality"],
         },
