@@ -8915,14 +8915,17 @@ function refreshDegen(){
         else if (ivNow < 50)  { ivLabel = 'moderate'; ivColor = 'rgba(200,220,255,0.85)'; }
         else if (ivNow < 75)  { ivLabel = 'elevated'; ivColor = 'rgba(255,200,140,0.85)'; }
         else                  { ivLabel = 'EXPENSIVE'; ivColor = 'rgba(255,138,160,0.85)'; }
-        // DVOL trend
-        let dvolTrend = 'stable';
-        if (dvolHist.length >= 6) {
+        // DVOL trend — distinguish 'still building' from 'stable'
+        let dvolTrend;
+        if (dvolHist.length < 6) {
+          dvolTrend = `building history (${dvolHist.length}/6)`;
+        } else {
           const first = Number(dvolHist[dvolHist.length-6].dvol || dvolNow);
           const last  = Number(dvolHist[dvolHist.length-1].dvol || dvolNow);
           const delta = last - first;
           if (delta > 3)       dvolTrend = `↑ +${delta.toFixed(1)}pts/6scan`;
           else if (delta < -3) dvolTrend = `↓ ${delta.toFixed(1)}pts/6scan`;
+          else                 dvolTrend = `stable (${delta>=0?'+':''}${delta.toFixed(1)})`;
         }
         // DTE hint
         let dteHint;
