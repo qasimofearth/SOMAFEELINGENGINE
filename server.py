@@ -7943,8 +7943,8 @@ def build_chat_html() -> str:
           <div id="d-options">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">ELAN ACTIONS</div>
-          <div id="d-actions">—</div>
+          <div class="k-section-hdr">ELAN ACTIONS <span id="d-actions-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
+          <div id="d-actions" style="max-height:520px;overflow-y:auto;padding-right:6px">—</div>
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">SPOT SIGNALS <span id="d-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
@@ -8656,11 +8656,15 @@ function refreshDegen(){
     const actions = (a && a.actions) || [];
     const aEl = document.getElementById('d-actions');
     if(!aEl) return;
+    // Count chip in header
+    const actCountEl = document.getElementById('d-actions-count');
+    if (actCountEl) actCountEl.textContent = actions.length + ' actions';
     if(actions.length===0){ aEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no actions yet</div>'; }
     else{
       // Two-line render: header (timestamp + action + identifier) on top,
       // full reason wrapped on its own line below. No more truncated thinking.
-      aEl.innerHTML = actions.slice(-20).reverse().map(ac=>{
+      // Show ALL actions returned by the bot (currently last 500), scrollable.
+      aEl.innerHTML = actions.slice().reverse().map(ac=>{
         const ts = (ac.ts||'').slice(11,19);
         const act = ac.action || '?';
         const p = ac.params || {};
