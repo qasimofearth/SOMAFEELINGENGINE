@@ -6131,16 +6131,19 @@ def fetch_degen_state(force: bool = False) -> dict:
 
 def fetch_degen_actions() -> list:
     if not (_DEGEN_ENABLED and _DEGEN_API_URL):
+        print(f"[fetch_degen_actions] disabled — _DEGEN_ENABLED={_DEGEN_ENABLED} _DEGEN_API_URL={_DEGEN_API_URL!r}", flush=True)
         return []
     try:
         import urllib.request, base64 as _b64
         req = urllib.request.Request(f"{_DEGEN_API_URL}/api/actions")
         if _DEGEN_AUTH:
             req.add_header("Authorization", f"Basic {_b64.b64encode(_DEGEN_AUTH.encode()).decode()}")
-        with urllib.request.urlopen(req, timeout=6) as r:
+        with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode("utf-8"))
-        return data.get("actions", []) if isinstance(data, dict) else []
-    except Exception:
+        result = data.get("actions", []) if isinstance(data, dict) else []
+        return result
+    except Exception as e:
+        print(f"[fetch_degen_actions] FAILED: {type(e).__name__}: {e}", flush=True)
         return []
 
 
@@ -7944,8 +7947,12 @@ def build_chat_html() -> str:
           <div id="d-actions">—</div>
         </div>
         <div id="kalshi-section">
-          <div class="k-section-hdr">SIGNALS <span id="d-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
+          <div class="k-section-hdr">SPOT SIGNALS <span id="d-macro-pills" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right"></span></div>
           <div id="d-signals">—</div>
+        </div>
+        <div id="kalshi-section">
+          <div class="k-section-hdr">OPTIONS SIGNALS <span id="d-opt-sig-pill" style="font-weight:normal;letter-spacing:1px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
+          <div id="d-opt-signals">—</div>
         </div>
         <div id="kalshi-section">
           <div class="k-section-hdr">SPOTS HISTORY <span id="d-recent-spot-count" style="font-weight:normal;letter-spacing:1.5px;color:rgba(160,180,220,0.55);font-size:9px;float:right">—</span></div>
@@ -8854,14 +8861,14 @@ function refreshDegen(){
       }
     }
 
-    // Top signals
+    // Top SPOT signals
     const pairs = s.pairs || {};
     const sigs = Object.entries(pairs)
       .filter(([_,d])=>d.signal==='buy'||d.signal==='sell')
       .sort((a,b)=>(b[1].conviction||0)-(a[1].conviction||0))
       .slice(0,6);
     const sigEl = document.getElementById('d-signals');
-    if(sigs.length===0){ sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no signals</div>'; }
+    if(sigs.length===0){ sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no spot signals</div>'; }
     else{
       sigEl.innerHTML = sigs.map(([pair, d])=>{
         const side = (d.side||'').toLowerCase();
@@ -8871,6 +8878,63 @@ function refreshDegen(){
              + `<span>$${d.price}</span>`
              + `<span>conv ${Math.round((d.conviction||0)*100)}%</span></div>`;
       }).join('');
+    }
+
+    // OPTIONS signals — separate read. IV regime, DVOL trend, engine action.
+    const optSig = s.options_signal || {};
+    const ivNow = Number(s.iv_rank || 0);
+    const dvolNow = Number(s.dvol || 0);
+    const dvolHist = s.dvol_history || [];
+    const optSigEl = document.getElementById('d-opt-signals');
+    const optSigPill = document.getElementById('d-opt-sig-pill');
+    if (optSigEl) {
+      if (!ivNow && !optSig.action) {
+        optSigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no options signal data yet</div>';
+        if (optSigPill) optSigPill.textContent = '—';
+      } else {
+        // IV regime label
+        let ivLabel, ivColor;
+        if (ivNow < 30)       { ivLabel = 'CHEAP'; ivColor = 'rgba(127,255,176,0.85)'; }
+        else if (ivNow < 50)  { ivLabel = 'moderate'; ivColor = 'rgba(200,220,255,0.85)'; }
+        else if (ivNow < 75)  { ivLabel = 'elevated'; ivColor = 'rgba(255,200,140,0.85)'; }
+        else                  { ivLabel = 'EXPENSIVE'; ivColor = 'rgba(255,138,160,0.85)'; }
+        // DVOL trend
+        let dvolTrend = 'stable';
+        if (dvolHist.length >= 6) {
+          const first = Number(dvolHist[dvolHist.length-6].dvol || dvolNow);
+          const last  = Number(dvolHist[dvolHist.length-1].dvol || dvolNow);
+          const delta = last - first;
+          if (delta > 3)       dvolTrend = `↑ +${delta.toFixed(1)}pts/6scan`;
+          else if (delta < -3) dvolTrend = `↓ ${delta.toFixed(1)}pts/6scan`;
+        }
+        // DTE hint
+        let dteHint;
+        if (ivNow < 30)       dteHint = '30-60d (cheap vol — buy time)';
+        else if (ivNow < 60)  dteHint = '14-30d (balanced)';
+        else                  dteHint = '7-14d (expensive — avoid theta)';
+        // Engine action
+        const action = (optSig.action || 'unknown').toUpperCase();
+        const conv = optSig.conviction || 0;
+        const reason = (optSig.reason || '').slice(0, 120);
+        const days_out = optSig.days_out;
+        const otm_pct = optSig.otm_pct;
+        let actColor;
+        if (action === 'WAIT')                  actColor = 'rgba(255,200,140,0.85)';
+        else if (action.startsWith('BUY'))      actColor = 'rgba(127,255,176,0.85)';
+        else                                    actColor = 'rgba(200,220,255,0.85)';
+        // Pill in header
+        if (optSigPill) optSigPill.textContent = `${action} · IV ${ivNow.toFixed(0)}% (${ivLabel.toLowerCase()})`;
+        // Body — three rows
+        const rows = [
+          `<div class="k-row"><span class="k-tk">IV rank</span><span style="color:${ivColor};letter-spacing:1.5px">${ivNow.toFixed(0)}% · ${ivLabel}</span></div>`,
+          `<div class="k-row"><span class="k-tk">DVOL</span><span>${dvolNow.toFixed(0)}% · ${dvolTrend}</span></div>`,
+          `<div class="k-row"><span class="k-tk">suggested DTE</span><span style="color:rgba(180,200,240,0.75);font-size:11px">${dteHint}</span></div>`,
+          `<div class="k-row has-detail"><span class="k-tk">engine</span><span class="k-side" style="color:${actColor};letter-spacing:1.5px">${action}</span>`
+            + `<span>conv ${Math.round(conv*100)}%</span></div>`
+            + (reason ? `<div class="k-row-detail"><i>${reason}</i>${days_out?` · target ${days_out}d`:''}${otm_pct?` · ${(otm_pct*100).toFixed(0)}% OTM`:''}</div>` : ''),
+        ];
+        optSigEl.innerHTML = rows.join('');
+      }
     }
 
     // Recent closed — split into spots + options panels.
