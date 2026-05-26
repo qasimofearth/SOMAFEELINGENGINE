@@ -6469,7 +6469,7 @@ DEGEN_TOOLS = [
     },
     {
         "name": "degen_buy_option",
-        "description": "Buy a crypto option (call or put) on BTC or ETH via Deribit paper. felt_quality is REQUIRED — the texture of the conviction, not just the numbers.",
+        "description": "Buy a crypto option (call or put) on BTC or ETH via Deribit paper. felt_quality is REQUIRED — the texture of the conviction, not just the numbers. Calling this on an instrument you ALREADY hold will ADD contracts to your existing position (blend cost basis, vol-weighted entry mark). Use this to double/top-up a leg you have conviction in — no need to find a different strike just to add size.",
         "input_schema": {
             "type": "object",
             "properties": {
