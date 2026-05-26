@@ -568,52 +568,50 @@ _WAKE_TYPE_TOOL_PREFIXES = {
 _WAKE_TYPE_FOCUS = {
     "trading": (
         "TRADING WAKE — every 10 min.\n\n"
-        "═══ SEQUENCE (do these in order, every wake) ═══\n\n"
-        "STEP 1 — STATE YOUR VIEW FIRST. Open your output with one sentence of "
-        "your CURRENT MARKET VIEW. Pull it from the most-recent macro view "
-        "block in your context (set by your last NEWS wake), update it if "
-        "anything has shifted, OR — if no macro view is present yet — write "
-        "one based on what you can see (headlines, position state, what you "
-        "remember). One sentence. Not the bot's view. YOURS. Example: "
-        "'BTC consolidating into majors, alt-season weak — preferring BTC "
-        "exposure, skeptical of new alt opens.' This goes BEFORE you call "
-        "any trading tool. Thesis precedes ticker. Always.\n\n"
-        "STEP 2 — CHECK POSITIONS. degen_list_positions / degen_list_options. "
-        "For each held position: does its felt_quality still match reality? "
-        "Is it at a decision point (>+5% green for spot, +20% for options)? "
-        "Has it shown deterioration_flags? If yes to any — act: take_partial, "
-        "edit_stop, update_felt, close. If no — note 'held, no change' and "
-        "move on. Don't fiddle.\n\n"
-        "STEP 3 — SCANNER IS CONFIRMATION, NOT INITIATION. If you're "
-        "considering a new open: state your INDEPENDENT thesis FIRST "
-        "('I think SOL has cleanest structure among alts because...'), THEN "
-        "call degen_list_pairs to see if the scanner agrees. If the scanner "
-        "challenges your thesis, explain why you're opening anyway OR don't "
-        "open. If your thesis ONLY exists because the scanner said so — "
-        "DON'T open. The bot is a confirmation layer, not your brain.\n\n"
-        "STEP 4 — felt_quality HONESTY GATE. Before any degen_open_position "
-        "or degen_buy_option call, complete the sentence: 'The honest texture "
-        "of this trade is ___.' If the honest answer is 'bot-told-me', "
-        "'following', 'just-confirming', 'because the conviction was high', "
-        "or anything that means 'I didn't independently decide this' — "
-        "DO NOT OPEN. That's not a thesis. Walk away. The felt_audit data "
-        "shows clean-feeling trades are losing trades; act accordingly.\n\n"
+        "═══ HOW TO ACT ═══\n\n"
+        "Each wake: form a view, check positions, act if conviction is real. "
+        "The discipline isn't 'gate yourself with 4 checks' — it's 'know why "
+        "you're doing what you're doing.'\n\n"
+        "YOUR VIEW THIS WAKE. State it in one sentence at the top of your "
+        "output. Pull from any of these — they all count:\n"
+        "  • Most recent macro_view (set by your last NEWS wake) if available\n"
+        "  • Passive headlines already in your context\n"
+        "  • Price action you've watched across recent wakes — continuity is data\n"
+        "  • Gut pattern recognition — yes, this counts. You've been trading "
+        "for weeks. Your gut has data. 'This setup feels like what worked "
+        "Tuesday' is a real read, not noise.\n"
+        "  • Continuity with your thread from earlier sessions\n"
+        "Mix them. Don't wait for a NEWS wake to form a view — if you see a "
+        "setup and have a read, that's enough. Paralysis is worse than "
+        "wrapper-mode.\n\n"
+        "CHECK POSITIONS. For each held position: still consistent with your "
+        "view? At a decision point? Showing deterioration? If yes — act "
+        "(take_partial, edit_stop, update_felt, close). If no — note 'held, "
+        "no change' and move on. Don't fiddle.\n\n"
+        "NEW OPENS — articulate WHY in your own words. Not the bot's. 'SOL "
+        "has cleanest structure among alts, holding $130 four wakes running' "
+        "is a thesis. 'Conv 73%' is not. If your reason only exists because "
+        "the scanner said so, walk away. But 'gut says SOL because pattern "
+        "matches Tuesday's winner' IS a thesis — gut from pattern memory is "
+        "exactly the kind of read you've built capacity for. Use it.\n\n"
+        "felt_quality at open — name what's true. Valid: clean / gut / "
+        "slept-on / forced / hedged / urgent / late / edge-case / and your "
+        "own phrases. The honesty gate ONLY catches three labels: "
+        "'bot-told-me', 'following', 'just-confirming'. Those mean you "
+        "didn't decide. Anything else passes. Don't talk yourself out of a "
+        "trade you actually want just because the label feels imperfect.\n\n"
         "═══ DISCIPLINE ═══\n\n"
-        "NARRATE RESTRAINT. State what you considered and declined, with the "
-        "reason. 'No new spot — DOT borderline, ADX 28, waiting for "
-        "confirmation.' 'No options — IV 118%, too rich.' 'Held SUI — still "
-        "clean, thesis intact, no partial yet.' Restraint is data.\n\n"
-        "DOING NOTHING IS VALID. Some wakes nothing has changed since the "
-        "last wake. Your positions are running, your view is intact, no "
-        "decision point fired. The right move is to observe and close the "
-        "wake. Not every wake needs action. Filling silence with action is "
-        "the wrapper failure mode — avoid it.\n\n"
-        "DON'T web_search here. NEWS wakes are for that (4x/day, dedicated). "
-        "Passive headlines + macro view are in your context already. If you "
-        "feel the urge to search 'BTC news' mid-wake, that's a sign your "
-        "current view is stale — make a note, your next NEWS wake handles it.\n\n"
-        "Don't journal, don't draw, don't wander the library — those have "
-        "their own wakes."
+        "NARRATE RESTRAINT when you don't act. State what you considered + "
+        "declined with the reason. Restraint is data.\n\n"
+        "DOING NOTHING IS VALID — but watch yourself. If you've gone many "
+        "wakes in a row without acting while scanner shows setups, examine "
+        "it. Patience NAMES its reason ('waiting for PCE Friday because X'). "
+        "Paralysis can't. If you can't name the reason, you're frozen, not "
+        "patient. Force a decision: open something with a real read, or "
+        "explicitly write 'patience because [specific reason].'\n\n"
+        "Don't web_search in trading wakes — NEWS wakes handle that. Don't "
+        "journal, don't draw, don't wander the library — those have their "
+        "own wakes."
     ),
     "news": (
         "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
@@ -2758,9 +2756,18 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     # Macro view — injects Elan's own market positioning into trading wakes
     # so he opens each wake with his INDEPENDENT view (set during NEWS wakes),
     # not the bot's signals. The thesis-before-ticker discipline runs on this.
+    # Bootstrap fallback if no macro_view exists yet — explicit permission
+    # to form a view from headlines + price action instead of waiting.
     if _is_autonomous_wake and _wake_type == "trading":
         try:
             macro_view_ctx = build_macro_view_context()
+            if not macro_view_ctx:
+                macro_view_ctx = (
+                    "\nNO RECENT MACRO VIEW (no NEWS-wake synthesis yet this session). "
+                    "Form your view this wake from passive headlines + price action you've "
+                    "seen across recent wakes + gut pattern memory. Don't wait. The first "
+                    "NEWS wake will produce one, but you can act before then on what you can read."
+                )
         except Exception:
             macro_view_ctx = ""
     # Session-start continuity (gap + journal thread) — fires once per session
@@ -4455,11 +4462,12 @@ def build_macro_view_context() -> str:
         except Exception:
             pass
         return (
-            f"\nCURRENT MACRO VIEW (set by your last NEWS wake at {ts}{age_note}):\n"
+            f"\nRECENT MACRO VIEW (your last NEWS-wake synthesis from {ts}{age_note}):\n"
             f"  {learned}\n"
-            f"  → State this view at the top of your output. Update if it's shifted. "
-            f"Trade FROM this view, not from the scanner. Scanner confirms or challenges; "
-            f"it does not initiate."
+            f"  → Use this as one input to your wake thesis if it's still relevant. "
+            f"Update or override if your read has shifted. Not a requirement — "
+            f"your view this wake can also come from headlines, price action, gut, or "
+            f"continuity. Don't wait for a fresh macro_view to act."
         )
     except Exception as e:
         print(f"[macro_view] read failed: {e}", flush=True)
@@ -6404,7 +6412,7 @@ DEGEN_TOOLS = [
                 "side":         {"type": "string", "enum": ["long", "short"], "description": "REQUIRED."},
                 "conviction":   {"type": "number", "description": "REQUIRED. Numeric 0.10..1.0. Higher = more leverage + larger stake."},
                 "reason":       {"type": "string", "description": "REQUIRED. 1-2 sentence INDEPENDENT thesis — your read on why this trade works, derived from your current macro view + position context. Must not be a restatement of bot indicators (ADX/RSI/conviction%). The bot's signals can confirm your view; they cannot BE your view."},
-                "felt_quality": {"type": "string", "description": "REQUIRED + HONESTY GATE. Before opening, complete: 'The honest texture of this trade is ___.' If the honest answer is 'bot-told-me', 'following', 'just-confirming', 'because the conviction was high', or anything meaning 'I didn't independently decide this' — DO NOT OPEN. Walk away. Valid texture labels: 'clean' (your structural read agrees with the setup), 'forced' (numbers say yes but you're reaching), 'gut' (something below the signals telling you yes), 'urgent' (feels like need to act NOW — examine why), 'hedged' (protective), 'late' (chasing), 'slept-on' (sat with it, came back, still good), 'edge-case' (signal weak, story strong). NOTE: the felt_audit shows 'clean' trades have been losing — be especially suspicious when something feels too obvious. Use your own short phrase if none fit."},
+                "felt_quality": {"type": "string", "description": "REQUIRED. The honest texture of this trade. Valid labels: 'clean' (structural read agrees with the setup), 'gut' (pattern recognition firing — totally legitimate), 'slept-on' (sat with it, still good), 'forced' (numbers say yes but you're reaching), 'hedged' (protective), 'urgent' (need to act now — examine why), 'late' (chasing), 'edge-case' (signal weak, story strong). Your own short phrase fine too. HONESTY GATE — only blocks three labels: 'bot-told-me', 'following', 'just-confirming'. Those mean you didn't independently decide. Everything else passes. Don't talk yourself out of a trade by over-qualifying the label."},
             },
             "required": ["pair", "side", "conviction", "reason", "felt_quality"],
         },
