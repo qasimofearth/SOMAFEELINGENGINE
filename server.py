@@ -502,10 +502,10 @@ _AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACT
 # reliably AND makes more grounded decisions. Cost roughly ~3x but the
 # user explicitly asked for an active trader, not a contemplative one.
 _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
-# Quiet hours — if set, autonomous wakes are skipped during this UTC window.
-# Format: "HH-HH" e.g. "2-7" (2am-7am UTC) or "22-6" (overnight wrap).
-# Empty = no quiet hours, wakes fire 24/7.
-_AUTONOMOUS_QUIET_HOURS = os.environ.get("ELAN_AUTONOMOUS_QUIET_HOURS", "")
+# Quiet hours — DISABLED. Crypto is 24/7 and Asia/EU overnight moves
+# matter as much as US-day moves. Hard-coded off regardless of env so
+# accidentally-set env vars don't blackout the bot during a Fed surprise.
+_AUTONOMOUS_QUIET_HOURS = ""
 
 
 # ── Wake-type system (2026-05-24) ──────────────────────────────────────────
@@ -7272,6 +7272,33 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers(); return
             self.send_json({"actions": fetch_degen_actions(),
                             "trading_enabled": _DEGEN_TRADING_ENABLED})
+        elif path == "/debug/trigger-test":
+            # Fires a 1-token Anthropic API call and returns the FULL response —
+            # success or error. Used to capture the complete spending-limit error
+            # message including reset date. Unauthed because: the response is
+            # Anthropic's, not ours; no secrets exposed; rate-limited by the
+            # spend cap itself.
+            try:
+                _client = _get_anthropic_client()
+                _resp = _client.messages.create(
+                    model="claude-haiku-4-5-20251001",   # cheapest model for the probe
+                    max_tokens=1,
+                    messages=[{"role": "user", "content": "ping"}],
+                )
+                self.send_json({
+                    "ok": True,
+                    "status": "API responding normally",
+                    "response_preview": str(_resp)[:300],
+                })
+            except Exception as _e:
+                # Capture the full error message including any reset-date hint
+                self.send_json({
+                    "ok": False,
+                    "error_type": type(_e).__name__,
+                    "error_full": str(_e),
+                    "error_repr": repr(_e),
+                })
+            return
         elif path == "/debug/notebook-shape":
             # Sample-shape debug. Auth via existing _check_auth (already passed).
             # Returns first-entry keys + count by classified domain, no full content.
