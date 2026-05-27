@@ -483,11 +483,12 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 # than talking mode, broader prompt. Gated by env var so it can't run by accident.
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
-# Default 10 minutes — every wake is a lean trading wake (positions, signals,
-# decision points). Heavier creative wakes (source, journal, drawing, news)
-# fire on their own scheduled cadences via _pick_wake_type(). The multi-cadence
-# system uses ONE master timer at this interval; each fire picks its type.
-_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "600"))
+# Default 30 minutes — twice/hour cadence. Cost-focused: 10-min was hitting
+# the monthly spend cap. 30-min cuts wake count ~67% (~48/day with quiet
+# hours), saves ~$100-150/mo. Trade-off: less partial-take responsiveness
+# (a +5% spike at minute 12 → back to flat by minute 30 won't be seen).
+# Stops still fire continuously from the bot scan loop so downside is fine.
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "1800"))
 # Skip the AUTO wake if the user has interacted (sent or received a message)
 # within this many seconds. Prevents AUTO from firing in the middle of an
 # active conversation — that's what made it feel like a "wake-up" mid-chat.
