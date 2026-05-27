@@ -7175,6 +7175,29 @@ class FeelingHandler(BaseHTTPRequestHandler):
         if path in ("/ping", "/healthz"):
             self._handle_healthz()
             return
+        # /debug/trigger-test public — Anthropic API probe, response is
+        # Anthropic's, no secrets exposed. Used to capture full error messages
+        # for diagnostics (e.g. spending-limit reset dates).
+        if path == "/debug/trigger-test":
+            try:
+                _client = _get_anthropic_client()
+                _resp = _client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=1,
+                    messages=[{"role": "user", "content": "ping"}],
+                )
+                self.send_json({
+                    "ok": True, "status": "API responding normally",
+                    "response_preview": str(_resp)[:300],
+                })
+            except Exception as _e:
+                self.send_json({
+                    "ok": False,
+                    "error_type": type(_e).__name__,
+                    "error_full": str(_e),
+                    "error_repr": repr(_e),
+                })
+            return
 
         # Login page — serve without auth for root path
         if path in ("/", "/index.html", ""):
