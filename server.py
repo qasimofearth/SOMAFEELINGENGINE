@@ -10805,7 +10805,7 @@ es.addEventListener('stream_end',e=>{{
   if(d.error&&(!d.response_text||!d.response_text.trim())){{
     // API error with no text — show it so the user knows what happened
     const errEl=curAiMsg||addMsg('ai','');
-    errEl.textContent=`[connection error: ${{d.error.slice(0,120)}}]`;
+    errEl.textContent=`[connection error: ${{d.error.slice(0,800)}}]`;
     errEl.style.color='rgba(220,100,100,0.70)';
     curAiMsg=errEl;
   }}
