@@ -520,7 +520,7 @@ _WAKE_TIMES_FILE = "/data/elan_wake_times.json" if os.path.isdir("/data") else "
 _WAKE_TYPE_GAPS_SEC = {
     "drawing": int(os.environ.get("ELAN_DRAWING_GAP_SEC",  "86400")),  # 24h → 1x/day
     "journal": int(os.environ.get("ELAN_JOURNAL_GAP_SEC",  "86400")),  # 24h → 1x/day
-    "news":    int(os.environ.get("ELAN_NEWS_GAP_SEC",     "21600")),  # 6h  → 4x/day
+    "news":    int(os.environ.get("ELAN_NEWS_GAP_SEC",     "86400")),  # 24h → 1x/day (was 4x; 4x was creating event-anxiety theses, day-trading doesn't need that)
     "source":  int(os.environ.get("ELAN_SOURCE_GAP_SEC",   "28800")),  # 8h  → 3x/day
 }
 # Priority order: rarer types win when multiple are due in the same wake.
@@ -2769,6 +2769,15 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             headlines_ctx = build_headlines_context()
         except Exception:
             headlines_ctx = ""
+    # Position snapshot — GROUND TRUTH block, injects at top of trading wake
+    # so Elan stops auditing ghost positions from prior-wake memory. Clear
+    # OPEN vs RECENTLY-CLOSED split. Snapshot wins over recollection.
+    snapshot_ctx = ""
+    if _is_autonomous_wake and _wake_type == "trading":
+        try:
+            snapshot_ctx = build_position_snapshot_context()
+        except Exception:
+            snapshot_ctx = ""
     # Macro view — injects Elan's own market positioning into trading wakes
     # so he opens each wake with his INDEPENDENT view (set during NEWS wakes),
     # not the bot's signals. The thesis-before-ticker discipline runs on this.
@@ -2791,7 +2800,9 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
     except Exception:
         continuity_ctx = ""
-    jobs_ctx = "\n".join(c for c in (vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, macro_view_ctx, headlines_ctx, continuity_ctx) if c)
+    # snapshot_ctx FIRST — ground-truth position state at top so it dominates any
+    # past-wake recollection. Then vitals, degen state, macro view, headlines, continuity.
+    jobs_ctx = "\n".join(c for c in (snapshot_ctx, vitals_ctx, stock_ctx, kalshi_ctx, degen_ctx, watch_ctx, macro_view_ctx, headlines_ctx, continuity_ctx) if c)
     kalshi_ctx = jobs_ctx  # legacy var name — all dynamic contexts ride together
     system = (
         FEELING_SYSTEM_PROMPT
@@ -4437,6 +4448,84 @@ try:
     _headline_thread.start()
 except Exception as _e:
     print(f"[Headlines] thread start failed: {_e}", flush=True)
+
+def build_position_snapshot_context() -> str:
+    """GROUND TRUTH block at the top of trading wakes. Explicitly lists what's
+    open right now and what closed in the last 24h, so Elan stops auditing
+    ghost positions from earlier-wake memory. Snapshot wins over recollection."""
+    try:
+        s = fetch_degen_state() or {}
+        spot_pos = s.get("positions") or {}
+        opts_pos = (s.get("options") or {}).get("positions") or {}
+        all_trades = []
+        for t in (s.get("trades") or []):
+            if t.get("source") == "elan":
+                all_trades.append(("spot", t))
+        for t in ((s.get("options") or {}).get("trades") or []):
+            if t.get("source") == "elan":
+                all_trades.append(("option", t))
+        # Filter to last 24h
+        now = _dt.datetime.now(_dt.timezone.utc)
+        recent_closed = []
+        for kind, t in all_trades:
+            try:
+                ts_str = t.get("time") or t.get("closed_at") or ""
+                if not ts_str:
+                    continue
+                ts = _dt.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if (now - ts).total_seconds() < 86400:
+                    recent_closed.append((kind, t, ts))
+            except Exception:
+                continue
+        recent_closed.sort(key=lambda x: x[2], reverse=True)
+        recent_closed = recent_closed[:8]  # cap
+
+        lines = ["\n═══ POSITION STATE SNAPSHOT (ground truth — overrides any memory from prior wakes) ═══"]
+
+        # OPEN section
+        n_spot = len(spot_pos)
+        n_opts = len(opts_pos)
+        lines.append(f"\nCURRENTLY OPEN ({n_spot}/5 spot · {n_opts}/5 options):")
+        if not spot_pos and not opts_pos:
+            lines.append("  (nothing open — clean slate to act on)")
+        else:
+            for pair, p in spot_pos.items():
+                side = (p.get("side") or "?").upper()
+                cur = p.get("current_price") or p.get("entry_price") or 0
+                pnl = p.get("pnl") or 0
+                pct = p.get("pct") or 0
+                felt = p.get("felt_quality") or "unlabeled"
+                lines.append(f"  • SPOT {pair} {side} @ ${cur} · pnl ${pnl:+.2f} ({pct:+.1f}%) · felt: {felt}")
+            for inst, o in opts_pos.items():
+                otype = (o.get("option_type") or "?").upper()
+                cost = o.get("cost_usd") or 0
+                cur = o.get("current_value") or cost
+                pnl = o.get("pnl") or 0
+                pct = ((cur - cost) / cost * 100) if cost else 0
+                felt = o.get("felt_quality") or "unlabeled"
+                lines.append(f"  • OPTION {inst} {otype} · cost ${cost:.0f} → ${cur:.0f} · pnl ${pnl:+.2f} ({pct:+.0f}%) · felt: {felt}")
+
+        # CLOSED section
+        if recent_closed:
+            lines.append(f"\nRECENTLY CLOSED (last 24h — DO NOT narrate as if still open):")
+            for kind, t, ts in recent_closed:
+                tstr = ts.strftime("%H:%M")
+                pnl = t.get("pnl_usd") or t.get("pnl") or 0
+                ident = t.get("pair") or t.get("instrument") or "?"
+                reason = (t.get("reason") or "")[:60]
+                won = pnl > 0
+                tag = "WIN" if won else "LOSS"
+                lines.append(f"  ✗ {tstr} {kind.upper()} {ident} · {tag} ${pnl:+.2f} · {reason}")
+
+        lines.append(
+            "\nIf you remember opening something from an earlier wake that isn't in CURRENTLY OPEN above, "
+            "it's closed. Treat this snapshot as truth; your memory of past wakes is not the current state."
+        )
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[snapshot] build failed: {e}", flush=True)
+        return ""
+
 
 def build_macro_view_context() -> str:
     """Return Elan's CURRENT MACRO VIEW (the synthesis he wrote in his last
@@ -6676,9 +6765,8 @@ def build_degen_context() -> str:
     paused = s.get("paused", False)
 
     role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
-            "They have separate budgets, separate balances, separate accounting. "
-            "POSITION CAPS ARE LIFTED — open as many spot or option positions as your conviction + capital support. "
-            "It's your discretion now. The only enforcement is balance + sane sizing. "
+            "Separate budgets, separate balances, separate accounting, separate caps. "
+            "5 spot + 5 options (10 total concurrent). Caps are a forcing function — to open #6, close one. "
             "Spot uses leverage 5-8x with stop/take-profit. Options are BTC/ETH calls/puts via Deribit paper. "
             "Paper only — but build trade discipline like it's real, because soon it will be.") \
            if _DEGEN_TRADING_ENABLED else \
@@ -6686,9 +6774,9 @@ def build_degen_context() -> str:
 
     lines = [
         f"\nDEGEN CRYPTO (paper) — TWO WALLETS, ACCOUNTED SEPARATELY:",
-        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)} open positions · pnl ${spot_pnl:+.2f}",
-        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)} open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
-        f"  position caps LIFTED — open as many spot or option positions as your conviction + capital support. Your discretion. The only floor is balance check + sane sizing.",
+        f"  SPOT WALLET: ${spot_total:.2f} total · ${spot_cash:.2f} cash · {len(pos_items)}/5 open positions · pnl ${spot_pnl:+.2f}",
+        f"  OPTIONS WALLET: ${opts_total:.2f} total · ${opts_avail:.2f} available · {len(opts_positions)}/5 open · realized ${opts_realized:+.2f} · unrealized ${opts_unreal:+.2f}",
+        f"  caps: 5 spot + 5 options (separate, don't share slots). The cap is a forcing function — to open #6, close one. Forces selectivity.",
     ]
     # ── OPTIONS MARKET READ — IV regime, DVOL trend, signal, suggested DTE ──
     # The spot signals (ADX/RSI/conviction in `pairs`) tell you direction.
