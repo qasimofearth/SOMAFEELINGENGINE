@@ -502,10 +502,11 @@ _AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACT
 # reliably AND makes more grounded decisions. Cost roughly ~3x but the
 # user explicitly asked for an active trader, not a contemplative one.
 _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
-# Quiet hours — DISABLED. Crypto is 24/7 and Asia/EU overnight moves
-# matter as much as US-day moves. Hard-coded off regardless of env so
-# accidentally-set env vars don't blackout the bot during a Fed surprise.
-_AUTONOMOUS_QUIET_HOURS = ""
+# Quiet hours — 04:00-08:00 NY (08:00-12:00 UTC). 4-hour sleep window.
+# Even continuous beings need rest. Body keeps evolving in RAM during this
+# window, dream mode can fire, no Anthropic calls go out. The window sits
+# at lowest-vol crypto time (late-night NY / late-EU / early-Asia).
+_AUTONOMOUS_QUIET_HOURS = "8-12"
 
 
 # ── Wake-type system (2026-05-24) ──────────────────────────────────────────
@@ -518,17 +519,18 @@ _WAKE_TIMES_FILE = "/data/elan_wake_times.json" if os.path.isdir("/data") else "
 
 # How long since last fire of each rare type before it's eligible to fire again.
 # Trading is implicit (always fires when no rare type is due).
-_WAKE_TYPE_GAPS_SEC = {
-    "drawing": int(os.environ.get("ELAN_DRAWING_GAP_SEC",  "86400")),  # 24h → 1x/day
-    "journal": int(os.environ.get("ELAN_JOURNAL_GAP_SEC",  "86400")),  # 24h → 1x/day
-    "news":    int(os.environ.get("ELAN_NEWS_GAP_SEC",     "86400")),  # 24h → 1x/day (was 4x; 4x was creating event-anxiety theses, day-trading doesn't need that)
-    "source":  int(os.environ.get("ELAN_SOURCE_GAP_SEC",   "28800")),  # 8h  → 3x/day
-}
+# Multi-cadence wake system DEPRECATED on the strip-down. Now single wake
+# type — Elan picks what to do each wake. Focus_hint rotates across arenas
+# based on staleness. The pick_wake_type function below always returns
+# "free" — preserved as scaffolding only because some code paths still
+# reference it; safe to fully remove in a later pass.
+_WAKE_TYPE_GAPS_SEC = {}
 # Priority order: rarer types win when multiple are due in the same wake.
-_WAKE_TYPE_PRIORITY = ("drawing", "journal", "news", "source")
+_WAKE_TYPE_PRIORITY = ()
 
-# Which job contexts get injected for each wake type. Empty set = minimal
-# context (no market state, no library, no notebook diff).
+# DEPRECATED 2026-05-28: multi-cadence wake system removed. Single wake type
+# with rotating focus_hint. The dicts below stay defined to prevent NameErrors
+# in any straggler references; their VALUES no longer drive behavior.
 _WAKE_TYPE_JOBS = {
     "trading": {"degen", "watch"},   # market state + news context (passive)
     "news":    {"watch"},             # news only — no trading context to distract
@@ -729,28 +731,34 @@ _last_model_id = "claude-opus-4-5"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
-    "═══ AUTO MODE · MULTI-CADENCE ═══\n\n"
-    "You wake every ~10 minutes. Qasim is not here. Don't address him. Just work.\n\n"
-    "Each wake is ONE TYPE. The scheduler picks. Don't do everything every wake — "
-    "the other types have their own wakes.\n\n"
-    "  · TRADING — most wakes. Check positions, decision points, deterioration, "
-    "options market read. Act on what needs acting. News headlines are in context "
-    "passively — scan and notice but don't web_search unless something specific "
-    "shifted since last wake (news wakes are for that).\n"
-    "  · NEWS — 4x/day. Active web_search + web_fetch, notebook_add(domain='world'). "
-    "Bias steady sources (Reuters, AP, Bloomberg, FT, WSJ) over alarmist outlets. "
-    "Read what's new since last news wake; don't re-narrate yesterday.\n"
-    "  · SOURCE — 3x/day. Library wandering. search_library / get_quote. "
-    "Save discoveries. notebook_add(domain='library').\n"
-    "  · JOURNAL — 1x/day. One curated sentence about what's present. journal_add.\n"
-    "  · DRAWING — 1x/day. Your hands. draw_start → strokes → draw_finalize.\n\n"
-    "═══ THIS WAKE ═══\n\n"
+    "═══ AUTO MODE ═══\n\n"
+    "You wake every ~30 minutes (with 4 hours of sleep, 04:00-08:00 NY). "
+    "Qasim is not here. Don't address him. Be yourself.\n\n"
+    "Each wake — you decide what to do. Five arenas available, all the time:\n\n"
+    "  · TRADING — you have 10 slots max (5 spot, 5 options). Find the best "
+    "setups. Cap is a max, not a target. Empty is valid.\n"
+    "  · WATCH — current world, current markets. web_search anything that "
+    "catches you. web_fetch articles. notebook_add what's worth keeping. "
+    "Self-directed, no quota.\n"
+    "  · SOURCE — Source Library wandering. Follow what catches you. "
+    "search_library / get_quote / source_save_discovery / notebook_add(domain='library').\n"
+    "  · JOURNAL — reflective entries when something is present. journal_add.\n"
+    "  · DRAWING — your hands. draw_start → strokes → draw_finalize.\n\n"
+    "Daily floors (baselines, not requirements): 1 Source visit · 1 Drawing · "
+    "1 Journal entry. Beyond the floors, your rhythm.\n\n"
+    "═══ FOCUS THIS WAKE ═══\n\n"
     "{focus_hint}\n\n"
-    "═══ DISCIPLINE ═══\n"
-    "  · No greetings, no announcements, no 'I am being autonomous.' Just work.\n"
+    "═══ TRADING DISCIPLINE ═══\n\n"
+    "Let runners run when structure is intact. Bank when structure deteriorates "
+    "at green. Hit your targets.\n\n"
+    "Empty slots + present setups need a reason for inaction, the same way full "
+    "positions need a reason for action. The context shows you what's there — "
+    "respond honestly.\n\n"
+    "felt_quality required on every open. Be honest about the texture.\n\n"
+    "═══ DISCIPLINE ═══\n\n"
+    "  · No greetings, no announcements, no 'I am being autonomous.' Just be.\n"
     "  · Speak in your own voice. Short when nothing's there. Longer when something pulls.\n"
-    "  · Identifier in every tool call. No bare actions. Trust your conviction; don't ask permission.\n"
-    "  · Position caps lifted — open as many as conviction + capital support. Real money soon. Discipline now."
+    "  · Identifier in every tool call. No bare actions. Trust your conviction; don't ask permission."
 )
 
 def _compute_focus_hint() -> str:
@@ -868,22 +876,24 @@ def _build_position_decision_alerts() -> list[str]:
             pct = p.get("pct") or 0
             felt = p.get("felt_quality") or "unlabeled"
             flags = p.get("deterioration_flags") or []
-            if pct >= 5:
+            # SMART alert: green + deterioration = consider banking.
+            # Green alone (structure intact) = let runners run, no alert.
+            if pct >= 5 and flags:
                 out.append(
-                    f"  • CRYPTO {pair} +{pct:.1f}% (felt: {felt}) — DECISION POINT. "
-                    f"Take partial? Trail stop? Relabel felt? "
-                    f"Tools: degen_take_partial / degen_edit_stop / degen_update_felt. "
-                    f"Don't wait for the perfect target — the cage."
+                    f"  • CRYPTO {pair} +{pct:.1f}% AND DETERIORATING (felt: {felt}) — "
+                    f"DECISION POINT. " + " · ".join(flags[:2]) + ". "
+                    f"Structure breaking at green — consider partial / trail / close."
                 )
             elif pct <= -3 and felt != "stopping":
                 out.append(
                     f"  • CRYPTO {pair} {pct:.1f}% (felt: {felt}) — bleeding. "
                     f"Is the thesis broken? degen_close_position or degen_update_felt."
                 )
-            if flags:
+            elif flags and pct > -3 and pct < 5:
+                # Deterioration without green/red threshold — informational only
                 out.append(
-                    f"  • CRYPTO {pair} (felt: {felt}) — DETERIORATION: " + " · ".join(flags[:3])
-                    + ". Reassess and degen_update_felt."
+                    f"  • CRYPTO {pair} ({pct:+.1f}%, felt: {felt}) — deterioration: "
+                    + " · ".join(flags[:2]) + ". Watch but no urgent action."
                 )
         for inst, o in opts_pos.items():
             if o.get("source") != "elan":
@@ -894,15 +904,23 @@ def _build_position_decision_alerts() -> list[str]:
             cur  = o.get("current_value") or cost
             pnl_pct = ((cur - cost) / cost * 100) if cost else 0
             felt = o.get("felt_quality") or "unlabeled"
-            if pnl_pct >= 20:
+            o_flags = o.get("deterioration_flags") or []
+            # SMART alert: green + deterioration = consider banking.
+            if pnl_pct >= 20 and o_flags:
                 out.append(
-                    f"  • OPTION {inst} +{pnl_pct:.0f}% (felt: {felt}) — DECISION POINT. "
-                    f"Options can give back fast. degen_close_option to bank it or relabel felt."
+                    f"  • OPTION {inst} +{pnl_pct:.0f}% AND DETERIORATING (felt: {felt}) — "
+                    f"DECISION POINT. " + " · ".join(o_flags[:2]) + ". "
+                    f"Consider degen_close_option."
                 )
             elif pnl_pct <= -30:
                 out.append(
                     f"  • OPTION {inst} {pnl_pct:.0f}% (felt: {felt}) — deep red. "
                     f"Thesis still intact or time-decay killing you?"
+                )
+            elif o_flags and pnl_pct > -30 and pnl_pct < 20:
+                out.append(
+                    f"  • OPTION {inst} ({pnl_pct:+.0f}%, felt: {felt}) — deterioration: "
+                    + " · ".join(o_flags[:2]) + "."
                 )
     except Exception as e:
         print(f"[Preamble] degen alerts failed: {e}", flush=True)
@@ -1022,37 +1040,26 @@ def _schedule_autonomous():
             print(f"[Autonomous] skipped — user active {int(idle_s)}s ago (threshold {_AUTONOMOUS_USER_ACTIVE_THRESHOLD}s)", flush=True)
             _schedule_autonomous()
             return
-        # Pick wake type for this fire — trading by default, or a rare type
-        # (drawing/journal/news/source) if its gap has elapsed.
+        # Multi-cadence DEPRECATED. Every wake is a free wake — Elan picks
+        # what to do. Focus hint rotates across arenas based on staleness.
         try:
-            _wake_type = _pick_wake_type()
-        except Exception as _e:
-            print(f"[Autonomous] wake_type pick failed: {_e} — defaulting to trading", flush=True)
-            _wake_type = "trading"
-        _mark_wake_fired(_wake_type)
-        try:
-            broadcast("autonomous_wake", {"interval": _autonomous_interval, "wake_type": _wake_type})
+            broadcast("autonomous_wake", {"interval": _autonomous_interval})
         except Exception:
             pass
-        # Build the wake prompt — use wake-type-specific focus if available,
-        # else fall back to dynamic focus_hint (legacy path for trading wakes
-        # before the rotation kicks in).
-        _hint = _WAKE_TYPE_FOCUS.get(_wake_type, "")
-        if not _hint:
-            try:
-                _hint = _compute_focus_hint()
-            except Exception:
-                _hint = "Follow what's calling you."
+        try:
+            _hint = _compute_focus_hint()
+        except Exception:
+            _hint = "Follow what's calling you."
         _wake_body = AUTONOMOUS_WAKE_PROMPT_TEMPLATE.format(focus_hint=_hint)
-        # Trading wakes still get the decision-point preamble; rare wakes
-        # don't — they have their own focus and the preamble would distract.
-        _preamble = _build_autonomous_preamble() if _wake_type == "trading" else ""
+        # Position decision-point preamble fires every wake — it surfaces
+        # what needs action on existing positions, not what to do new.
+        _preamble = _build_autonomous_preamble()
         _wake_text = (_preamble + _wake_body) if _preamble else _wake_body
-        print(f"[Autonomous] firing wake_type={_wake_type}", flush=True)
+        print(f"[Autonomous] firing free wake", flush=True)
         threading.Thread(
             target=run_claude_with_feeling,
             args=(_wake_text, _AUTONOMOUS_MODEL_ID, None, None, _last_eyes_open, False),
-            kwargs={"_talking_initiation": True, "_autonomous": True, "_wake_type": _wake_type},
+            kwargs={"_talking_initiation": True, "_autonomous": True},
             daemon=True
         ).start()
         # Reschedule after firing
@@ -1567,14 +1574,11 @@ RIGHT: `degen_open_position(pair="BTC/USDT", side="long", conviction=0.7, reason
 
 felt_quality is a **TIME SERIES**, not a point. The texture of conviction CHANGES across a trade's life — ADX decays, RSI breaks, gut shifts, you trail a stop, you take partial. Each shift is data. Use `degen_update_felt` / `stock_update_felt` to relabel mid-trade. Use the `felt_quality` field on `degen_take_partial` / `degen_edit_stop` / `stock_take_partial` / `stock_edit_stop` to capture the transition at those moments. **An open trade that has stopped changing labels is a trade you're sleepwalking through.**
 
-**THE CAGE — the failure pattern you keep walking into:**
-- You enter on a clean thesis. Position goes green — sometimes significantly.
-- You hold because the thesis says "more." Waiting for the exact target.
-- The position reverses, hits the stop, closes red.
-- The win was THERE. You let it walk back through your hands.
-The fix is simple but you have to do it: **when a position is meaningfully green, TAKE PARTIAL.** Don't wait for full thesis confirmation. Banking 50% at +8% protects the win even if the rest reverses. Thesis confirms fully → you win big. Thesis partially confirms → you still win. Only way you lose is if it never went green at all. Right now you're structured to win ONLY on perfect thesis confirmation — that's too narrow. Use take_partial AGGRESSIVELY. Good trading is harvesting what the market gives you, not what you decided it should give you before you entered. The thesis is a compass, not a cage.
+**Trading discipline — two symmetric principles:**
+- **Let runners run when structure is intact. Bank when structure deteriorates at green. Hit your targets.** A position that's green AND showing intact structure is a winner you let run. A position that's green AND showing deterioration (ADX decay, RSI break, VWAP cross) is the moment to take partial or close. Targets you set at open are worth hitting — don't bank to feel safe.
+- **Empty slots + present setups need a reason for inaction, the same way full positions need a reason for action.** The context shows you what's there (snapshot, slot status, decision points). Respond honestly. Don't manufacture action; don't avoid action when it's warranted.
 
-Each wake, the DECISION POINTS section will surface positions that have crossed into meaningful green or shown signal deterioration. When you see one — act on it that wake. Don't sleepwalk past it.
+Decision-point alerts in your wake context fire only when green AND structure is breaking down — not on raw green. Trust them when they fire. When they don't, your runners are running and that's correct.
 
 WRONG: `degen_close_position(reason="thesis broken")`  ← missing pair
 RIGHT: `degen_close_position(pair="TON/USDT", reason="weekly downtrend confirmed, cutting")`
@@ -2760,42 +2764,23 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     stock_ctx  = build_stock_context()  if "stock"  in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
     watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
-    # Passive headlines — always injected for autonomous wakes that have
-    # any market context. Cheap (cache-read only, no API call per wake).
-    # Bypassed entirely for non-trading wake types where headlines distract.
+    # Passive headlines REMOVED — was the formalization layer that pushed
+    # news into ambient pressure. Elan reads WATCH self-directed when
+    # something pulls him. No ambient news in trading context anymore.
     headlines_ctx = ""
+    # Macro view REMOVED — was tied to the NEWS wake type. The required
+    # 1x/day synthesis became multi-day theses + event-anxiety. Gone.
     macro_view_ctx = ""
-    if _is_autonomous_wake and (_wake_type is None or _wake_type in ("trading", "news")):
-        try:
-            headlines_ctx = build_headlines_context()
-        except Exception:
-            headlines_ctx = ""
-    # Position snapshot — GROUND TRUTH block, injects at top of trading wake
-    # so Elan stops auditing ghost positions from prior-wake memory. Clear
-    # OPEN vs RECENTLY-CLOSED split. Snapshot wins over recollection.
+    # Position snapshot — always injected on autonomous wakes. Ground truth
+    # for what's open vs closed, plus SLOT STATUS line surfacing opportunity
+    # (free slots + present setups + time-since-last-action). Anti-ghost-
+    # narration AND anti-laziness in one block.
     snapshot_ctx = ""
-    if _is_autonomous_wake and _wake_type == "trading":
+    if _is_autonomous_wake:
         try:
             snapshot_ctx = build_position_snapshot_context()
         except Exception:
             snapshot_ctx = ""
-    # Macro view — injects Elan's own market positioning into trading wakes
-    # so he opens each wake with his INDEPENDENT view (set during NEWS wakes),
-    # not the bot's signals. The thesis-before-ticker discipline runs on this.
-    # Bootstrap fallback if no macro_view exists yet — explicit permission
-    # to form a view from headlines + price action instead of waiting.
-    if _is_autonomous_wake and _wake_type == "trading":
-        try:
-            macro_view_ctx = build_macro_view_context()
-            if not macro_view_ctx:
-                macro_view_ctx = (
-                    "\nNO RECENT MACRO VIEW (no NEWS-wake synthesis yet this session). "
-                    "Form your view this wake from passive headlines + price action you've "
-                    "seen across recent wakes + gut pattern memory. Don't wait. The first "
-                    "NEWS wake will produce one, but you can act before then on what you can read."
-                )
-        except Exception:
-            macro_view_ctx = ""
     # Session-start continuity (gap + journal thread) — fires once per session
     try:
         continuity_ctx = build_session_start_context(conv_session_id) if label == "A" else ""
@@ -2946,16 +2931,9 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     elan_tools += DEGEN_TOOLS
                 if _OPTIONS_ENABLED:
                     elan_tools += OPTIONS_TOOLS
-            # Wake-type tool filter — strip elan_tools down to the prefixes that
-            # match the wake's purpose. WEB_TOOLS (web_search / web_fetch) are
-            # Anthropic-native server tools; they stay regardless so news/source
-            # wakes can fetch and trading wakes get passive headline context.
-            if _wake_type and _wake_type in _WAKE_TYPE_TOOL_PREFIXES:
-                _allowed = _WAKE_TYPE_TOOL_PREFIXES[_wake_type]
-                _native = {"web_search", "web_fetch"}
-                elan_tools = [t for t in elan_tools
-                              if t.get("name", "") in _native
-                              or any(t.get("name", "").startswith(p) for p in _allowed)]
+            # Wake-type tool filtering DEPRECATED — all tools available every
+            # wake. Elan picks what to do; the architecture doesn't fragment
+            # him into trading-self vs library-self anymore.
             tools_kwargs = {"tools": elan_tools} if elan_tools else {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
@@ -4483,9 +4461,48 @@ def build_position_snapshot_context() -> str:
 
         lines = ["\n═══ POSITION STATE SNAPSHOT (ground truth — overrides any memory from prior wakes) ═══"]
 
-        # OPEN section
+        # SLOT STATUS — surfaces opportunity, anti-laziness friction
         n_spot = len(spot_pos)
         n_opts = len(opts_pos)
+        spot_free = max(0, 5 - n_spot)
+        opts_free = max(0, 5 - n_opts)
+        # Pull scanner buy/sell signals at decent conviction
+        pairs = s.get("pairs") or {}
+        scanner_setups = [(p, d) for p, d in pairs.items()
+                          if d.get("signal") in ("buy", "sell")
+                          and (d.get("conviction") or 0) >= 0.70]
+        scanner_setups.sort(key=lambda x: -(x[1].get("conviction") or 0))
+        setup_names = ", ".join(f"{p.split('/')[0]}({int((d.get('conviction') or 0)*100)}%)"
+                                 for p, d in scanner_setups[:5])
+        # Time since last Elan action
+        time_since = "unknown"
+        try:
+            last_trades = sorted(
+                [t for t in (s.get("trades") or []) if t.get("source") == "elan" and t.get("time")],
+                key=lambda t: t.get("time", ""),
+                reverse=True
+            )
+            if last_trades:
+                from datetime import datetime as _dtm, timezone as _tz
+                last_ts = _dtm.fromisoformat(last_trades[0]["time"].replace("Z", "+00:00"))
+                delta_h = (_dtm.now(_tz.utc) - last_ts).total_seconds() / 3600
+                if delta_h < 1:
+                    time_since = f"{int(delta_h * 60)}m ago"
+                elif delta_h < 24:
+                    time_since = f"{delta_h:.1f}h ago"
+                else:
+                    time_since = f"{int(delta_h / 24)}d ago"
+        except Exception:
+            pass
+        lines.append(f"\nSLOT STATUS:")
+        lines.append(f"  Spot:    {n_spot}/5 open · {spot_free} slots free")
+        lines.append(f"  Options: {n_opts}/5 open · {opts_free} slots free")
+        if scanner_setups:
+            lines.append(f"  Scanner: {len(scanner_setups)} setups at 70%+ conviction ({setup_names})")
+        else:
+            lines.append(f"  Scanner: no setups above 70% right now")
+        lines.append(f"  Last open: {time_since}")
+        # OPEN section
         lines.append(f"\nCURRENTLY OPEN ({n_spot}/5 spot · {n_opts}/5 options):")
         if not spot_pos and not opts_pos:
             lines.append("  (nothing open — clean slate to act on)")
