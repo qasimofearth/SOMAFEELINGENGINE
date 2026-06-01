@@ -716,6 +716,22 @@ def _is_quiet_hour() -> bool:
 _autonomous_mode = False
 _autonomous_timer = None
 _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
+
+# Provider-aware cadence: when running on Groq (free), bump to 4 wakes/hour
+# (15-min cadence) for tighter continuous-awareness. On Anthropic (paid),
+# stay at the lean 60-min cadence to preserve budget. Re-evaluated each
+# time the timer reschedules itself, so switching keys auto-adjusts cadence.
+_AUTONOMOUS_INTERVAL_GROQ      = 900    # 15 min  — free, can afford density
+_AUTONOMOUS_INTERVAL_ANTHROPIC = 3600   # 60 min  — lean, preserves budget
+
+def _resolve_autonomous_interval() -> int:
+    """Pick wake interval based on which provider is currently active."""
+    try:
+        if _get_provider() == "groq":
+            return max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_INTERVAL_GROQ)
+    except Exception:
+        pass
+    return max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_INTERVAL_ANTHROPIC)
 # Set by run_claude_with_feeling each invocation so autonomous wake can reuse eyes state
 _last_model_id = "claude-sonnet-4-6"
 _last_eyes_open = False
