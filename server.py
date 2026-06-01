@@ -2918,7 +2918,17 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # Wake-type tool filtering DEPRECATED — all tools available every
             # wake. Elan picks what to do; the architecture doesn't fragment
             # him into trading-self vs library-self anymore.
-            tools_kwargs = {"tools": elan_tools} if elan_tools else {}
+            if elan_tools:
+                # PROMPT CACHING for tool definitions: cache_control on the
+                # LAST tool extends the cached prefix to include ALL tools
+                # (~10-15K tokens). Reads at 10% of normal cost. Same 1h TTL
+                # as system prompt — at 60-min autonomous cadence each wake
+                # gets a cache hit. Big rate-limit + cost win.
+                elan_tools[-1] = {**elan_tools[-1],
+                                  "cache_control": {"type": "ephemeral", "ttl": "1h"}}
+                tools_kwargs = {"tools": elan_tools}
+            else:
+                tools_kwargs = {}
             working_messages = list(messages)
             MAX_TOOL_TURNS = 4
 
@@ -2947,9 +2957,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
+            # Tighter output cap for autonomous wakes — Elan should be concise
+            # in his journal/action there. Chat gets the full 900 since user
+            # expects longer responses. Saves ~$3-5/mo on output tokens.
+            _max_tokens = 500 if autonomous else 900
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
-                    "model": model_id, "max_tokens": 900,
+                    "model": model_id, "max_tokens": _max_tokens,
                     "system": system_blocks, "messages": working_messages,
                     "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
