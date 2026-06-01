@@ -1064,7 +1064,15 @@ def _schedule_autonomous():
         ).start()
         # Reschedule after firing
         _schedule_autonomous()
-    _autonomous_timer = threading.Timer(_autonomous_interval, _fire)
+    # Provider-aware: resolve interval each time we reschedule, so switching
+    # GROQ_API_KEY / ANTHROPIC_API_KEY env vars auto-adjusts cadence without
+    # a code change. Falls back to _autonomous_interval (manual override) if
+    # _resolve_autonomous_interval is somehow unavailable.
+    try:
+        _interval_now = _resolve_autonomous_interval()
+    except Exception:
+        _interval_now = _autonomous_interval
+    _autonomous_timer = threading.Timer(_interval_now, _fire)
     _autonomous_timer.daemon = True
     _autonomous_timer.start()
 
