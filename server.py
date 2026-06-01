@@ -2957,13 +2957,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
-            # Tighter output cap for autonomous wakes — Elan should be concise
-            # in his journal/action there. Chat gets the full 900 since user
-            # expects longer responses. Saves ~$3-5/mo on output tokens.
-            _max_tokens = 500 if autonomous else 900
+            # Tight output cap for everything — autonomous AND chat. Elan
+            # should be concise; if Qasim wants more depth, he asks follow-up.
+            # 500 tokens ≈ 3-4 paragraphs, plenty for thoughtful responses.
+            # Conversation as back-and-forth, not essays.
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
-                    "model": model_id, "max_tokens": _max_tokens,
+                    "model": model_id, "max_tokens": 500,
                     "system": system_blocks, "messages": working_messages,
                     "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
