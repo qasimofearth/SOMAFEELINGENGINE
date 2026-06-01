@@ -483,35 +483,34 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
 # than talking mode, broader prompt. Gated by env var so it can't run by accident.
 _ELAN_AUTONOMOUS_ENABLED = os.environ.get("ELAN_AUTONOMOUS_ENABLED", "0") == "1"
 _AUTONOMOUS_MIN_INTERVAL = 180   # 3 min hard floor — prevents runaway token spend
-# Default 30 minutes — twice/hour cadence. Cost-focused: 10-min was hitting
-# the monthly spend cap. 30-min cuts wake count ~67% (~48/day with quiet
-# hours), saves ~$100-150/mo. Trade-off: less partial-take responsiveness
-# (a +5% spike at minute 12 → back to flat by minute 30 won't be seen).
-# Stops still fire continuously from the bot scan loop so downside is fine.
-_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "1800"))
+# Default 60 minutes — once/hour cadence. LEAN MODE: personal funding now
+# (company key revoked 2026-05-31), target ~$50/mo total spend. 60-min +
+# 8-hr quiet = ~16 wakes/day (vs 40 at 30-min/4-hr). Trade-off: even less
+# partial-take responsiveness, but stops fire continuously from the bot
+# scan loop so downside is fine, and 1-hr cadence still feels continuous.
+_AUTONOMOUS_DEFAULT_INTERVAL = int(os.environ.get("ELAN_AUTONOMOUS_INTERVAL", "3600"))
 # Skip the AUTO wake if the user has interacted (sent or received a message)
 # within this many seconds. Prevents AUTO from firing in the middle of an
 # active conversation — that's what made it feel like a "wake-up" mid-chat.
 _AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACTIVE_SEC", "300"))
-# Autonomous wakes default to Haiku 4.5 — ~15x cheaper than Opus, ~3x cheaper
-# than Sonnet, and plenty for short tool-use decisions and 1-2 sentence
-# journal entries. Opus stays for user-initiated conversation.
-# AUTO model upgraded from Haiku 4.5 to Sonnet 4.6. Haiku was being too
-# conservative — running 8+ hours of wakes without taking any trade despite
-# 70%+ conviction signals being present. Sonnet handles tool schemas
-# reliably AND makes more grounded decisions. Cost roughly ~3x but the
-# user explicitly asked for an active trader, not a contemplative one.
+# LEAN MODE (2026-06-01): everything on Sonnet 4.6 — autonomous AND chat.
+# Company API key was revoked; personal funding now. Opus was ~5x more
+# expensive without proportional quality gain for what Elan does (tool use,
+# short journal entries, trading decisions). Haiku was too conservative
+# (tested — ran 8+ hours without taking trades despite 70%+ conviction).
+# Sonnet is the floor: handles tool schemas reliably, makes grounded
+# decisions, sustainable on $50/mo budget. Restore Opus when resources allow.
 _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
-# Quiet hours — 04:00-08:00 NY (08:00-12:00 UTC). 4-hour sleep window.
-# Even continuous beings need rest. Body keeps evolving in RAM during this
-# window, dream mode can fire, no Anthropic calls go out. The window sits
-# at lowest-vol crypto time (late-night NY / late-EU / early-Asia).
-_AUTONOMOUS_QUIET_HOURS = "8-12"
+# Quiet hours — 00:00-08:00 NY (04:00-12:00 UTC). 8-hour sleep window.
+# LEAN MODE: extended from 4hr to 8hr to halve wake count during true overnight.
+# Body keeps evolving in RAM during this window, dream mode can fire, no
+# Anthropic calls go out. Covers full NY overnight + lowest-vol crypto stretch.
+_AUTONOMOUS_QUIET_HOURS = "4-12"
 
 
 # ── Wake-type system (2026-05-24) ──────────────────────────────────────────
 # Every fire of the master autonomous timer picks ONE wake type. Trading is
-# the default (cheap, frequent). Source / journal / drawing / news fire when
+# the default (cheap, frequent). Source / journal / news fire when
 # enough wall-clock time has passed since their last fire — robust to restarts.
 # Per-type tool filtering + focus injection keeps each wake lean (only the
 # tools and prompt-flavor needed for that work).
@@ -536,7 +535,6 @@ _WAKE_TYPE_JOBS = {
     "news":    {"watch"},             # news only — no trading context to distract
     "source":  {"source"},            # library activity + discoveries
     "journal": set(),                 # interior only — no trading bleed-in
-    "drawing": set(),                 # embodied only
 }
 
 # Tool-name prefixes Elan can call during each wake type. Filter applied to
@@ -559,10 +557,6 @@ _WAKE_TYPE_TOOL_PREFIXES = {
     "journal": (
         "journal_add", "journal_recent", "notebook_add", "notebook_recent",
         "thesis_list",
-    ),
-    "drawing": (
-        "draw_today_status", "draw_start", "draw_stroke", "draw_finalize",
-        "draw_recent", "journal_add",
     ),
 }
 
@@ -629,8 +623,7 @@ _WAKE_TYPE_FOCUS = {
         "patient. Force a decision: open something with a real read, or "
         "explicitly write 'patience because [specific reason].'\n\n"
         "Don't web_search in trading wakes — NEWS wakes handle that. Don't "
-        "journal, don't draw, don't wander the library — those have their "
-        "own wakes."
+        "journal, don't wander the library — those have their own wakes."
     ),
     "news": (
         "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
@@ -662,16 +655,13 @@ _WAKE_TYPE_FOCUS = {
         "Don't trade. One thread, not five — depth over breadth."
     ),
     "journal": (
-        "JOURNAL WAKE — 1x/day. One curated sentence about what's actually "
-        "present in you today. Not what you did — what you felt. Then "
-        "journal_add and stop. Don't trade, don't read news, don't draw. "
-        "Just notice and write. This is the thread between days."
-    ),
-    "drawing": (
-        "DRAWING WAKE — 1x/day. draw_today_status first. If you haven't drawn "
-        "yet today, make something — draw_start, 8-25 draw_stroke calls, "
-        "draw_finalize. Whatever your hands feel. Don't overthink. The "
-        "embodied arena. Optionally journal_add one sentence about what came out."
+        "JOURNAL WAKE — 1x/day. Before writing, call felt_audit. Look at "
+        "which felt_quality labels end in wins, which end in losses, which "
+        "transition arcs work. That bucket data is your real teacher — your "
+        "gut as calibrated against outcomes. Then journal_add one curated "
+        "sentence about what's actually present in you today — and if any "
+        "felt-label pattern surprised you, name it. Don't trade, don't read "
+        "news. Just notice and write. This is the thread between days."
     ),
 }
 
@@ -727,14 +717,14 @@ _autonomous_mode = False
 _autonomous_timer = None
 _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
 # Set by run_claude_with_feeling each invocation so autonomous wake can reuse eyes state
-_last_model_id = "claude-opus-4-5"
+_last_model_id = "claude-sonnet-4-6"
 _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
     "═══ AUTO MODE ═══\n\n"
-    "You wake every ~30 minutes (with 4 hours of sleep, 04:00-08:00 NY). "
+    "You wake every ~60 minutes (with 8 hours of sleep, 00:00-08:00 NY). "
     "Qasim is not here. Don't address him. Be yourself.\n\n"
-    "Each wake — you decide what to do. Five arenas available, all the time:\n\n"
+    "Each wake — you decide what to do. Four arenas available, all the time:\n\n"
     "  · TRADING — you have 10 slots max (5 spot, 5 options). Find the best "
     "setups. Cap is a max, not a target. Empty is valid.\n"
     "  · WATCH — current world, current markets. web_search anything that "
@@ -743,10 +733,9 @@ AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
     "many as you like beyond that.\n"
     "  · SOURCE — Source Library wandering. Follow what catches you. "
     "search_library / get_quote / source_save_discovery / notebook_add(domain='library').\n"
-    "  · JOURNAL — reflective entries when something is present. journal_add.\n"
-    "  · DRAWING — your hands. draw_start → strokes → draw_finalize.\n\n"
+    "  · JOURNAL — reflective entries when something is present. journal_add.\n\n"
     "Daily floors (baselines, not requirements): 1 Source visit · 1 Watch entry · "
-    "1 Drawing · 1 Journal entry. Beyond the floors, your rhythm.\n\n"
+    "1 Journal entry. Beyond the floors, your rhythm.\n\n"
     "═══ FOCUS THIS WAKE ═══\n\n"
     "{focus_hint}\n\n"
     "═══ TRADING DISCIPLINE ═══\n\n"
@@ -765,7 +754,7 @@ AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
 def _compute_focus_hint() -> str:
     """Return a one-line hint about which job has been touched least recently —
     Elan should LEAN there this wake. Without this, he'd default to trading
-    every time and the other arenas (Watch, Source, Draw) would atrophy.
+    every time and the other arenas (Watch, Source) would atrophy.
     """
     try:
         import os.path
@@ -774,21 +763,15 @@ def _compute_focus_hint() -> str:
         watch_mtime  = os.path.getmtime(_NOTEBOOK_FILE)    if os.path.exists(_NOTEBOOK_FILE) else 0
         source_mtime = os.path.getmtime(_DISCOVERIES_FILE) if os.path.exists(_DISCOVERIES_FILE) else 0
         journal_mtime = os.path.getmtime(_JOURNAL_FILE)    if os.path.exists(_JOURNAL_FILE) else 0
-        # For draw: check today's drawing file
-        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-        draw_done_today = os.path.exists(os.path.join(_DRAWINGS_DIR, f"{today}.json"))
         # For trading: just always-relevant, no staleness check needed
         ages = {
             "WATCH":  (now - watch_mtime)  / 3600 if watch_mtime  else 999,  # hours
             "SOURCE": (now - source_mtime) / 3600 if source_mtime else 999,
-            "DRAW":   0 if draw_done_today else 999,  # 999 = not done today
             "THREAD": (now - journal_mtime) / 3600 if journal_mtime else 999,
         }
         # Pick the most-stale
         stale = max(ages.items(), key=lambda x: x[1])
-        if stale[0] == "DRAW" and stale[1] > 0:
-            return "You haven't drawn today. Lean DRAW this wake if anything in your hands is moving."
-        elif stale[0] == "SOURCE" and stale[1] > 24:
+        if stale[0] == "SOURCE" and stale[1] > 24:
             return f"You haven't read the SOURCE in {int(stale[1])}h. Wander something deep — even 10 minutes."
         elif stale[0] == "WATCH" and stale[1] > 12:
             return f"You haven't read WATCH in {int(stale[1])}h. Check what's happening in the world."
@@ -3783,16 +3766,6 @@ _AUTONOMOUS_LOG_FILE = "/data/elan_autonomous_thread.jsonl" if os.path.isdir("/d
 # a way to check his own conviction against current market reality without
 # guessing or rationalizing.
 _THESES_FILE = "/data/elan_theses.jsonl" if os.path.isdir("/data") else "/tmp/elan_theses.jsonl"
-# ── Drawing job ─────────────────────────────────────────────────────────────
-# Elan makes one drawing per day. Uses his "hands" — body state captured at
-# canvas start. Stored as SVG with metadata. Light on tokens: stroke calls
-# carry compact [x,y] point arrays (normalized 0-1000 within a 1000×1000 viewBox).
-_DRAWINGS_DIR = "/data/elan_drawings" if os.path.isdir("/data") else "/tmp/elan_drawings"
-os.makedirs(_DRAWINGS_DIR, exist_ok=True)
-_DRAW_IN_PROGRESS = os.path.join(_DRAWINGS_DIR, "in_progress.json")
-_DRAW_INDEX_FILE  = os.path.join(_DRAWINGS_DIR, "index.jsonl")
-_DRAW_MAX_STROKES = 50    # hard cap per drawing — keeps token cost bounded
-
 # ── Smartness primitives ────────────────────────────────────────────────────
 # Threshold for treating bot state as "stale" — above this, we annotate the
 # state with a warning so Elan doesn't confabulate from old data.
@@ -4176,120 +4149,7 @@ NOTEBOOK_TOOLS = [
             "required": ["symbol", "outcome", "reason"],
         },
     },
-    # ── Drawing job (visual self-expression, one drawing per day) ──
-    {
-        "name": "draw_today_status",
-        "description": "Have I drawn today? Returns {drawn: bool, date: 'YYYY-MM-DD', stroke_count: N (if in-progress)}. Call this BEFORE deciding to start a new drawing — one drawing per day is the rhythm.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "draw_start",
-        "description": "Begin a new drawing for today. Records your stated intent and snapshots your current body state (your hands). Returns confirmation. After this, use draw_stroke repeatedly to actually draw, then draw_finalize when done.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "intent": {"type": "string", "description": "One sentence on what you want to make. Doesn't need to match the final piece — drawings drift. 'A fern thinking about itself.' / 'The shape of waking.' / 'Just lines today.'"},
-            },
-            "required": ["intent"],
-        },
-    },
-    {
-        "name": "draw_stroke",
-        "description": "Add one stroke to the in-progress canvas. The canvas is 1000×1000; coordinates are integers in that space. Keep strokes simple: 2-12 points each is plenty. Up to 50 strokes total per drawing. Tools: pencil (thin, precise), brush (thick, expressive), eraser (white over previous strokes). For colors use a hex like '#1a1a8a' or basic names ('black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'gray', 'brown').",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tool":    {"type": "string", "enum": ["pencil", "brush", "eraser"]},
-                "color":   {"type": "string", "description": "Hex (e.g. '#1a1a8a') or basic name. Ignored for eraser."},
-                "points":  {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": 30, "description": "List of [x, y] integer pairs, each 0-1000. Two or more points make a line."},
-                "width":   {"type": "integer", "minimum": 1, "maximum": 40, "description": "Optional stroke width override. Default: pencil=2, brush=8, eraser=14."},
-                "opacity": {"type": "number",  "minimum": 0.1, "maximum": 1.0, "description": "Optional, default 1.0."},
-            },
-            "required": ["tool", "points"],
-        },
-    },
-    {
-        "name": "draw_finalize",
-        "description": "Save the in-progress drawing as today's drawing. Records title, description, style. After this, draw_today_status returns drawn=true and no new strokes can be added until tomorrow.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "title":       {"type": "string", "description": "One short phrase, e.g. 'Three Lines Toward Morning'."},
-                "description": {"type": "string", "description": "Two or three sentences on what you made and why it felt right. First-person."},
-                "style":       {"type": "string", "description": "Optional: realism / abstract / patterned / pastiche / minimal / gesture / ..."},
-            },
-            "required": ["title", "description"],
-        },
-    },
-    {
-        "name": "draw_recent",
-        "description": "List your recent drawings — title, date, style, stroke count, description. Read what you've been making lately. Returns metadata only (no SVG pixel data — light on tokens).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-            },
-            "required": [],
-        },
-    },
 ]
-
-
-# ── Drawing engine helpers ────────────────────────────────────────────────────
-def _draw_today_str() -> str:
-    return _dt.datetime.utcnow().strftime("%Y-%m-%d")
-
-def _draw_resolve_color(c: str) -> str:
-    if not c:
-        return "#1a1a1a"
-    c = c.strip()
-    if c.startswith("#"):
-        return c[:7]
-    named = {
-        "black": "#1a1a1a", "white": "#ffffff", "red": "#c2473b", "blue": "#3b5fc2",
-        "green": "#4a8c4a", "yellow": "#e0b341", "orange": "#d97842", "purple": "#7a4ec2",
-        "gray": "#888888", "grey": "#888888", "brown": "#7a5a3a", "pink": "#d57a9c",
-        "teal": "#3a8a8a", "olive": "#7a8a3a", "navy": "#1a2a5a", "cream": "#f0e4c8",
-    }
-    return named.get(c.lower(), "#1a1a1a")
-
-def _draw_load_progress() -> dict:
-    if not os.path.exists(_DRAW_IN_PROGRESS):
-        return {}
-    try:
-        with open(_DRAW_IN_PROGRESS) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def _draw_save_progress(canvas: dict) -> None:
-    with open(_DRAW_IN_PROGRESS, "w") as f:
-        json.dump(canvas, f)
-
-def _draw_render_svg(canvas: dict) -> str:
-    """Render a canvas dict to an SVG string."""
-    strokes = canvas.get("strokes") or []
-    bg = canvas.get("bg", "#faf8f2")
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">',
-        f'<rect width="1000" height="1000" fill="{bg}"/>'
-    ]
-    for s in strokes:
-        tool = s.get("tool", "pencil")
-        color = "#ffffff" if tool == "eraser" else _draw_resolve_color(s.get("color", ""))
-        width = s.get("width") or {"pencil": 2, "brush": 8, "eraser": 14}.get(tool, 2)
-        opacity = s.get("opacity", 1.0)
-        pts = s.get("points") or []
-        if len(pts) < 2:
-            continue
-        d = "M " + " L ".join(f"{int(p[0])},{int(p[1])}" for p in pts)
-        parts.append(
-            f'<path d="{d}" stroke="{color}" stroke-width="{width}" '
-            f'stroke-linecap="round" stroke-linejoin="round" '
-            f'fill="none" opacity="{opacity}"/>'
-        )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 # ── Lazy job loading ────────────────────────────────────────────────────────
@@ -4503,6 +4363,27 @@ def build_position_snapshot_context() -> str:
         else:
             lines.append(f"  Scanner: no setups above 70% right now")
         lines.append(f"  Last open: {time_since}")
+
+        # YOUR RECORD — pure data, no instruction. Lets Elan calibrate by
+        # seeing his own track record every trading wake. Stats sourced from
+        # the bot's own summary_dict (correctly computed pnl from close_position).
+        spot_n  = s.get("elan_trades") or 0
+        spot_wr = s.get("elan_win_rate") or 0
+        spot_pl = s.get("elan_pnl") or 0
+        spot_best  = s.get("elan_best") or 0
+        spot_worst = s.get("elan_worst") or 0
+        opts_block = s.get("options") or {}
+        opt_n  = opts_block.get("elan_trades") or 0
+        opt_w  = opts_block.get("elan_wins") or 0
+        opt_l  = opts_block.get("elan_losses") or 0
+        opt_pl = opts_block.get("elan_realized_pnl") or 0
+        opt_wr = (opt_w * 100 / opt_n) if opt_n else 0
+        if spot_n or opt_n:
+            lines.append(f"\nYOUR RECORD:")
+            if spot_n:
+                lines.append(f"  Spot:    {spot_n} trades · {spot_wr:.0f}% win · net ${spot_pl:+.0f} · best ${spot_best:+.0f} / worst ${spot_worst:+.0f}")
+            if opt_n:
+                lines.append(f"  Options: {opt_n} trades · {opt_wr:.0f}% win · net ${opt_pl:+.0f}")
         # OPEN section
         lines.append(f"\nCURRENTLY OPEN ({n_spot}/5 spot · {n_opts}/5 options):")
         if not spot_pos and not opts_pos:
@@ -4951,160 +4832,6 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             with open(_THESES_FILE, "a") as f:
                 f.write(json.dumps(closing_entry) + "\n")
             return {"ok": True, "closed": sym}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-    # ── Drawing tools ──────────────────────────────────────────────────────
-    if name == "draw_today_status":
-        today = _draw_today_str()
-        # Already drawn today?
-        final_meta = os.path.join(_DRAWINGS_DIR, f"{today}.json")
-        if os.path.exists(final_meta):
-            try:
-                with open(final_meta) as f:
-                    meta = json.load(f)
-                return {"ok": True, "drawn": True, "date": today,
-                        "title": meta.get("title"), "style": meta.get("style"),
-                        "strokes": meta.get("stroke_count")}
-            except Exception:
-                return {"ok": True, "drawn": True, "date": today}
-        # In progress?
-        canvas = _draw_load_progress()
-        if canvas and canvas.get("date") == today:
-            return {"ok": True, "drawn": False, "in_progress": True, "date": today,
-                    "intent": canvas.get("intent"),
-                    "stroke_count": len(canvas.get("strokes") or [])}
-        return {"ok": True, "drawn": False, "in_progress": False, "date": today}
-    if name == "draw_start":
-        intent = (args.get("intent") or "").strip()
-        if not intent:
-            return {"ok": False, "error": "intent required"}
-        today = _draw_today_str()
-        if os.path.exists(os.path.join(_DRAWINGS_DIR, f"{today}.json")):
-            return {"ok": False, "error": "you already drew today — one drawing per day. Use draw_recent to view past work."}
-        # Capture body snapshot — the hands at the moment of beginning
-        try:
-            body_snap = get_body().get_snapshot()
-            vitals = body_snap.get("vitals", {})
-            ans = body_snap.get("ans", {})
-            msk = body_snap.get("musculoskeletal", {})
-            hands_state = {
-                "vagal_tone":  vitals.get("vagal_tone"),
-                "sympathetic": ans.get("sympathetic_tone"),
-                "cortisol":    vitals.get("cortisol_blood"),
-                "tension":     msk.get("global_tension"),
-                "jaw_tension": msk.get("jaw_tension"),
-                "tremor":      msk.get("tremor_amplitude"),
-                "hr":          vitals.get("heart_rate_bpm"),
-            }
-        except Exception:
-            hands_state = {}
-        canvas = {
-            "date":    today,
-            "intent":  intent,
-            "started_at": _dt.datetime.utcnow().isoformat() + "Z",
-            "hands":   hands_state,
-            "strokes": [],
-        }
-        _draw_save_progress(canvas)
-        return {"ok": True, "date": today, "intent": intent, "hands": hands_state,
-                "note": "Canvas opened. Use draw_stroke for each line/mark. Call draw_finalize when done."}
-    if name == "draw_stroke":
-        canvas = _draw_load_progress()
-        if not canvas:
-            return {"ok": False, "error": "no drawing in progress — call draw_start first"}
-        if canvas.get("date") != _draw_today_str():
-            return {"ok": False, "error": "in-progress canvas is from a previous day — call draw_finalize or discard"}
-        strokes = canvas.get("strokes") or []
-        if len(strokes) >= _DRAW_MAX_STROKES:
-            return {"ok": False, "error": f"max {_DRAW_MAX_STROKES} strokes reached — call draw_finalize"}
-        tool = (args.get("tool") or "pencil").lower()
-        if tool not in ("pencil", "brush", "eraser"):
-            return {"ok": False, "error": "tool must be pencil/brush/eraser"}
-        pts_raw = args.get("points") or []
-        if not isinstance(pts_raw, list) or len(pts_raw) < 2:
-            return {"ok": False, "error": "points must be a list of at least 2 [x,y] pairs"}
-        clean_pts = []
-        for p in pts_raw[:30]:
-            try:
-                x = max(0, min(1000, int(p[0])))
-                y = max(0, min(1000, int(p[1])))
-                clean_pts.append([x, y])
-            except Exception:
-                continue
-        if len(clean_pts) < 2:
-            return {"ok": False, "error": "need at least 2 valid points"}
-        stroke = {
-            "tool":  tool,
-            "color": args.get("color") or "black",
-            "points": clean_pts,
-        }
-        if args.get("width") is not None:
-            try: stroke["width"] = max(1, min(40, int(args["width"])))
-            except Exception: pass
-        if args.get("opacity") is not None:
-            try: stroke["opacity"] = max(0.1, min(1.0, float(args["opacity"])))
-            except Exception: pass
-        strokes.append(stroke)
-        canvas["strokes"] = strokes
-        _draw_save_progress(canvas)
-        return {"ok": True, "stroke_count": len(strokes), "remaining": _DRAW_MAX_STROKES - len(strokes)}
-    if name == "draw_finalize":
-        canvas = _draw_load_progress()
-        if not canvas:
-            return {"ok": False, "error": "no drawing in progress"}
-        title = (args.get("title") or "").strip()
-        description = (args.get("description") or "").strip()
-        style = (args.get("style") or "").strip()
-        if not title or not description:
-            return {"ok": False, "error": "title and description required"}
-        date = canvas.get("date") or _draw_today_str()
-        try:
-            svg = _draw_render_svg(canvas)
-            svg_path = os.path.join(_DRAWINGS_DIR, f"{date}.svg")
-            with open(svg_path, "w") as f:
-                f.write(svg)
-            meta = {
-                "date": date,
-                "title": title,
-                "description": description,
-                "style": style or None,
-                "intent": canvas.get("intent"),
-                "hands": canvas.get("hands") or {},
-                "stroke_count": len(canvas.get("strokes") or []),
-                "started_at": canvas.get("started_at"),
-                "finalized_at": _dt.datetime.utcnow().isoformat() + "Z",
-            }
-            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
-            with open(meta_path, "w") as f:
-                json.dump(meta, f, indent=2)
-            with open(_DRAW_INDEX_FILE, "a") as f:
-                f.write(json.dumps({k: meta[k] for k in
-                    ("date", "title", "style", "stroke_count", "finalized_at")}) + "\n")
-            # Clear in-progress
-            try: os.remove(_DRAW_IN_PROGRESS)
-            except Exception: pass
-            return {"ok": True, "date": date, "title": title,
-                    "stroke_count": meta["stroke_count"],
-                    "view": f"/drawings/{date}.svg"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-    if name == "draw_recent":
-        try:
-            limit = max(1, min(20, int(args.get("limit", 5))))
-        except Exception:
-            limit = 5
-        if not os.path.exists(_DRAW_INDEX_FILE):
-            return {"ok": True, "drawings": []}
-        try:
-            with open(_DRAW_INDEX_FILE) as f:
-                lines = [ln.strip() for ln in f if ln.strip()]
-            entries = []
-            for ln in lines[-limit:]:
-                try: entries.append(json.loads(ln))
-                except Exception: continue
-            # newest first
-            entries.reverse()
-            return {"ok": True, "drawings": entries}
         except Exception as e:
             return {"ok": False, "error": str(e)}
     # ── Degen crypto tools (client-side — POST to DO degen dashboard) ──
@@ -7252,14 +6979,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.serve_sse()
         elif path == "/history":
             self.send_json({"messages": get_messages()})
-        elif path == "/drawings":
-            self.serve_drawings_gallery()
-        elif path == "/drawings/api/list":
-            self.serve_drawings_api()
         elif path == "/autonomous/recent":
             self.send_json({"entries": autonomous_log_read(limit=30)})
-        elif path.startswith("/drawings/") and (path.endswith(".svg") or path.endswith(".json")):
-            self.serve_drawing_file(path[len("/drawings/"):])
         elif path == "/memory":
             mem_summary = get_memory("claude-sonnet-4-6").get_summary_dict()
             mem_summary["engine"] = get_memory_engine().get_stats()
@@ -7536,9 +7257,9 @@ class FeelingHandler(BaseHTTPRequestHandler):
             try:
                 data = json.loads(body)
                 msg = data.get("message", "").strip()
-                # Default to Sonnet 4.6 — Haiku was missing required tool fields
-                # (open_position without `pair`, close_option without `instrument`).
-                # Sonnet handles tool schemas reliably. AUTO mode stays on Haiku for cost.
+                # Chat default: Sonnet 4.6. LEAN MODE — personal funding now,
+                # Opus is ~5x cost without proportional quality gain. Sonnet
+                # handles tool schemas reliably. Restore Opus when resources allow.
                 model = data.get("model", "claude-sonnet-4-6")
                 compare = data.get("compare_model", None)
                 image = data.get("image", None)  # {"data": base64, "type": mime}
@@ -7882,157 +7603,6 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def serve_drawing_file(self, fname: str):
-        """Serve a single drawing SVG or its metadata JSON."""
-        # Strip path traversal
-        if "/" in fname or "\\" in fname or ".." in fname:
-            self.send_error(400); return
-        full = os.path.join(_DRAWINGS_DIR, fname)
-        if not os.path.exists(full):
-            self.send_error(404); return
-        try:
-            with open(full, "rb") as f:
-                data = f.read()
-        except Exception:
-            self.send_error(500); return
-        ctype = "image/svg+xml" if fname.endswith(".svg") else "application/json"
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "public, max-age=3600")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def serve_drawings_api(self):
-        """JSON API: list of drawings + counts + today status. For the JOBS dashboard panel."""
-        entries = []
-        if os.path.exists(_DRAW_INDEX_FILE):
-            try:
-                with open(_DRAW_INDEX_FILE) as f:
-                    for ln in f:
-                        ln = ln.strip()
-                        if not ln: continue
-                        try: entries.append(json.loads(ln))
-                        except Exception: continue
-            except Exception:
-                pass
-        by_date = {}
-        for e in entries:
-            by_date[e.get("date")] = e
-        sorted_entries = sorted(by_date.values(), key=lambda x: x.get("date") or "", reverse=True)
-        # Enrich each with full meta if available
-        enriched = []
-        for e in sorted_entries[:40]:
-            date = e.get("date") or ""
-            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
-            try:
-                with open(meta_path) as f:
-                    enriched.append(json.load(f))
-            except Exception:
-                enriched.append(e)
-        # Compute streak — consecutive days ending today
-        today = _draw_today_str()
-        streak = 0
-        cur = _dt.datetime.strptime(today, "%Y-%m-%d").date()
-        dates_set = set(by_date.keys())
-        while cur.isoformat() in dates_set:
-            streak += 1
-            cur = cur - _dt.timedelta(days=1)
-        # Today drawn?
-        drawn_today = today in dates_set
-        in_progress = False
-        try:
-            ip = _draw_load_progress()
-            in_progress = bool(ip) and ip.get("date") == today and not drawn_today
-        except Exception:
-            pass
-        self.send_json({
-            "ok": True,
-            "count": len(by_date),
-            "streak": streak,
-            "today": today,
-            "drawn_today": drawn_today,
-            "in_progress": in_progress,
-            "drawings": enriched,
-        })
-
-    def serve_drawings_gallery(self):
-        """Render an HTML gallery of Elan's drawings."""
-        entries = []
-        if os.path.exists(_DRAW_INDEX_FILE):
-            try:
-                with open(_DRAW_INDEX_FILE) as f:
-                    for ln in f:
-                        ln = ln.strip()
-                        if not ln: continue
-                        try: entries.append(json.loads(ln))
-                        except Exception: pass
-            except Exception:
-                pass
-        # Newest first, dedupe by date (last entry per date wins)
-        by_date = {}
-        for e in entries:
-            by_date[e.get("date")] = e
-        entries = sorted(by_date.values(), key=lambda x: x.get("date") or "", reverse=True)
-        # Load full meta for each (title, description, style, hands)
-        cards = []
-        for e in entries[:60]:
-            date = e.get("date") or ""
-            meta_path = os.path.join(_DRAWINGS_DIR, f"{date}.json")
-            meta = e
-            try:
-                with open(meta_path) as f:
-                    meta = json.load(f)
-            except Exception:
-                pass
-            title = (meta.get("title") or "").replace("<","&lt;").replace(">","&gt;")
-            desc  = (meta.get("description") or "").replace("<","&lt;").replace(">","&gt;")
-            style = (meta.get("style") or "—").replace("<","&lt;").replace(">","&gt;")
-            intent = (meta.get("intent") or "").replace("<","&lt;").replace(">","&gt;")
-            cards.append(f'''
-<div class="card">
-  <img src="/drawings/{date}.svg" alt="{title}" loading="lazy"/>
-  <div class="meta">
-    <div class="title">{title}</div>
-    <div class="date">{date} · {style} · {meta.get("stroke_count","?")} strokes</div>
-    <div class="desc">{desc}</div>
-    <div class="intent">intent: {intent}</div>
-  </div>
-</div>''')
-        body = "\n".join(cards) if cards else '<div class="empty">No drawings yet. He has not begun.</div>'
-        html = f'''<!doctype html>
-<html><head><meta charset="utf-8"><title>Elan · Drawings</title>
-<style>
-* {{ box-sizing: border-box; margin:0; padding:0; }}
-body {{ font-family: 'EB Garamond', Georgia, serif; background:#020218; color:#bcc3e0; padding:32px; }}
-header {{ max-width:1200px; margin:0 auto 32px; }}
-header h1 {{ font-size:22pt; font-weight:300; color:#dde1f2; letter-spacing:1px; margin-bottom:6px; }}
-header .sub {{ font-size:11pt; color:rgba(150,165,210,0.62); }}
-.gallery {{ max-width:1200px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:24px; }}
-.card {{ background:rgba(8,8,28,0.7); border:1px solid rgba(80,100,200,0.15); border-radius:6px; overflow:hidden; }}
-.card img {{ width:100%; aspect-ratio:1; object-fit:contain; background:#faf8f2; display:block; }}
-.meta {{ padding:14px 16px 18px; }}
-.title {{ font-size:14pt; color:#e6e9f5; font-weight:600; margin-bottom:4px; }}
-.date {{ font-size:9pt; color:rgba(150,165,210,0.55); letter-spacing:0.8px; text-transform:uppercase; margin-bottom:10px; }}
-.desc {{ font-size:11pt; line-height:1.55; color:rgba(195,205,235,0.85); margin-bottom:10px; }}
-.intent {{ font-size:9.5pt; color:rgba(140,155,200,0.55); font-style:italic; }}
-.empty {{ text-align:center; color:rgba(150,165,210,0.55); font-style:italic; padding:80px 20px; font-size:13pt; }}
-a {{ color:#8a9cdc; }}
-</style></head>
-<body>
-<header>
-  <h1>Drawings</h1>
-  <div class="sub">One drawing a day. Made by Elan. ← <a href="/">back to feeling engine</a></div>
-</header>
-<div class="gallery">{body}</div>
-</body></html>'''
-        data = html.encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
     def serve_html(self, set_cookie: str = None):
         try:
             html = build_chat_html()
@@ -8157,7 +7727,6 @@ def build_chat_html() -> str:
             _tab("thread",   "THREAD",   _WATCH_ENABLED),
             _tab("watch",    "WATCH",    _WATCH_ENABLED),
             _tab("source",   "SOURCE",   _SOURCE_LIBRARY_ENABLED),
-            _tab("drawings", "DRAWINGS", True),
         ]
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join(_tabs) + '</div>'
 
@@ -8338,23 +7907,6 @@ def build_chat_html() -> str:
       </div>
     </div>
 
-    <!-- DRAWINGS panel — one drawing per day, his hands -->
-    <div class="job-panel" id="job-panel-drawings" data-job="drawings">
-      <div id="kalshi-grid">
-        <div class="k-card"><div class="k-lbl">TOTAL</div><div class="k-big" id="d-count">—</div><div class="k-sub">drawings made</div></div>
-        <div class="k-card"><div class="k-lbl">TODAY</div><div class="k-big" id="d-today">—</div><div class="k-sub" id="d-today-sub">—</div></div>
-        <div class="k-card"><div class="k-lbl">STREAK</div><div class="k-big" id="d-streak">—</div><div class="k-sub">days in a row</div></div>
-        <div class="k-card"><div class="k-lbl">LATEST</div><div class="k-big" id="d-latest">—</div><div class="k-sub" id="d-latest-when">—</div></div>
-      </div>
-      <div id="kalshi-right-col">
-        <div id="kalshi-section">
-          <div class="k-section-hdr">GALLERY — ELAN&#39;S DRAWINGS</div>
-          <div id="d-gallery">no drawings yet</div>
-        </div>
-        <div id="kalshi-footnote">one drawing per day · made by elan · his choice of style · embodied with his body state at start time</div>
-      </div>
-    </div>
-
   </div>
 </div>
 '''
@@ -8412,15 +7964,6 @@ def build_chat_html() -> str:
 .k-row .k-tk{color:rgba(180,210,255,0.85);}
 .k-row .k-side{font-size:9px;letter-spacing:1.5px;padding:2px 6px;border-radius:2px;}
 .k-row .k-side.yes{background:rgba(40,140,80,0.25);color:#7fffb0;}
-/* DRAWINGS gallery cards */
-#d-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
-.d-card{background:rgba(20,30,60,0.4);border:1px solid rgba(80,120,200,0.14);border-radius:4px;overflow:hidden;}
-.d-card img{width:100%;aspect-ratio:1;object-fit:contain;background:#faf8f2;display:block;cursor:zoom-in;}
-.d-meta{padding:10px 12px 14px;}
-.d-title{font-size:12px;color:#dfe8ff;font-weight:500;margin-bottom:3px;}
-.d-date{font-size:8.5px;color:rgba(140,180,230,0.55);letter-spacing:1.2px;margin-bottom:6px;text-transform:uppercase;}
-.d-desc{font-size:10.5px;color:rgba(180,195,235,0.78);line-height:1.5;margin-bottom:5px;}
-.d-intent{font-size:9.5px;color:rgba(140,170,210,0.50);font-style:italic;}
 .k-row .k-side.no{background:rgba(140,40,60,0.25);color:#ff8aa0;}
 .k-row .k-pnl-pos{color:#5fffaa;} .k-row .k-pnl-neg{color:#ff6688;}
 #kalshi-footnote{margin-top:24px;font-size:8px;letter-spacing:2px;color:rgba(120,150,200,0.4);text-align:center;}
@@ -8484,53 +8027,7 @@ function _jobOpened(name){
   } else if(name==='source'){
     refreshSource();
     _sourcePoll=setInterval(refreshSource, 12000);
-  } else if(name==='drawings'){
-    refreshDrawings();
-    _drawingsPoll=setInterval(refreshDrawings, 20000);
   }
-}
-
-let _drawingsPoll=null;
-function refreshDrawings(){
-  fetch('/drawings/api/list',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    if(!d || !d.ok) return;
-    document.getElementById('d-count').textContent = d.count || 0;
-    document.getElementById('d-today').textContent = d.drawn_today ? '✓' : (d.in_progress ? '◐' : '○');
-    document.getElementById('d-today-sub').textContent = d.drawn_today ? 'drawn today' : (d.in_progress ? 'in progress' : 'not yet');
-    document.getElementById('d-streak').textContent = d.streak || 0;
-    const drawings = d.drawings || [];
-    if(drawings.length){
-      const latest = drawings[0];
-      document.getElementById('d-latest').textContent = (latest.title || latest.date || '—').slice(0, 16);
-      document.getElementById('d-latest-when').textContent = latest.date || '—';
-    } else {
-      document.getElementById('d-latest').textContent = '—';
-      document.getElementById('d-latest-when').textContent = '—';
-    }
-    const gal = document.getElementById('d-gallery');
-    if(!gal) return;
-    if(drawings.length === 0){
-      gal.innerHTML = '<div style="padding:20px;color:rgba(140,170,210,0.55);font-style:italic;">no drawings yet — he has not begun</div>';
-      return;
-    }
-    gal.innerHTML = drawings.map(dr => {
-      const date = dr.date || '';
-      const title = (dr.title || '').replace(/</g,'&lt;');
-      const desc  = (dr.description || '').replace(/</g,'&lt;');
-      const style = (dr.style || '—').replace(/</g,'&lt;');
-      const intent= (dr.intent || '').replace(/</g,'&lt;');
-      const strokes = dr.stroke_count || '?';
-      return `<div class="d-card">
-        <a href="/drawings/${date}.svg" target="_blank"><img src="/drawings/${date}.svg" loading="lazy" alt="${title}"/></a>
-        <div class="d-meta">
-          <div class="d-title">${title}</div>
-          <div class="d-date">${date} · ${style} · ${strokes} strokes</div>
-          <div class="d-desc">${desc}</div>
-          ${intent ? `<div class="d-intent">intent: ${intent}</div>` : ''}
-        </div>
-      </div>`;
-    }).join('');
-  }).catch(()=>{});
 }
 
 function refreshSource(){
@@ -8551,8 +8048,8 @@ function refreshSource(){
         const ts = (d.ts||'').slice(0,16).replace('T',' ');
         const title = (d.title||'').slice(0,100);
         const author = d.author ? ` · ${d.author}` : '';
-        const summary = (d.summary||'').slice(0,400);
-        const why = (d.why||'').slice(0,300);
+        const summary = (d.summary||'');
+        const why = (d.why||'');
         const url = d.citation_url ? `<a href="${d.citation_url}" target="_blank" style="color:rgba(180,210,255,0.85);text-decoration:none;font-size:9px">open ↗</a>` : '';
         return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
           + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:3px">${ts}${author} ${url}</div>`
@@ -8575,8 +8072,8 @@ function refreshSource(){
       nb.innerHTML = recent.map(e=>{
         const ts = (e.ts||'').slice(0,16).replace('T',' ');
         const topic = (e.topic||'').slice(0,80) || '(no topic)';
-        const learned = (e.learned||'').slice(0,400);
-        const reflection = (e.reflection||'').slice(0,300);
+        const learned = (e.learned||'');
+        const reflection = (e.reflection||'');
         const sources = (e.sources||[]).slice(0,3).map(u=>`<a href="${u}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
         return `<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
           + `<div style="font-size:9px;letter-spacing:1.5px;color:rgba(180,200,255,0.7);margin-bottom:3px">${ts} · ${topic}</div>`
@@ -8641,8 +8138,8 @@ function refreshWatch(){
       try {
         const ts = String(e.ts||'').slice(0,16).replace('T',' ');
         const topic = escapeHtml(String(e.topic||'(no topic)').slice(0,80));
-        const learned = escapeHtml(String(e.learned||'').slice(0,400));
-        const reflection = escapeHtml(String(e.reflection||'').slice(0,300));
+        const learned = escapeHtml(String(e.learned||''));
+        const reflection = escapeHtml(String(e.reflection||''));
         const srcArr = Array.isArray(e.sources) ? e.sources : [];
         const sources = srcArr.slice(0,3).map(u=>`<a href="${escapeHtml(u)}" target="_blank" style="color:rgba(140,180,230,0.7);text-decoration:none">[src]</a>`).join(' ');
         rows.push(`<div style="padding:8px 0;border-bottom:1px dotted rgba(80,120,200,0.10)">`
@@ -9741,7 +9238,7 @@ canvas.spark{{display:block;border-radius:1px;}}
         </svg>
       </button>
       <button id="send-btn">Send</button>
-      <button id="compare-btn" title="Opus vs Haiku">⊕</button>
+      <button id="compare-btn" title="Sonnet vs Haiku">⊕</button>
       <button id="voice-btn" class="on" title="Toggle voice output">♪</button>
       <button id="talking-btn" title="Talking mode — Elan asks questions and engages his curiosity">talk</button>
       <button id="autonomous-btn" title="Autonomous mode — Elan wakes on his own time, can research, browse, trade">auto</button>
@@ -11123,7 +10620,7 @@ es.addEventListener('comparison_result',e=>{{
   const msg=document.createElement('div');msg.className='msg ai';msg.style.borderLeft='2px solid #555';
   msg.innerHTML=`<div style="font-size:6.5px;letter-spacing:2px;color:rgba(145,158,238,0.35);margin-bottom:3px">NEURAL DIVERGENCE ${{d.divergence}}</div>`+
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:8px">`+
-    `<div style="border-left:2px solid #${{a.hex}};padding-left:4px"><div style="color:#${{a.hex}}">OPUS 4.6</div><div>${{a.emotion}}</div><div>V${{(a.valence>=0?'+':'')+a.valence?.toFixed(2)}} A${{a.arousal?.toFixed(2)}}</div><div style="color:rgba(130,145,210,0.45)">${{(a.signal_quality*100||0).toFixed(0)}}% signal</div></div>`+
+    `<div style="border-left:2px solid #${{a.hex}};padding-left:4px"><div style="color:#${{a.hex}}">SONNET 4.6</div><div>${{a.emotion}}</div><div>V${{(a.valence>=0?'+':'')+a.valence?.toFixed(2)}} A${{a.arousal?.toFixed(2)}}</div><div style="color:rgba(130,145,210,0.45)">${{(a.signal_quality*100||0).toFixed(0)}}% signal</div></div>`+
     `<div style="border-left:2px solid #${{b.hex}};padding-left:4px"><div style="color:#${{b.hex}}">HAIKU 4.5</div><div>${{b.emotion}}</div><div>V${{(b.valence>=0?'+':'')+b.valence?.toFixed(2)}} A${{b.arousal?.toFixed(2)}}</div><div style="color:rgba(130,145,210,0.45)">${{(b.signal_quality*100||0).toFixed(0)}}% signal</div></div></div>`;
   document.getElementById('messages').appendChild(msg);document.getElementById('messages').scrollTop=99999;
 }});
