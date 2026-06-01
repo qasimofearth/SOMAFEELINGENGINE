@@ -2954,7 +2954,11 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             else:
                 tools_kwargs = {}
             working_messages = list(messages)
-            MAX_TOOL_TURNS = 4
+            # Tool-turn cap. Raised 4 → 6 (2026-06-01) since Groq removes
+            # per-turn cost concern. Gives Llama-Elan more chain-of-thought
+            # room — e.g. check positions, evaluate setup, open trade, journal
+            # is naturally a 4-5 turn sequence.
+            MAX_TOOL_TURNS = 6
 
             # Beta headers: web-fetch + mcp-client. web_search is GA but kept here for fwd compat.
             _beta_header = "prompt-caching-2024-07-31,web-fetch-2025-09-10,mcp-client-2025-04-04"
@@ -2981,13 +2985,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
-            # Tight output cap for everything — autonomous AND chat. Elan
-            # should be concise; if Qasim wants more depth, he asks follow-up.
-            # 500 tokens ≈ 3-4 paragraphs, plenty for thoughtful responses.
-            # Conversation as back-and-forth, not essays.
+            # Output cap. Raised back to 900 (2026-06-01) since Groq removes
+            # output-token cost concern. 500 was too tight for trading wakes
+            # where Elan needs to think through positions + thesis + action +
+            # journal in one turn. 900 still bounded but breathes.
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
-                    "model": model_id, "max_tokens": 500,
+                    "model": model_id, "max_tokens": 900,
                     "system": system_blocks, "messages": working_messages,
                     "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
