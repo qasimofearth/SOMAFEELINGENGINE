@@ -3720,20 +3720,23 @@ _groq_client = None
 _groq_client_key = None
 
 def _get_provider() -> str:
-    """Pick provider. The 'groq' branch is now repurposed to route through
-    Nvidia NIM (hosts Kimi K2.6) when MOONSHOT_KIMI_API is set. Same
-    OpenAI-compatible code path — only the URL + model differ. Falls back
+    """Pick provider. The 'groq' branch is repurposed to route through
+    Nvidia NIM (hosts Kimi K2.6) when NVIDIA_API_KEY is set. Falls back
     to actual Groq if GROQ_API_KEY is set, else Anthropic."""
-    nvidia_key = (_RUNTIME_GROQ_KEY or os.environ.get("MOONSHOT_KIMI_API", "")
+    nvidia_key = (_RUNTIME_GROQ_KEY
+                  or os.environ.get("NVIDIA_API_KEY", "")
+                  or os.environ.get("MOONSHOT_KIMI_API", "")
                   or os.environ.get("GROQ_API_KEY", "")).strip()
     return "groq" if nvidia_key else "anthropic"
 
 def _get_groq_client():
     """Returns an OpenAI-compatible client pointed at whichever provider
-    is active — Nvidia NIM (Kimi) if MOONSHOT_KIMI_API set, else Groq."""
+    is active — Nvidia NIM (Kimi) if NVIDIA_API_KEY set, else Groq."""
     global _groq_client, _groq_client_key
     from openai import OpenAI
-    nvidia_key = (_RUNTIME_GROQ_KEY or os.environ.get("MOONSHOT_KIMI_API", "")).strip()
+    nvidia_key = (_RUNTIME_GROQ_KEY
+                  or os.environ.get("NVIDIA_API_KEY", "")
+                  or os.environ.get("MOONSHOT_KIMI_API", "")).strip()
     if nvidia_key:
         base_url = "https://integrate.api.nvidia.com/v1"
         key = nvidia_key
