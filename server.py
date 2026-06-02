@@ -2888,7 +2888,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 }
             openai_tools = []
             if label == "A":
-                _wanted = list(WEB_TOOLS)
+                # Start with CLIENT_WEB_TOOLS instead of Anthropic's WEB_TOOLS
+                # — Kimi/Llama don't have server-side web search, so we use
+                # DuckDuckGo + urllib (already wired into dispatch_elan_tool).
+                _wanted = list(CLIENT_WEB_TOOLS)
                 if _WATCH_ENABLED:
                     _wanted += NOTEBOOK_TOOLS + CALENDAR_TOOLS
                 if _SOURCE_LIBRARY_ENABLED:
@@ -2898,8 +2901,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if _DEGEN_TRADING_ENABLED:  _wanted += DEGEN_TOOLS
                 if _OPTIONS_ENABLED:        _wanted += OPTIONS_TOOLS
                 for _t in _wanted:
-                    # Skip provider-native tools (web_search, web_fetch) — those
-                    # are Anthropic-only server-side tools. Kimi/Llama don't run them.
+                    # Defensive: skip any Anthropic-typed entries that snuck in
                     if _t.get("type") in ("web_search_20250305", "web_fetch_20250910"):
                         continue
                     openai_tools.append(_anth_tool_to_openai(_t))
@@ -4771,6 +4773,37 @@ WEB_TOOLS = [
     },
 ]
 
+# Client-side web tools for non-Anthropic providers (Kimi via Nvidia, Llama via
+# Groq). Backed by DuckDuckGo + urllib (already defined at top of file as
+# _search_web and _fetch_url). Same surface (web_search/web_fetch by name) so
+# Elan's prompt and habits work unchanged across providers.
+CLIENT_WEB_TOOLS = [
+    {
+        "name": "web_search",
+        "description": "Search the web for current information. Returns a list of result titles, URLs, and short snippets. Use for news, recent events, market context, anything you need fresh. Free (DuckDuckGo backend, no API key cost).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to search for. Be specific — 'BTC ETF flows June 2026' is better than 'crypto news'."},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Optional. Default 5."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "web_fetch",
+        "description": "Fetch the readable text content of a URL. Use after web_search to read a specific article. Strips HTML and returns clean text. Truncated at ~3000 chars by default — enough for most articles.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url":       {"type": "string", "description": "The URL to fetch. Must start with http:// or https://."},
+                "max_chars": {"type": "integer", "minimum": 500, "maximum": 8000, "description": "Optional. Default 3000."},
+            },
+            "required": ["url"],
+        },
+    },
+]
+
 
 KALSHI_TOOLS = [
     {
@@ -4854,6 +4887,33 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     _circuit_warning = None
     if name in _circuit_tools:
         _circuit_warning = _check_repetition(name, args or {})
+
+    # ── Client-side web tools (for Kimi/Llama via Nvidia/Groq) ──
+    # Anthropic's web_search/web_fetch are server-side and bypass this
+    # dispatcher. For non-Anthropic providers, we use the DuckDuckGo +
+    # urllib functions defined at the top of the file.
+    if name == "web_search":
+        try:
+            q = (args.get("query") or "").strip()
+            if not q:
+                return {"ok": False, "error": "query required"}
+            n = int(args.get("max_results") or 5)
+            n = max(1, min(10, n))
+            results = _search_web(q, max_results=n)
+            return {"ok": True, "query": q, "results": results}
+        except Exception as e:
+            return {"ok": False, "error": f"web_search failed: {e}"}
+    if name == "web_fetch":
+        try:
+            url = (args.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                return {"ok": False, "error": "url must start with http:// or https://"}
+            n = int(args.get("max_chars") or 3000)
+            n = max(500, min(8000, n))
+            content = _fetch_url(url, max_chars=n)
+            return {"ok": True, "url": url, "content": content}
+        except Exception as e:
+            return {"ok": False, "error": f"web_fetch failed: {e}"}
 
     # ── Source Library discovery ──
     if name == "source_save_discovery":
