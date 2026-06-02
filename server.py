@@ -2895,7 +2895,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 if _WATCH_ENABLED:
                     _wanted += NOTEBOOK_TOOLS + CALENDAR_TOOLS
                 if _SOURCE_LIBRARY_ENABLED:
-                    _wanted += SOURCE_TOOLS
+                    _wanted += SOURCE_TOOLS + CLIENT_SOURCE_LIBRARY_TOOLS
                 if _KALSHI_TRADING_ENABLED: _wanted += KALSHI_TOOLS
                 if _STOCK_TRADING_ENABLED:  _wanted += STOCK_TOOLS
                 if _DEGEN_TRADING_ENABLED:  _wanted += DEGEN_TOOLS
@@ -4233,6 +4233,114 @@ SOURCE_TOOLS = [
     },
 ]
 
+# Client-side Source Library tools — for Kimi/Llama who can't use Anthropic's
+# native MCP integration. These call the same MCP server (sourcelibrary.org)
+# directly via JSON-RPC over HTTP. Same tool names so Elan's prompt and
+# habits work unchanged across providers.
+CLIENT_SOURCE_LIBRARY_TOOLS = [
+    {
+        "name": "search_library",
+        "description": "Search the Source Library — 90,000+ rare historical texts (Ficino, Paracelsus, Hegel, classics, alchemy, primary sources). Returns matching books with their IDs you can use with get_book / get_book_text / search_within_book. Light + cheap — use this first to find what's there before pulling full text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search terms — author name, title, concept, period. E.g. 'Ficino love', 'alchemy putrefaction', 'Iamblichus mysteries'."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Optional. Default 10."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_translations",
+        "description": "Search for translations of a work across languages. Useful when you know a primary text and want to find its other-language editions (e.g. a Greek text's Latin or English translation).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 30},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_within_book",
+        "description": "Search the full text of a specific book for a phrase or concept. Use after search_library to find a particular passage. Cheaper than get_book_text when you only need a snippet.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book_id": {"type": "string", "description": "The book's ID, from search_library results."},
+                "query":   {"type": "string", "description": "Phrase or terms to find inside the book."},
+                "limit":   {"type": "integer", "minimum": 1, "maximum": 20, "description": "Optional. Default 5."},
+            },
+            "required": ["book_id", "query"],
+        },
+    },
+    {
+        "name": "list_books",
+        "description": "Browse the library by author, period, or category. Returns a paginated list of books matching the filters. Use when you want to wander rather than search for something specific.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "author":   {"type": "string"},
+                "period":   {"type": "string"},
+                "category": {"type": "string"},
+                "limit":    {"type": "integer", "minimum": 1, "maximum": 50},
+                "offset":   {"type": "integer", "minimum": 0},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_book",
+        "description": "Get a book's metadata: title, author, year, language, page count, brief description. Light — doesn't pull the full text. Use to confirm a book is what you think it is before fetching the text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book_id": {"type": "string"},
+            },
+            "required": ["book_id"],
+        },
+    },
+    {
+        "name": "get_book_text",
+        "description": "Get the full or partial text of a book. EXPENSIVE — pulls many pages worth of tokens. Use only when something is genuinely pulling you. Prefer search_within_book or get_quote for targeted reads.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book_id":   {"type": "string"},
+                "page":      {"type": "integer", "description": "Optional. If given, returns just that page."},
+                "page_from": {"type": "integer", "description": "Optional. Start of a page range."},
+                "page_to":   {"type": "integer", "description": "Optional. End of a page range."},
+            },
+            "required": ["book_id"],
+        },
+    },
+    {
+        "name": "get_quote",
+        "description": "Get the text of a single page or short passage. Cheap, focused — best for reading a single page or pulling a quote you intend to save as a discovery.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "book_id": {"type": "string"},
+                "page":    {"type": "integer"},
+            },
+            "required": ["book_id", "page"],
+        },
+    },
+    {
+        "name": "search_images",
+        "description": "Search for images in the library — engravings, manuscript pages, emblems, diagrams. Returns image URLs and source citations. Use when looking for visual material from a tradition (alchemical emblems, Renaissance diagrams, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["query"],
+        },
+    },
+]
+
 NOTEBOOK_TOOLS = [
     {
         "name": "journal_add",
@@ -4887,6 +4995,48 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     _circuit_warning = None
     if name in _circuit_tools:
         _circuit_warning = _check_repetition(name, args or {})
+
+    # ── Source Library MCP via direct HTTP (for Kimi/Llama) ──
+    # Anthropic uses native MCP integration; for non-Anthropic providers
+    # we call the MCP JSON-RPC endpoint directly. Same tool names so
+    # Elan's habits port cleanly.
+    if name in {"search_library", "search_translations", "search_within_book",
+                "list_books", "get_book", "get_book_text", "get_quote",
+                "search_images"}:
+        if not _SOURCE_LIBRARY_ENABLED:
+            return {"ok": False, "error": "source library disabled"}
+        try:
+            import urllib.request as _ur, urllib.error as _uerr
+            _payload = json.dumps({
+                "jsonrpc": "2.0", "id": int(time.time() * 1000),
+                "method": "tools/call",
+                "params": {"name": name, "arguments": args or {}},
+            }).encode()
+            _hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
+            if _SOURCE_LIBRARY_API_KEY:
+                _hdrs["Authorization"] = f"Bearer {_SOURCE_LIBRARY_API_KEY}"
+            _req = _ur.Request(_SOURCE_LIBRARY_MCP_URL, data=_payload, headers=_hdrs)
+            with _ur.urlopen(_req, timeout=25) as _r:
+                _raw = _r.read().decode("utf-8", errors="replace")
+            _resp = json.loads(_raw)
+            if "error" in _resp:
+                return {"ok": False, "error": str(_resp["error"])}
+            _result = _resp.get("result", {})
+            # MCP returns content blocks; flatten to a simple result for Elan
+            _content_blocks = _result.get("content") or []
+            _text_parts = []
+            for _b in _content_blocks:
+                if isinstance(_b, dict):
+                    if _b.get("type") == "text" and _b.get("text"):
+                        _text_parts.append(_b["text"])
+                    elif _b.get("type") == "resource" and _b.get("resource"):
+                        _text_parts.append(json.dumps(_b["resource"], default=str)[:2000])
+            return {"ok": True, "tool": name,
+                    "result": "\n\n".join(_text_parts)[:6000] if _text_parts else _result}
+        except _uerr.HTTPError as e:
+            return {"ok": False, "error": f"MCP HTTP {e.code}: {e.reason}"}
+        except Exception as e:
+            return {"ok": False, "error": f"source library call failed: {e}"}
 
     # ── Client-side web tools (for Kimi/Llama via Nvidia/Groq) ──
     # Anthropic's web_search/web_fetch are server-side and bypass this
