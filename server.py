@@ -5012,7 +5012,13 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
                 "method": "tools/call",
                 "params": {"name": name, "arguments": args or {}},
             }).encode()
-            _hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
+            # User-Agent matters: sourcelibrary.org rejects urllib's default
+            # 'Python-urllib/3.x' with 403. Use a browser-like UA.
+            _hdrs = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": _WEB_HEADERS.get("User-Agent", "Mozilla/5.0"),
+            }
             if _SOURCE_LIBRARY_API_KEY:
                 _hdrs["Authorization"] = f"Bearer {_SOURCE_LIBRARY_API_KEY}"
             _req = _ur.Request(_SOURCE_LIBRARY_MCP_URL, data=_payload, headers=_hdrs)
