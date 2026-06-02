@@ -2875,7 +2875,13 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 model=groq_model, max_tokens=900, messages=groq_msgs, stream=True
             )
             for chunk in stream:
-                text = chunk.choices[0].delta.content or ""
+                # Nvidia NIM sometimes sends chunks with empty choices arrays
+                # (usage frames, final metadata, etc.) that don't have content.
+                # Guard against IndexError on those.
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                text = (delta.content if delta else None) or ""
                 if text:
                     yield text
         else:
