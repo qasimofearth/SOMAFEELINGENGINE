@@ -2871,19 +2871,115 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                  "content": _to_groq_content(m["content"], vision=(has_image and i == last_user_idx))}
                 for i, m in enumerate(messages)
             ]
-            stream = _get_groq_client().chat.completions.create(
-                model=groq_model, max_tokens=900, messages=groq_msgs, stream=True
-            )
-            for chunk in stream:
-                # Nvidia NIM sometimes sends chunks with empty choices arrays
-                # (usage frames, final metadata, etc.) that don't have content.
-                # Guard against IndexError on those.
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                text = (delta.content if delta else None) or ""
-                if text:
-                    yield text
+
+            # ── Build OpenAI-format tools list (mirrors anthropic build) ──
+            # Converts ELAN_TOOLS (Anthropic format) to OpenAI function format
+            # and gates by the same enabled flags. Lets Kimi/Llama actually
+            # trade rather than just chat about positions.
+            def _anth_tool_to_openai(t: dict) -> dict:
+                """Convert {name, description, input_schema} to OpenAI function form."""
+                return {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+                    },
+                }
+            openai_tools = []
+            if label == "A":
+                _wanted = list(WEB_TOOLS)
+                if _WATCH_ENABLED:
+                    _wanted += NOTEBOOK_TOOLS + CALENDAR_TOOLS
+                if _SOURCE_LIBRARY_ENABLED:
+                    _wanted += SOURCE_TOOLS
+                if _KALSHI_TRADING_ENABLED: _wanted += KALSHI_TOOLS
+                if _STOCK_TRADING_ENABLED:  _wanted += STOCK_TOOLS
+                if _DEGEN_TRADING_ENABLED:  _wanted += DEGEN_TOOLS
+                if _OPTIONS_ENABLED:        _wanted += OPTIONS_TOOLS
+                for _t in _wanted:
+                    # Skip provider-native tools (web_search, web_fetch) — those
+                    # are Anthropic-only server-side tools. Kimi/Llama don't run them.
+                    if _t.get("type") in ("web_search_20250305", "web_fetch_20250910"):
+                        continue
+                    openai_tools.append(_anth_tool_to_openai(_t))
+
+            # ── Tool-use loop (mirrors anthropic MAX_TOOL_TURNS loop) ──
+            _GROQ_MAX_TURNS = 6
+            _working = list(groq_msgs)
+            for _turn in range(_GROQ_MAX_TURNS):
+                _create_kwargs = dict(
+                    model=groq_model, max_tokens=900,
+                    messages=_working, stream=True,
+                )
+                if openai_tools:
+                    _create_kwargs["tools"] = openai_tools
+                    _create_kwargs["tool_choice"] = "auto"
+                stream = _get_groq_client().chat.completions.create(**_create_kwargs)
+                # Collect text + accumulated tool calls across all chunks
+                _turn_text = ""
+                # tool_calls keyed by index — OpenAI streams them in pieces
+                _tool_calls: dict[int, dict] = {}
+                _finish_reason = None
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
+                    if not delta:
+                        continue
+                    if delta.content:
+                        _turn_text += delta.content
+                        yield delta.content
+                    # Tool call deltas arrive piecewise (id+name first, then args fragments)
+                    _tcs = getattr(delta, "tool_calls", None) or []
+                    for _tc in _tcs:
+                        _idx = getattr(_tc, "index", 0) or 0
+                        slot = _tool_calls.setdefault(_idx, {
+                            "id": None, "name": None, "args_str": ""
+                        })
+                        if getattr(_tc, "id", None): slot["id"] = _tc.id
+                        _fn = getattr(_tc, "function", None)
+                        if _fn:
+                            if getattr(_fn, "name", None): slot["name"] = _fn.name
+                            if getattr(_fn, "arguments", None): slot["args_str"] += _fn.arguments
+                    if getattr(choice, "finish_reason", None):
+                        _finish_reason = choice.finish_reason
+                # No tool calls → done
+                if not _tool_calls:
+                    break
+                # Execute each tool call, append assistant + tool messages
+                _asst_msg = {"role": "assistant", "content": _turn_text or None,
+                              "tool_calls": []}
+                _tool_results = []
+                for _idx in sorted(_tool_calls.keys()):
+                    _tc = _tool_calls[_idx]
+                    _tc_id = _tc["id"] or f"call_{_idx}"
+                    _name  = _tc["name"] or ""
+                    try:
+                        _args = json.loads(_tc["args_str"] or "{}")
+                    except Exception:
+                        _args = {}
+                    _asst_msg["tool_calls"].append({
+                        "id": _tc_id, "type": "function",
+                        "function": {"name": _name, "arguments": _tc["args_str"] or "{}"},
+                    })
+                    # Execute via the shared dispatcher
+                    try:
+                        _result = dispatch_elan_tool(_name, _args) if _name else {"ok": False, "error": "missing tool name"}
+                    except Exception as _exc:
+                        _result = {"ok": False, "error": f"dispatcher exception: {_exc}"}
+                    _tool_results.append({
+                        "role": "tool", "tool_call_id": _tc_id,
+                        "content": json.dumps(_result, default=str),
+                    })
+                    # Surface tool result as a small inline note (mirrors Anthropic UX)
+                    _ok = _result.get("ok") if isinstance(_result, dict) else False
+                    _short = "ok" if _ok else f"err: {(_result or {}).get('error','?')}"
+                    yield f"\n_[{_name}: {_short}]_\n"
+                _working.append(_asst_msg)
+                _working.extend(_tool_results)
+                # Continue to next turn — Elan can now react to tool results
         else:
             # Prompt caching: static base (FEELING_SYSTEM_PROMPT + vision state) is cached.
             # Dynamic parts (memory, brain state, temporal) are a separate uncached block.
