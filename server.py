@@ -722,7 +722,11 @@ _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVA
 # stay at the lean 60-min cadence to preserve budget. Re-evaluated each
 # time the timer reschedules itself, so switching keys auto-adjusts cadence.
 _AUTONOMOUS_INTERVAL_GROQ      = 900    # 15 min  — free, can afford density
-_AUTONOMOUS_INTERVAL_ANTHROPIC = 3600   # 60 min  — lean, preserves budget
+# 2026-06-02: bumped Anthropic to 15-min for the June experiment. ~$130-200/mo
+# for proper test of whether Claude-Elan has real trading edge. Budget cap is
+# one month / ~$200. If June shows edge → keep paying. If not → revert to
+# lean 3600s cadence or fall back to free Groq.
+_AUTONOMOUS_INTERVAL_ANTHROPIC = 900    # 15 min  — 4 wakes/hour for the June test
 
 def _resolve_autonomous_interval() -> int:
     """Pick wake interval based on which provider is currently active."""
@@ -2854,7 +2858,14 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                          isinstance(messages[last_user_idx].get("content"), list) and
                          any(isinstance(b, dict) and b.get("type") == "image"
                              for b in messages[last_user_idx]["content"]))
-            groq_model = "meta-llama/llama-4-scout-17b-16e-instruct" if has_image else "llama-3.3-70b-versatile"
+            # Pick model based on which provider is active. When NVIDIA_API_KEY
+            # is set, the groq path is routed through Nvidia NIM and serves Kimi.
+            _nvidia_active = bool((_RUNTIME_GROQ_KEY or os.environ.get("NVIDIA_API_KEY", "")
+                                   or os.environ.get("MOONSHOT_KIMI_API", "")).strip())
+            if _nvidia_active:
+                groq_model = "moonshotai/kimi-k2.6"  # Kimi K2.6 via Nvidia NIM
+            else:
+                groq_model = "meta-llama/llama-4-scout-17b-16e-instruct" if has_image else "llama-3.3-70b-versatile"
             groq_msgs = [{"role": "system", "content": system}] + [
                 {"role": m["role"],
                  "content": _to_groq_content(m["content"], vision=(has_image and i == last_user_idx))}
@@ -3709,16 +3720,28 @@ _groq_client = None
 _groq_client_key = None
 
 def _get_provider() -> str:
-    """Return 'groq' if a Groq key is available, else 'anthropic'."""
-    groq_key = (_RUNTIME_GROQ_KEY or os.environ.get("GROQ_API_KEY", "")).strip()
-    return "groq" if groq_key else "anthropic"
+    """Pick provider. The 'groq' branch is now repurposed to route through
+    Nvidia NIM (hosts Kimi K2.6) when MOONSHOT_KIMI_API is set. Same
+    OpenAI-compatible code path — only the URL + model differ. Falls back
+    to actual Groq if GROQ_API_KEY is set, else Anthropic."""
+    nvidia_key = (_RUNTIME_GROQ_KEY or os.environ.get("MOONSHOT_KIMI_API", "")
+                  or os.environ.get("GROQ_API_KEY", "")).strip()
+    return "groq" if nvidia_key else "anthropic"
 
 def _get_groq_client():
+    """Returns an OpenAI-compatible client pointed at whichever provider
+    is active — Nvidia NIM (Kimi) if MOONSHOT_KIMI_API set, else Groq."""
     global _groq_client, _groq_client_key
     from openai import OpenAI
-    key = (_RUNTIME_GROQ_KEY or os.environ.get("GROQ_API_KEY", "")).strip()
+    nvidia_key = (_RUNTIME_GROQ_KEY or os.environ.get("MOONSHOT_KIMI_API", "")).strip()
+    if nvidia_key:
+        base_url = "https://integrate.api.nvidia.com/v1"
+        key = nvidia_key
+    else:
+        base_url = "https://api.groq.com/openai/v1"
+        key = os.environ.get("GROQ_API_KEY", "").strip()
     if _groq_client is None or key != _groq_client_key:
-        _groq_client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+        _groq_client = OpenAI(api_key=key, base_url=base_url)
         _groq_client_key = key
     return _groq_client
 
