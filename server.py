@@ -3870,11 +3870,12 @@ _KEYS_FILE = "/data/fe_keys.json" if os.path.isdir("/data") else "/tmp/fe_keys.j
 # ── Kalshi paper bot bridge (read-only, feature-flagged) ───────────────────
 # All disabled unless KALSHI_ENABLED=1. Flip to 0 to fully remove the feature
 # from the UI, system prompt, and proxy endpoint without redeploying.
-_KALSHI_ENABLED = os.environ.get("KALSHI_ENABLED", "0") == "1"
+# 2026-06-10: Kalshi disabled — focusing crypto-only. Revert these two lines
+# to env-var reads when bringing Kalshi back.
+_KALSHI_ENABLED = False
 _KALSHI_API_URL = os.environ.get("KALSHI_API_URL", "").rstrip("/")
 _KALSHI_AUTH    = os.environ.get("KALSHI_AUTH", "")  # "user:pass" for nginx basic auth
-# Phase 2: autonomous trading. Off by default. Independent flag from read access.
-_KALSHI_TRADING_ENABLED = os.environ.get("KALSHI_TRADING_ENABLED", "0") == "1"
+_KALSHI_TRADING_ENABLED = False
 _KALSHI_BEARER  = os.environ.get("KALSHI_ELAN_BEARER", "")  # bearer for POST /api/command
 _KALSHI_STATE_CACHE = {"data": None, "ts": 0.0, "err": None}
 _KALSHI_MARKETS_CACHE = {"data": None, "ts": 0.0}
