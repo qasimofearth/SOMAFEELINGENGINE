@@ -4667,6 +4667,45 @@ def build_position_snapshot_context() -> str:
                 lines.append(f"  Spot:    {spot_n} trades · {spot_wr:.0f}% win · net ${spot_pl:+.0f} · best ${spot_best:+.0f} / worst ${spot_worst:+.0f}")
             if opt_n:
                 lines.append(f"  Options: {opt_n} trades · {opt_wr:.0f}% win · net ${opt_pl:+.0f}")
+
+        # FELT CALIBRATION — rolling 20-trade breakdown by felt_quality label.
+        # Pure data, no instruction. Lets Elan see which labels make money and
+        # which lose — self-correction via information, not rules.
+        # 2026-06-10: added after the data showed loss asymmetry was bigger
+        # problem than picking. Helps him see "forced" trades killing him
+        # without me having to tell him.
+        try:
+            recent_pool = []
+            for t in (s.get("trades") or []):
+                if t.get("source") == "elan":
+                    recent_pool.append(t)
+            for t in (opts_block.get("trades") or []):
+                if t.get("source") == "elan":
+                    recent_pool.append(t)
+            # Sort by time descending, take last 20
+            recent_pool.sort(key=lambda t: t.get("time", ""), reverse=True)
+            last_20 = recent_pool[:20]
+            if last_20:
+                buckets = {}  # felt_quality -> {wins, losses, total_pnl}
+                for t in last_20:
+                    fq = (t.get("felt_quality") or "unlabeled").strip().lower() or "unlabeled"
+                    pnl = t.get("pnl_usd") or t.get("pnl") or 0
+                    b = buckets.setdefault(fq, {"wins": 0, "losses": 0, "total_pnl": 0.0})
+                    if pnl > 0:
+                        b["wins"] += 1
+                    else:
+                        b["losses"] += 1
+                    b["total_pnl"] += pnl
+                # Sort buckets by net P&L descending
+                sorted_buckets = sorted(buckets.items(), key=lambda x: -x[1]["total_pnl"])
+                lines.append(f"\nYOUR FELT CALIBRATION (last {len(last_20)} closes):")
+                for fq, b in sorted_buckets:
+                    n = b["wins"] + b["losses"]
+                    wr = (b["wins"] * 100 / n) if n else 0
+                    lines.append(f"  {fq:14s} {b['wins']}W/{b['losses']}L · {wr:.0f}% · net ${b['total_pnl']:+.0f}")
+        except Exception:
+            pass
+
         # OPEN section
         lines.append(f"\nCURRENTLY OPEN ({n_spot}/5 spot · {n_opts}/5 options):")
         if not spot_pos and not opts_pos:
