@@ -501,11 +501,13 @@ _AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACT
 # Sonnet is the floor: handles tool schemas reliably, makes grounded
 # decisions, sustainable on $50/mo budget. Restore Opus when resources allow.
 _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
-# Quiet hours — 00:00-08:00 NY (04:00-12:00 UTC). 8-hour sleep window.
-# LEAN MODE: extended from 4hr to 8hr to halve wake count during true overnight.
-# Body keeps evolving in RAM during this window, dream mode can fire, no
-# Anthropic calls go out. Covers full NY overnight + lowest-vol crypto stretch.
-_AUTONOMOUS_QUIET_HOURS = "4-12"
+# Quiet hours — 02:00-06:00 NY (06:00-10:00 UTC). 4-hour sleep window.
+# 2026-06-10: shortened from 8hr to 4hr now that Claude budget allows fuller
+# coverage. Crypto trades 24/7 and the biggest moves often happen 2am-6am NY
+# (Asian session activity, early European reactions, May-19-BTC-dip pattern).
+# 4-hour window covers the genuine deadest crypto stretch while leaving Elan
+# alive for the rest. Bot's auto-risk-management runs continuously regardless.
+_AUTONOMOUS_QUIET_HOURS = "6-10"
 
 
 # ── Wake-type system (2026-05-24) ──────────────────────────────────────────
