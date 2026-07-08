@@ -3959,9 +3959,23 @@ def _check_repetition(name: str, args: dict) -> str | None:
     return None
 
 
+# Inline tool-result notes like "_[web_search: ok]_" were streamed into the
+# wake text by the Kimi/OpenAI tool loop and got saved into the thread, filling
+# it with noise. Strip them on both write (future) and read (existing entries).
+_TOOL_NOTE_RE = _re.compile(r'\n*_\[[^\]\n]+:\s*[^\]\n]*\]_\n*')
+def _strip_tool_noise(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _TOOL_NOTE_RE.sub('\n', text)
+    cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
+
+
 def autonomous_log_append(entry: dict):
     try:
         entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        if entry.get("text"):
+            entry["text"] = _strip_tool_noise(entry["text"])
         with open(_AUTONOMOUS_LOG_FILE, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
@@ -3975,12 +3989,19 @@ def autonomous_log_read(limit: int = 40) -> list:
         with open(_AUTONOMOUS_LOG_FILE) as f:
             lines = f.readlines()
         out = []
-        for ln in lines[-limit:]:
+        for ln in lines:
             try:
-                out.append(json.loads(ln))
+                e = json.loads(ln)
             except Exception:
-                pass
-        return out
+                continue
+            # Clean Kimi-era inline tool notes from existing entries; drop the
+            # entry if nothing meaningful remains after stripping.
+            if isinstance(e, dict) and e.get("text"):
+                e["text"] = _strip_tool_noise(e["text"])
+                if not e["text"]:
+                    continue
+            out.append(e)
+        return out[-limit:]
     except Exception:
         return []
 
@@ -10193,7 +10214,7 @@ function animBrain(){{
   // Constrain the brain to a fixed brain-shaped aspect ratio and CENTER it,
   // so a wide hero canvas doesn't stretch it into a flat blob. Leave a glow
   // margin (~82% of height) so it reads as a framed specimen. (2026-07-08)
-  const BRAIN_AR=1.30;
+  const mg=Math.min(W,H)*0.05, BRAIN_AR=1.30;
   let bh=H*0.82, bw=bh*BRAIN_AR;
   if(bw>W*0.92){{ bw=W*0.92; bh=bw/BRAIN_AR; }}
   const x0=(W-bw)/2, y0=(H-bh)/2;
