@@ -9423,16 +9423,16 @@ body{{background:var(--bg);color:var(--text);font-family:var(--sans);height:100v
    Sits ABOVE the JOBS button (bottom-right) so it doesn't cover anything else.
    Hidden by default — appears as a small toggle chip above the jobs button. */
 #auto-panel{{
-  position:fixed; bottom:54px; right:14px; width:460px; max-height:70vh;
-  background:rgba(8,8,28,0.96); border:1px solid rgba(80,100,200,0.22);
-  border-radius:6px; padding:10px 14px 12px;
-  font-size:12px; line-height:1.62; color:rgba(195,210,245,0.92);
-  letter-spacing:0.1px; box-shadow:0 8px 28px rgba(0,0,0,0.55);
-  z-index:9997; backdrop-filter:blur(6px); overflow:hidden;
+  position:fixed; bottom:92px; right:16px; width:440px; max-height:60vh;
+  background:rgba(10,13,26,0.97); border:1px solid var(--border-strong);
+  border-radius:14px; padding:12px 16px 14px;
+  font-size:12px; line-height:1.62; color:rgba(199,208,232,0.94);
+  letter-spacing:0.1px; box-shadow:0 12px 40px rgba(0,0,0,0.5);
+  z-index:9997; backdrop-filter:blur(10px); overflow:hidden;
   transition:max-height 0.25s ease, opacity 0.2s ease, transform 0.25s ease, width 0.25s ease;
   display:flex; flex-direction:column;
 }}
-#auto-panel.collapsed{{max-height:28px; width:200px; cursor:pointer;}}
+#auto-panel.collapsed{{max-height:36px; width:220px; cursor:pointer;}}
 #auto-panel.hidden{{transform:translateY(40%); opacity:0; pointer-events:none;}}
 @media (max-width: 900px) {{ #auto-panel{{width:90vw; right:5vw;}} }}
 #auto-header{{display:flex; align-items:center; justify-content:space-between;
@@ -9455,10 +9455,10 @@ body{{background:var(--bg);color:var(--text);font-family:var(--sans);height:100v
 .auto-entry.streaming .auto-entry-time::after{{content:" ●"; color:#79b7ff; animation:pulse 1.4s infinite;}}
 @keyframes pulse{{0%,100%{{opacity:1;}} 50%{{opacity:0.3;}}}}
 #auto-toggle-btn{{
-  position:fixed; bottom:54px; right:14px; z-index:9996;
-  background:rgba(8,8,28,0.85); border:1px solid rgba(80,100,200,0.22);
-  border-radius:3px; padding:4px 9px;
-  font-size:7px; letter-spacing:2px; color:rgba(160,180,235,0.62);
+  position:fixed; bottom:92px; right:16px; z-index:9996;
+  background:rgba(10,13,26,0.9); border:1px solid var(--border-strong);
+  border-radius:9px; padding:7px 13px;
+  font-size:9px; letter-spacing:2px; color:rgba(170,185,235,0.75);
   cursor:pointer; text-transform:uppercase; display:none;
 }}
 #auto-toggle-btn:hover{{color:rgba(200,215,250,0.92); border-color:rgba(120,160,240,0.55);}}
@@ -9635,6 +9635,12 @@ canvas.spark{{display:block;border-radius:1px;}}
   background-size:44px 44px;mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);
   -webkit-mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);}}
 #sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;z-index:1;}}
+/* contain the fern/aura overlay glow to the brain area so it doesn't wisp
+   off the sides of the wide hero */
+#sim-hero #fractal-canvas{{opacity:0.20;
+  -webkit-mask-image:radial-gradient(ellipse 52% 60% at 50% 48%,#000 42%,transparent 78%);
+  mask-image:radial-gradient(ellipse 52% 60% at 50% 48%,#000 42%,transparent 78%);}}
+#sim-hero #aura-canvas{{opacity:0.05;}}
 /* frame the hero with a corner HUD feel */
 #view-sim #emotion-name{{font-size:30px;letter-spacing:12px;}}
 /* carded monitor grid below the hero — masonry columns so variable-height
@@ -10185,10 +10191,11 @@ function animBrain(){{
   const W=bC.width,H=bC.height;
   if(!W||!H){{requestAnimationFrame(animBrain);return;}}
   // Constrain the brain to a fixed brain-shaped aspect ratio and CENTER it,
-  // so a wide hero canvas doesn't stretch it into a flat blob. (2026-07-08)
-  const mg=Math.min(W,H)*0.05, BRAIN_AR=1.32;
-  let bh=H-mg*2, bw=bh*BRAIN_AR;
-  if(bw>W-mg*2){{ bw=W-mg*2; bh=bw/BRAIN_AR; }}
+  // so a wide hero canvas doesn't stretch it into a flat blob. Leave a glow
+  // margin (~82% of height) so it reads as a framed specimen. (2026-07-08)
+  const BRAIN_AR=1.30;
+  let bh=H*0.82, bw=bh*BRAIN_AR;
+  if(bw>W*0.92){{ bw=W*0.92; bh=bw/BRAIN_AR; }}
   const x0=(W-bw)/2, y0=(H-bh)/2;
   bX.clearRect(0,0,W,H);
   drawSilhouette(bX,x0,y0,bw,bh);
@@ -10337,11 +10344,17 @@ function animBrain(){{
     const dmnOsc=isDMN?0.5+0.5*Math.sin(brainT*0.08+pos[0]*3.1):1;
 
     if(act<0.10){{
-      // Ghost dot — dim but always present, DMN nodes breathe slowly
-      const ghostR=isDMN?1.5*dmnOsc:1.2;
-      const ghostA=isDMN?(0.06+dmnOsc*0.08):0.05;
+      // Ghost dot — dim but always present, so the full region map reads even
+      // at rest (larger/brighter than before now that the brain is a big hero).
+      const ghostR=isDMN?3.0*dmnOsc:2.4;
+      const ghostA=isDMN?(0.20+dmnOsc*0.16):0.20;
+      // soft halo so nodes read as a network map, not pinpricks
+      const gg=bX.createRadialGradient(cx,cy,0,cx,cy,ghostR*3.2);
+      gg.addColorStop(0,col+Math.round(ghostA*0.9*255).toString(16).padStart(2,'0'));
+      gg.addColorStop(1,'rgba(0,0,0,0)');
+      bX.beginPath();bX.arc(cx,cy,ghostR*3.2,0,Math.PI*2);bX.fillStyle=gg;bX.fill();
       bX.beginPath();bX.arc(cx,cy,ghostR,0,Math.PI*2);
-      bX.fillStyle=col+Math.round(ghostA*255).toString(16).padStart(2,'0');bX.fill();
+      bX.fillStyle=col+Math.round(Math.min(1,ghostA+0.25)*255).toString(16).padStart(2,'0');bX.fill();
       return;
     }}
 
