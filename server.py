@@ -2718,7 +2718,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             _working = list(groq_msgs)
             for _turn in range(_GROQ_MAX_TURNS):
                 _create_kwargs = dict(
-                    model=groq_model, max_tokens=900,
+                    model=groq_model, max_tokens=300,
                     messages=_working, stream=True,
                 )
                 if openai_tools:
@@ -2907,13 +2907,14 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
-            # Output cap. Raised back to 900 (2026-06-01) since Groq removes
-            # output-token cost concern. 500 was too tight for trading wakes
-            # where Elan needs to think through positions + thesis + action +
-            # journal in one turn. 900 still bounded but breathes.
+            # Output cap tightened to 300 (2026-07-08) for cost control on Claude —
+            # output tokens are the most expensive part of the bill. Note: 500 was
+            # previously found too tight for trading wakes needing to think through
+            # positions + thesis + action + journal in one turn (2026-06-01 comment) —
+            # 300 is tighter still; watch for cut-off trading wakes.
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
-                    "model": model_id, "max_tokens": 900,
+                    "model": model_id, "max_tokens": 300,
                     "system": system_blocks, "messages": working_messages,
                     "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
