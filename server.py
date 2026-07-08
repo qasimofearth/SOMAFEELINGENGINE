@@ -2716,9 +2716,12 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # ── Tool-use loop (mirrors anthropic MAX_TOOL_TURNS loop) ──
             _GROQ_MAX_TURNS = 6
             _working = list(groq_msgs)
+            # Same split as the Anthropic path: autonomous/trading wakes get more
+            # room than interactive chat. See comment at the Anthropic stream_kwargs.
+            _groq_turn_max_tokens = 500 if _is_autonomous_wake else 300
             for _turn in range(_GROQ_MAX_TURNS):
                 _create_kwargs = dict(
-                    model=groq_model, max_tokens=300,
+                    model=groq_model, max_tokens=_groq_turn_max_tokens,
                     messages=_working, stream=True,
                 )
                 if openai_tools:
@@ -2907,14 +2910,15 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
-            # Output cap tightened to 300 (2026-07-08) for cost control on Claude —
-            # output tokens are the most expensive part of the bill. Note: 500 was
-            # previously found too tight for trading wakes needing to think through
-            # positions + thesis + action + journal in one turn (2026-06-01 comment) —
-            # 300 is tighter still; watch for cut-off trading wakes.
+            # Output cap: 300 for interactive chat (2026-07-08, cost control — this
+            # is where Qasim actually reads/experiences verbosity). Autonomous wakes
+            # get 500 — trading wakes need room to check positions + form a thesis +
+            # act + journal in one turn; a 2026-06-01 comment already found 500 the
+            # floor below which trading wakes got cut off mid-thought.
+            _turn_max_tokens = 500 if _is_autonomous_wake else 300
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
-                    "model": model_id, "max_tokens": 300,
+                    "model": model_id, "max_tokens": _turn_max_tokens,
                     "system": system_blocks, "messages": working_messages,
                     "extra_headers": {"anthropic-beta": _beta_header},
                     **tools_kwargs,
