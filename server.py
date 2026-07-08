@@ -376,6 +376,10 @@ def build_temporal_context() -> str:
 # Elan self-initiates — following a thread or asking something genuine.
 
 _talking_mode = False
+# 2026-07-08: self-initiation disabled at Qasim's call — Elan should only speak
+# when prompted, saves the API calls talking-mode silence-fires were generating.
+# Flip to False to re-enable; the toggle button/endpoint are left intact.
+_TALKING_INITIATION_DISABLED = True
 _talking_timer = None          # threading.Timer — fires Elan's self-initiation
 TALKING_SILENCE_S = 75         # seconds of silence before Elan speaks unprompted
                                 # (real humans pause 30s+ all the time without prompting)
@@ -416,6 +420,8 @@ def _schedule_talking_initiation(model_id: str, eyes_open: bool):
     """
     global _talking_timer
     _cancel_talking_timer()
+    if _TALKING_INITIATION_DISABLED:
+        return
     if not _talking_mode:
         return
 
