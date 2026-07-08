@@ -9643,7 +9643,7 @@ canvas.spark{{display:block;border-radius:1px;}}
 #view-chat #talking-btn,#view-chat #autonomous-btn{{border-radius:9px;padding:9px 12px;}}
 /* SIMULATION TAB — cinematic brain hero + carded monitor grid */
 #view-sim{{background:var(--bg);padding:0;}}
-#sim-hero{{position:relative;width:100%;height:56vh;min-height:400px;flex-shrink:0;
+#sim-hero{{position:relative;width:100%;height:44vh;min-height:320px;flex-shrink:0;
   background:
     radial-gradient(ellipse 60% 70% at 50% 46%, rgba(91,110,240,0.18), rgba(91,110,240,0.04) 45%, transparent 72%),
     radial-gradient(ellipse 120% 100% at 50% 120%, rgba(20,26,54,0.9), transparent 60%),
@@ -9691,6 +9691,10 @@ canvas.spark{{display:block;border-radius:1px;}}
   padding:7px 16px;border-radius:8px;transition:all 0.15s;}}
 .subtab:hover{{color:var(--text);background:var(--accent-soft);}}
 .subtab.on{{color:var(--text-strong);background:var(--accent-soft);border-color:var(--accent-line);}}
+/* Thread is its own top tab now — always show its panel regardless of the
+   switchJob .show toggling used by the Jobs/Trading portals */
+#view-thread .portal-shell{{max-width:900px;}}
+#view-thread .job-panel{{display:block;}}
 /* Re-theme relocated job panels for both themes */
 #view-jobs .k-card,#view-trading .k-card{{background:var(--panel);border:1px solid var(--border);border-radius:10px;}}
 #view-jobs .k-big,#view-trading .k-big,#view-jobs .k-big-pos,#view-trading .k-big-pos{{color:var(--text-strong);}}
@@ -9718,6 +9722,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   <div class="brand"><span class="glyph">◉</span>Elan</div>
   <button class="tabbtn active" id="tab-chat" onclick="showTab('chat')"><span class="ico">💬</span>Chat</button>
   <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Simulation</button>
+  <button class="tabbtn" id="tab-thread" onclick="showTab('thread')"><span class="ico">✦</span>Thread</button>
   <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">⬡</span>Jobs</button>
   <button class="tabbtn" id="tab-trading" onclick="showTab('trading')"><span class="ico">📈</span>Trading</button>
   <div class="spacer"></div>
@@ -9726,11 +9731,13 @@ canvas.spark{{display:block;border-radius:1px;}}
 <div id="tabviews">
   <div class="tabview active" id="view-chat"></div>
   <div class="tabview" id="view-sim"></div>
+  <div class="tabview" id="view-thread">
+    <div class="portal-shell" id="thread-panels"></div>
+  </div>
   <div class="tabview" id="view-jobs">
     <div class="portal-shell">
       <div class="portal-subtabs" id="jobs-subtabs">
-        <button class="subtab on" data-sub="thread" onclick="switchJob('thread')">Thread</button>
-        <button class="subtab" data-sub="watch" onclick="switchJob('watch')">Watch</button>
+        <button class="subtab on" data-sub="watch" onclick="switchJob('watch')">Watch</button>
         <button class="subtab" data-sub="source" onclick="switchJob('source')">Source</button>
       </div>
       <div id="jobs-panels"></div>
@@ -9934,8 +9941,11 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   const bw=document.getElementById('brain-wrap');
   if(bw&&sim){{ const hero=document.createElement('div'); hero.id='sim-hero'; hero.appendChild(bw); sim.appendChild(hero); }}
   const right=document.getElementById('right'); if(right&&sim) sim.appendChild(right);
-  // JOBS (daily life) — thread / watch / source
-  ['thread','watch','source'].forEach(j=>{{ const p=document.getElementById('job-panel-'+j); if(p&&jobsPanels) jobsPanels.appendChild(p); }});
+  // THREAD — his interior autonomous stream + journal (now a top-level tab)
+  const threadPanels=document.getElementById('thread-panels');
+  const tp=document.getElementById('job-panel-thread'); if(tp&&threadPanels) threadPanels.appendChild(tp);
+  // JOBS (daily life) — watch / source
+  ['watch','source'].forEach(j=>{{ const p=document.getElementById('job-panel-'+j); if(p&&jobsPanels) jobsPanels.appendChild(p); }});
   // TRADING — only books that were rendered live (not disabled/"soon")
   const TRADE_LABEL={{crypto:'Crypto',stock:'Stocks',kalshi:'Kalshi'}};
   const liveTrade=['crypto','stock','kalshi'].filter(j=>{{
@@ -9955,26 +9965,32 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   if(tradeSubtabs && !liveTrade.length){{
     tradePanels.innerHTML='<div style="color:var(--muted);padding:30px 4px;font-size:14px">No trading book is currently live.</div>';
   }}
-  // The old #left wrapper is now empty (brain + chat moved out). Its fixed-
-  // position children (auto thread panel) must survive, so re-home them to
-  // <body>, then drop the empty wrapper so it stops eating flex height.
-  ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) document.body.appendChild(e); }});
+  // The old #left wrapper is now empty (brain + chat moved out). The floating
+  // AUTO-thread panel is retired now that Thread is a top-level tab.
+  ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) e.style.display='none'; }});
   const left=document.getElementById('left'); if(left) left.style.display='none';
 }})();
 
 // ── TOP TAB SWITCHER ────────────────────────────────────────────
-let _activeTab='chat', _jobsSub='thread', _tradeSub=null;
+let _activeTab='chat', _jobsSub='watch', _tradeSub=null;
 function showTab(name){{
   _activeTab=name;
-  ['chat','sim','jobs','trading'].forEach(t=>{{
+  ['chat','sim','thread','jobs','trading'].forEach(t=>{{
     const v=document.getElementById('view-'+t); if(v) v.classList.toggle('active',t===name);
     const b=document.getElementById('tab-'+t); if(b) b.classList.toggle('active',t===name);
   }});
   // Canvas tabs must re-fit when revealed (hidden tabs have 0 size)
   if(name==='sim' && typeof resize==='function') requestAnimationFrame(resize);
+  // Thread tab: reuse the existing thread refresh/poll machinery
+  if(name==='thread'){{
+    if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
+    _jobsOpen=true;
+    if(typeof refreshThread==='function'){{ refreshThread(); if(typeof _threadPoll!=='undefined'){{ _threadPoll=setInterval(refreshThread,15000); }} }}
+    return;
+  }}
   // Portals: drive pollers via existing job machinery
   _jobsOpen = (name==='jobs'||name==='trading');
-  if(name==='jobs'){{ switchJob(_jobsSub||'thread'); }}
+  if(name==='jobs'){{ switchJob(_jobsSub||'watch'); }}
   else if(name==='trading'){{ switchJob(_tradeSub||window._firstTrade||'crypto'); }}
   else {{ // leaving portals — stop all pollers
     if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
