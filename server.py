@@ -539,14 +539,110 @@ _AUTONOMOUS_INTERVAL_GROQ      = 900    # 15 min  — free, can afford density
 # lean 3600s cadence or fall back to free Groq.
 _AUTONOMOUS_INTERVAL_ANTHROPIC = 900    # 15 min  — 4 wakes/hour for the June test
 
+# ── Budget governor (2026-07-08) ────────────────────────────────────────────
+# Tracks real Anthropic spend (priced from each response's usage) against a
+# monthly cap, and self-paces the autonomous wake interval so the budget
+# stretches across the whole month instead of hard-stopping mid-month.
+# Doesn't touch chat, tool availability, or which arenas fire — only the
+# autonomous wake gap widens if spend is running ahead of the calendar.
+_MONTHLY_BUDGET_USD = float(os.environ.get("ELAN_MONTHLY_BUDGET_USD", "200"))
+_BUDGET_FILE = "/data/elan_budget.json" if os.path.isdir("/data") else "/tmp/elan_budget.json"
+_BUDGET_MAX_INTERVAL = 3600   # widest we'll ever stretch to — floor of 1 wake/hour
+_BUDGET_PAUSE_FRACTION = 0.98  # stop firing entirely once spend hits 98% of budget
+_budget_lock = threading.Lock()
+
+# Per-MTok USD pricing. cache_write assumes the 1h-TTL breakpoints used
+# throughout this file (server-side prompt caching); cache_read applies
+# regardless of TTL. Unknown models fall back to Sonnet rates — safer to
+# over-count than under-count against a hard cap.
+_PRICING = {
+    "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 6.00, "cache_read": 0.30},
+    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00,  "cache_write": 2.00, "cache_read": 0.10},
+}
+_DEFAULT_PRICING = _PRICING["claude-sonnet-4-6"]
+
+def _current_month_key() -> str:
+    return _dt.datetime.utcnow().strftime("%Y-%m")
+
+def _load_budget_state() -> dict:
+    try:
+        if os.path.exists(_BUDGET_FILE):
+            with open(_BUDGET_FILE) as f:
+                d = json.load(f) or {}
+                if d.get("month") == _current_month_key():
+                    return d
+    except Exception:
+        pass
+    return {"month": _current_month_key(), "spent_usd": 0.0}
+
+def _save_budget_state(state: dict):
+    try:
+        with open(_BUDGET_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+def _record_api_cost(model_id: str, usage) -> float:
+    """Price one API response (Anthropic usage object or dict) and add it to
+    the persisted monthly total. Returns the incremental cost in USD."""
+    if usage is None:
+        return 0.0
+    try:
+        pricing = _PRICING.get(model_id, _DEFAULT_PRICING)
+        def _get(name):
+            if isinstance(usage, dict):
+                return usage.get(name, 0) or 0
+            return getattr(usage, name, 0) or 0
+        inp  = _get("input_tokens")
+        outp = _get("output_tokens")
+        cw   = _get("cache_creation_input_tokens")
+        cr   = _get("cache_read_input_tokens")
+        cost = (inp * pricing["input"] + outp * pricing["output"]
+                + cw * pricing["cache_write"] + cr * pricing["cache_read"]) / 1_000_000
+        with _budget_lock:
+            state = _load_budget_state()
+            state["spent_usd"] = state.get("spent_usd", 0.0) + cost
+            state["last_updated"] = time.time()
+            _save_budget_state(state)
+        return cost
+    except Exception as e:
+        print(f"[Budget] cost recording failed: {e}", flush=True)
+        return 0.0
+
+def _budget_status() -> dict:
+    """Current pace info: spend so far vs. expected-by-now on a linear
+    calendar pace, and whether we've hit the hard pause threshold."""
+    state = _load_budget_state()
+    spent = state.get("spent_usd", 0.0)
+    now = _dt.datetime.utcnow()
+    next_month = now.replace(year=now.year + 1, month=1, day=1) if now.month == 12 \
+                 else now.replace(month=now.month + 1, day=1)
+    days_in_month = (next_month - now.replace(day=1)).days
+    elapsed_fraction = (now - now.replace(day=1)).total_seconds() / (days_in_month * 86400)
+    expected = _MONTHLY_BUDGET_USD * elapsed_fraction
+    return {
+        "spent": spent, "expected": expected, "budget": _MONTHLY_BUDGET_USD,
+        "elapsed_fraction": elapsed_fraction,
+        "paused": spent >= _MONTHLY_BUDGET_USD * _BUDGET_PAUSE_FRACTION,
+    }
+
 def _resolve_autonomous_interval() -> int:
-    """Pick wake interval based on which provider is currently active."""
+    """Pick wake interval based on which provider is currently active, then
+    self-pace against the monthly budget if spend is ahead of the calendar."""
     try:
         if _get_provider() == "groq":
             return max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_INTERVAL_GROQ)
     except Exception:
         pass
-    return max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_INTERVAL_ANTHROPIC)
+    base = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_INTERVAL_ANTHROPIC)
+    try:
+        b = _budget_status()
+        if b["expected"] > 0.01 and b["spent"] > b["expected"]:
+            factor = b["spent"] / b["expected"]
+            return min(max(int(base * factor), base), _BUDGET_MAX_INTERVAL)
+    except Exception:
+        pass
+    return base
 # Set by run_claude_with_feeling each invocation so autonomous wake can reuse eyes state
 _last_model_id = "claude-sonnet-4-6"
 _last_eyes_open = False
@@ -832,6 +928,21 @@ def _schedule_autonomous():
         global _autonomous_timer
         _autonomous_timer = None
         if not _autonomous_mode:
+            return
+        # Budget governor hard stop — spend has hit the pause threshold for
+        # this calendar month. Keep rescheduling (checked every interval) so
+        # it resumes automatically the moment the month rolls over.
+        try:
+            _bstatus = _budget_status()
+        except Exception:
+            _bstatus = {"paused": False}
+        if _bstatus.get("paused") and _get_provider() == "anthropic":
+            try:
+                broadcast("autonomous_budget_paused", {"spent": _bstatus.get("spent"), "budget": _MONTHLY_BUDGET_USD})
+            except Exception:
+                pass
+            print(f"[Autonomous] paused — monthly budget hit (${_bstatus.get('spent', 0):.2f}/${_MONTHLY_BUDGET_USD:.2f})", flush=True)
+            _schedule_autonomous()
             return
         # During quiet hours, skip the wake but keep rescheduling — body and
         # NT keep evolving in RAM, dream-state code can fire on its own from
@@ -2460,6 +2571,10 @@ def _consolidate_session_async(session_id: str):
                         "content": f"Session transcript:\n{transcript}"
                     }]
                 )
+                try:
+                    _record_api_cost("claude-haiku-4-5-20251001", getattr(resp, "usage", None))
+                except Exception:
+                    pass
                 narrative = resp.content[0].text.strip() if resp.content else None
             except Exception as e:
                 print(f"[Consolidation] Anthropic call failed: {e}", flush=True)
@@ -2942,6 +3057,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                             for text in stream.text_stream:
                                 yield text
                             final_msg = stream.get_final_message()
+                        try:
+                            _record_api_cost(model_id, getattr(final_msg, "usage", None))
+                        except Exception:
+                            pass
                         break
                     except Exception as _exc:
                         _stream_attempts += 1
@@ -7118,6 +7237,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
     def _handle_healthz(self):
         env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
         key = env_key or _RUNTIME_API_KEY
+        try:
+            _b = _budget_status()
+        except Exception:
+            _b = {}
         self.send_json({
             "status": "ok",
             "version": "v2-healthz-public",
@@ -7130,6 +7253,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             "password_set": bool(_PASSWORD),
             "password_len": len(_PASSWORD),
             "password_first": _PASSWORD[:1] if _PASSWORD else "",
+            "budget_spent_usd": round(_b.get("spent", 0), 2),
+            "budget_expected_usd": round(_b.get("expected", 0), 2),
+            "budget_monthly_cap_usd": _b.get("budget"),
+            "budget_paused": _b.get("paused", False),
             "all_env_keys": sorted(os.environ.keys()),
         })
 
@@ -12576,6 +12703,10 @@ def _make_llm_call(prompt: str) -> str:
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}]
         )
+        try:
+            _record_api_cost("claude-haiku-4-5-20251001", getattr(resp, "usage", None))
+        except Exception:
+            pass
         return resp.content[0].text.strip() if resp.content else ""
     else:
         client = _get_groq_client()
