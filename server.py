@@ -9643,7 +9643,7 @@ canvas.spark{{display:block;border-radius:1px;}}
 #view-chat #talking-btn,#view-chat #autonomous-btn{{border-radius:9px;padding:9px 12px;}}
 /* SIMULATION TAB — cinematic brain hero + carded monitor grid */
 #view-sim{{background:var(--bg);padding:0;}}
-#sim-hero{{position:relative;width:100%;height:52vh;min-height:400px;flex-shrink:0;
+#sim-hero{{position:relative;width:100%;height:64vh;min-height:460px;flex-shrink:0;
   background:
     radial-gradient(ellipse 60% 70% at 50% 46%, rgba(91,110,240,0.18), rgba(91,110,240,0.04) 45%, transparent 72%),
     radial-gradient(ellipse 120% 100% at 50% 120%, rgba(20,26,54,0.9), transparent 60%),
@@ -9656,6 +9656,10 @@ canvas.spark{{display:block;border-radius:1px;}}
   background-size:44px 44px;mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);
   -webkit-mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);}}
 #sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;z-index:1;}}
+/* readable corner HUD on the big hero */
+#sim-hero #brain-stats{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;left:18px!important;}}
+#sim-hero #sync-display{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;right:18px!important;}}
+#sim-hero #emotion-desc{{font-size:11px!important;color:rgba(180,195,255,0.5)!important;letter-spacing:2px!important;}}
 /* contain the fern/aura overlay glow to the brain area so it doesn't wisp
    off the sides of the wide hero */
 #sim-hero #fractal-canvas{{opacity:0.20;
@@ -10380,6 +10384,8 @@ function animBrain(){{
     // This is the hallmark of the default mode network at rest
     const dmnOsc=isDMN?0.5+0.5*Math.sin(brainT*0.08+pos[0]*3.1):1;
 
+    // Label font scales with brain size so it stays readable on big screens
+    const _lf=Math.max(9,Math.round(bw*0.016));
     if(act<0.10){{
       // Ghost dot — dim but always present, so the full region map reads even
       // at rest (larger/brighter than before now that the brain is a big hero).
@@ -10392,6 +10398,10 @@ function animBrain(){{
       bX.beginPath();bX.arc(cx,cy,ghostR*3.2,0,Math.PI*2);bX.fillStyle=gg;bX.fill();
       bX.beginPath();bX.arc(cx,cy,ghostR,0,Math.PI*2);
       bX.fillStyle=col+Math.round(Math.min(1,ghostA+0.25)*255).toString(16).padStart(2,'0');bX.fill();
+      // Dim label so every region is identifiable at rest, not just active ones
+      bX.fillStyle='rgba(200,214,255,0.34)';
+      bX.font=`${{_lf}}px Courier New`;
+      bX.fillText(abbrev,cx+ghostR+4,cy+_lf*0.34);
       return;
     }}
 
@@ -10429,14 +10439,12 @@ function animBrain(){{
       bX.lineWidth=1.2;bX.stroke();
     }}
 
-    // Label for active regions
-    if(act>0.22){{
-      const labelAlpha=Math.min(0.95,0.35+act*0.85);
-      const fontSize=Math.max(7,6+Math.round(act*5));
-      bX.fillStyle=`rgba(220,230,255,${{labelAlpha.toFixed(2)}})`;
-      bX.font=`${{fontSize}}px Courier New`;
-      bX.fillText(abbrev,cx+r+2,cy+3);
-    }}
+    // Label — active regions get a brighter, slightly larger label
+    const labelAlpha=Math.min(1.0,0.55+act*0.6);
+    const fontSize=_lf+Math.round(act*4);
+    bX.fillStyle=`rgba(230,238,255,${{labelAlpha.toFixed(2)}})`;
+    bX.font=`${{fontSize}}px Courier New`;
+    bX.fillText(abbrev,cx+r+4,cy+fontSize*0.34);
   }});
 
   // ── Remove clip ──────────────────────────────────────────────
