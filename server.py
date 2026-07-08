@@ -10145,16 +10145,18 @@ function drawSilhouette(ctx,x0,y0,w,h){{
   g.addColorStop(1,'rgba(2,3,12,0.68)');
   ctx.fillStyle=g; ctx.fill();
   // Outline drawn separately after clip — skip stroke here
-  // Cerebellum
+  // Cerebellum — sized off brain HEIGHT so a wide aspect ratio doesn't make
+  // it bulge out to the side; tucked under the posterior-inferior brain.
+  const cbX=x0+w*0.24, cbY=y0+h*0.82, cbRx=h*0.12, cbRy=h*0.075;
   ctx.beginPath();
-  ctx.ellipse(x0+w*0.20,y0+h*0.80,w*0.12,h*0.088,-0.3,0,Math.PI*2);
-  ctx.fillStyle='rgba(3,4,16,0.68)'; ctx.fill();
-  ctx.strokeStyle='rgba(55,75,155,0.15)'; ctx.lineWidth=0.9; ctx.stroke();
+  ctx.ellipse(cbX,cbY,cbRx,cbRy,-0.25,0,Math.PI*2);
+  ctx.fillStyle='rgba(3,4,16,0.60)'; ctx.fill();
+  ctx.strokeStyle='rgba(55,75,155,0.12)'; ctx.lineWidth=0.9; ctx.stroke();
   // Folia (horizontal striations)
   for(let i=0;i<6;i++){{
     ctx.beginPath();
-    ctx.ellipse(x0+w*0.20,y0+h*(0.758+i*0.014),w*(0.108-i*0.010),h*0.004,-0.3,0,Math.PI*2);
-    ctx.strokeStyle=`rgba(55,75,150,${{0.05+i*0.008}})`; ctx.lineWidth=0.5; ctx.stroke();
+    ctx.ellipse(cbX,cbY-cbRy*0.5+i*cbRy*0.18,cbRx*(0.9-i*0.09),h*0.004,-0.25,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(55,75,150,${{0.04+i*0.007}})`; ctx.lineWidth=0.5; ctx.stroke();
   }}
 
   // Brainstem
@@ -10374,6 +10376,9 @@ function animBrain(){{
   }});
 
   // ── 5. REGION DOTS — E/I ratio + DMN slow oscillation ───────
+  // Label font scales with brain size so it stays readable on big screens
+  const _lf=Math.max(10,Math.round(bw*0.014));
+  const labelCands=[];  // collect for a second, collision-avoided label pass
   allR.forEach(([abbrev,act,pos])=>{{
     const [cx,cy]=rc(pos[0],pos[1],x0,y0,bw,bh);
     const col=NET_COLORS[REGION_NET[abbrev]]||'#555588';
@@ -10384,8 +10389,6 @@ function animBrain(){{
     // This is the hallmark of the default mode network at rest
     const dmnOsc=isDMN?0.5+0.5*Math.sin(brainT*0.08+pos[0]*3.1):1;
 
-    // Label font scales with brain size so it stays readable on big screens
-    const _lf=Math.max(9,Math.round(bw*0.016));
     if(act<0.10){{
       // Ghost dot — dim but always present, so the full region map reads even
       // at rest (larger/brighter than before now that the brain is a big hero).
@@ -10398,10 +10401,7 @@ function animBrain(){{
       bX.beginPath();bX.arc(cx,cy,ghostR*3.2,0,Math.PI*2);bX.fillStyle=gg;bX.fill();
       bX.beginPath();bX.arc(cx,cy,ghostR,0,Math.PI*2);
       bX.fillStyle=col+Math.round(Math.min(1,ghostA+0.25)*255).toString(16).padStart(2,'0');bX.fill();
-      // Dim label so every region is identifiable at rest, not just active ones
-      bX.fillStyle='rgba(200,214,255,0.34)';
-      bX.font=`${{_lf}}px Courier New`;
-      bX.fillText(abbrev,cx+ghostR+4,cy+_lf*0.34);
+      labelCands.push({{abbrev:abbrev,cx:cx,cy:cy,r:ghostR,act:act}});
       return;
     }}
 
@@ -10438,14 +10438,32 @@ function animBrain(){{
       bX.strokeStyle=`rgba(80,140,255,${{(act*0.45).toFixed(2)}})`;
       bX.lineWidth=1.2;bX.stroke();
     }}
-
-    // Label — active regions get a brighter, slightly larger label
-    const labelAlpha=Math.min(1.0,0.55+act*0.6);
-    const fontSize=_lf+Math.round(act*4);
-    bX.fillStyle=`rgba(230,238,255,${{labelAlpha.toFixed(2)}})`;
-    bX.font=`${{fontSize}}px Courier New`;
-    bX.fillText(abbrev,cx+r+4,cy+fontSize*0.34);
+    labelCands.push({{abbrev:abbrev,cx:cx,cy:cy,r:r,act:act}});
   }});
+
+  // ── 5b. LABEL PASS with collision avoidance ─────────────────
+  // Draw the most-active regions' labels first; skip any that would overlap
+  // one already placed. Crowded regions stay as dots — no overlapping text.
+  labelCands.sort((a,b)=>b.act-a.act);
+  const _placed=[];
+  bX.textBaseline='middle';
+  for(const L of labelCands){{
+    const fs=_lf+Math.round(Math.min(1,L.act)*4);
+    bX.font=`${{fs}}px Courier New`;
+    const tw=bX.measureText(L.abbrev).width;
+    const lx=L.cx+L.r+5, ly=L.cy;
+    const box={{x:lx-1,y:ly-fs*0.55,w:tw+2,h:fs*1.1}};
+    let hit=false;
+    for(const p of _placed){{
+      if(box.x<p.x+p.w && box.x+box.w>p.x && box.y<p.y+p.h && box.y+box.h>p.y){{hit=true;break;}}
+    }}
+    if(hit) continue;
+    _placed.push(box);
+    const alpha=L.act>=0.10?Math.min(1.0,0.65+L.act*0.4):0.42;
+    bX.fillStyle=`rgba(232,240,255,${{alpha.toFixed(2)}})`;
+    bX.fillText(L.abbrev,lx,ly);
+  }}
+  bX.textBaseline='alphabetic';
 
   // ── Remove clip ──────────────────────────────────────────────
   bX.restore();
