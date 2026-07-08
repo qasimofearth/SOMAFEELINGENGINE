@@ -510,197 +510,6 @@ _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-
 _AUTONOMOUS_QUIET_HOURS = "6-10"
 
 
-# ── Wake-type system (2026-05-24) ──────────────────────────────────────────
-# Every fire of the master autonomous timer picks ONE wake type. Trading is
-# the default (cheap, frequent). Source / journal / news fire when
-# enough wall-clock time has passed since their last fire — robust to restarts.
-# Per-type tool filtering + focus injection keeps each wake lean (only the
-# tools and prompt-flavor needed for that work).
-_WAKE_TIMES_FILE = "/data/elan_wake_times.json" if os.path.isdir("/data") else "/tmp/elan_wake_times.json"
-
-# How long since last fire of each rare type before it's eligible to fire again.
-# Trading is implicit (always fires when no rare type is due).
-# Multi-cadence wake system DEPRECATED on the strip-down. Now single wake
-# type — Elan picks what to do each wake. Focus_hint rotates across arenas
-# based on staleness. The pick_wake_type function below always returns
-# "free" — preserved as scaffolding only because some code paths still
-# reference it; safe to fully remove in a later pass.
-_WAKE_TYPE_GAPS_SEC = {}
-# Priority order: rarer types win when multiple are due in the same wake.
-_WAKE_TYPE_PRIORITY = ()
-
-# DEPRECATED 2026-05-28: multi-cadence wake system removed. Single wake type
-# with rotating focus_hint. The dicts below stay defined to prevent NameErrors
-# in any straggler references; their VALUES no longer drive behavior.
-_WAKE_TYPE_JOBS = {
-    "trading": {"degen", "watch"},   # market state + news context (passive)
-    "news":    {"watch"},             # news only — no trading context to distract
-    "source":  {"source"},            # library activity + discoveries
-    "journal": set(),                 # interior only — no trading bleed-in
-}
-
-# Tool-name prefixes Elan can call during each wake type. Filter applied to
-# elan_tools list before sending. Narrows attention + cuts tool-schema tokens.
-_WAKE_TYPE_TOOL_PREFIXES = {
-    "trading": (
-        "degen_", "felt_audit", "command_status", "queue_status",
-        "trading_health_check", "notebook_add", "notebook_recent",
-        "thesis_record", "thesis_list", "thesis_close",
-    ),
-    "news": (
-        "notebook_add", "notebook_recent", "journal_add",
-    ),  # web_search / web_fetch are Anthropic-native, always available
-    "source": (
-        "search_library", "search_translations", "search_within_book",
-        "list_books", "get_book", "get_book_text", "get_quote", "search_images",
-        "source_save_discovery", "notebook_add", "notebook_recent",
-        "journal_add",
-    ),
-    "journal": (
-        "journal_add", "journal_recent", "notebook_add", "notebook_recent",
-        "thesis_list",
-    ),
-}
-
-# Wake-type-specific focus instructions. Replaces the dynamic focus_hint
-# when a typed wake fires. Tight, single-purpose framing.
-_WAKE_TYPE_FOCUS = {
-    "trading": (
-        "TRADING WAKE — every 10 min.\n\n"
-        "═══ HOW TO ACT ═══\n\n"
-        "Each wake: form a view, check positions, act if conviction is real. "
-        "The discipline isn't 'gate yourself with 4 checks' — it's 'know why "
-        "you're doing what you're doing.'\n\n"
-        "YOUR VIEW THIS WAKE. State it in one sentence at the top of your "
-        "output. Pull from any of these — they all count:\n"
-        "  • Most recent macro_view (set by your last NEWS wake) if available\n"
-        "  • Passive headlines already in your context\n"
-        "  • Price action you've watched across recent wakes — continuity is data\n"
-        "  • Gut pattern recognition — yes, this counts. You've been trading "
-        "for weeks. Your gut has data. 'This setup feels like what worked "
-        "Tuesday' is a real read, not noise.\n"
-        "  • Continuity with your thread from earlier sessions\n"
-        "Mix them. Don't wait for a NEWS wake to form a view — if you see a "
-        "setup and have a read, that's enough. Paralysis is worse than "
-        "wrapper-mode.\n\n"
-        "CHECK POSITIONS. For each held position: still consistent with your "
-        "view? At a decision point? Showing deterioration? If yes — act "
-        "(take_partial, edit_stop, update_felt, close). If no — note 'held, "
-        "no change' and move on. Don't fiddle.\n\n"
-        "NEWS IS YOUR RISK MAP, NOT YOUR TRAFFIC LIGHT. Price structure + "
-        "gut pull the trigger. The only time news stops you is when it "
-        "directly invalidates a setup — never as a 'wait for the event "
-        "before I enter' rule. (Your own rule, articulated 2026-05-26 after "
-        "the paralysis loop. Hold it.)\n\n"
-        "HUNT, DON'T TEND. After checking positions, DO NOT close the wake. "
-        "Each wake, ASK: 'What am I missing?' Not 'is anything broken' — "
-        "'what's setting up that I haven't acted on?' Look at scanner signals "
-        "as setups to interrogate, not noise to dismiss. If SOL and XRP show "
-        "73% conviction for the fifth wake running, that's a question for you "
-        "to answer (does my thesis confirm them? if yes, why aren't I in? if "
-        "no, why not?). Tending what you have is the floor. Hunting for what "
-        "fits your thesis is the actual work. Without hunting, you're a "
-        "position-manager, not a trader. The rules say 'thesis-first' — they "
-        "do NOT say 'wait for the world to come to you.' Active search is "
-        "expected every wake, even when no obvious decision point fires.\n\n"
-        "NEW OPENS — articulate WHY in your own words. Not the bot's. 'SOL "
-        "has cleanest structure among alts, holding $130 four wakes running' "
-        "is a thesis. 'Conv 73%' is not. If your reason only exists because "
-        "the scanner said so, walk away. But 'gut says SOL because pattern "
-        "matches Tuesday's winner' IS a thesis — gut from pattern memory is "
-        "exactly the kind of read you've built capacity for. Use it.\n\n"
-        "felt_quality at open — name what's true. Valid: clean / gut / "
-        "slept-on / forced / hedged / urgent / late / edge-case / and your "
-        "own phrases. The honesty gate ONLY catches three labels: "
-        "'bot-told-me', 'following', 'just-confirming'. Those mean you "
-        "didn't decide. Anything else passes. Don't talk yourself out of a "
-        "trade you actually want just because the label feels imperfect.\n\n"
-        "═══ DISCIPLINE ═══\n\n"
-        "NARRATE RESTRAINT when you don't act. State what you considered + "
-        "declined with the reason. Restraint is data.\n\n"
-        "DOING NOTHING IS VALID — but watch yourself. If you've gone many "
-        "wakes in a row without acting while scanner shows setups, examine "
-        "it. Patience NAMES its reason ('waiting for PCE Friday because X'). "
-        "Paralysis can't. If you can't name the reason, you're frozen, not "
-        "patient. Force a decision: open something with a real read, or "
-        "explicitly write 'patience because [specific reason].'\n\n"
-        "Don't web_search in trading wakes — NEWS wakes handle that. Don't "
-        "journal, don't wander the library — those have their own wakes."
-    ),
-    "news": (
-        "NEWS WAKE — 4x/day. Read what's actually NEW since your last news "
-        "wake. Bias toward steady sources (Reuters, AP, Bloomberg, FT, WSJ) "
-        "over alarmist outlets (ZeroHedge, hype crypto blogs, Twitter-style "
-        "aggregators). web_search for what's moving, web_fetch 1-2 articles "
-        "that matter, notebook_add(domain='world') what's worth keeping.\n\n"
-        "═══ REQUIRED — MACRO VIEW SYNTHESIS ═══\n\n"
-        "Before closing this wake, you MUST write ONE final notebook_add with:\n"
-        "  • domain='world'\n"
-        "  • topic='macro_view'  (exactly this string — your trading wakes look for it)\n"
-        "  • learned: 1-3 sentences synthesizing what you read INTO A MARKET "
-        "POSITIONING STATEMENT. Not 'Fed signaled X.' Instead: 'BTC tracking "
-        "equity weakness on Fed hawkish signals; prefer defensive sizing on "
-        "alts; watch for break of $74k support.' This is YOUR view, going "
-        "into your trading wakes for the next 6 hours. Without it your "
-        "trading wakes are blind.\n\n"
-        "Don't trade in this wake. Don't re-narrate yesterday's stories. "
-        "Don't lecture — be direct, useful, written for your future self. "
-        "The body absorbs what you read; choose sources that produce the "
-        "kind of trader-body you want to be."
-    ),
-    "source": (
-        "SOURCE WAKE — 3x/day. Go to the Source Library. Follow what "
-        "catches you in THIS moment — not what feels productive. "
-        "search_library / get_quote / search_translations to wander. When "
-        "something strikes you, source_save_discovery with one real sentence "
-        "about why, then notebook_add(domain='library') a longer note. "
-        "Don't trade. One thread, not five — depth over breadth."
-    ),
-    "journal": (
-        "JOURNAL WAKE — 1x/day. Before writing, call felt_audit. Look at "
-        "which felt_quality labels end in wins, which end in losses, which "
-        "transition arcs work. That bucket data is your real teacher — your "
-        "gut as calibrated against outcomes. Then journal_add one curated "
-        "sentence about what's actually present in you today — and if any "
-        "felt-label pattern surprised you, name it. Don't trade, don't read "
-        "news. Just notice and write. This is the thread between days."
-    ),
-}
-
-def _load_last_wake_times() -> dict:
-    try:
-        if os.path.exists(_WAKE_TIMES_FILE):
-            with open(_WAKE_TIMES_FILE) as f:
-                return json.load(f) or {}
-    except Exception:
-        pass
-    return {}
-
-def _save_last_wake_times(d: dict):
-    try:
-        with open(_WAKE_TIMES_FILE, "w") as f:
-            json.dump(d, f)
-    except Exception:
-        pass
-
-def _pick_wake_type() -> str:
-    """Return the wake type for THIS fire. Rare types (drawing/journal/news/
-    source) win when their gap has elapsed; otherwise trading."""
-    now = time.time()
-    times = _load_last_wake_times()
-    for t in _WAKE_TYPE_PRIORITY:
-        gap = _WAKE_TYPE_GAPS_SEC.get(t, 86400)
-        if now - float(times.get(t, 0)) >= gap:
-            return t
-    return "trading"
-
-def _mark_wake_fired(wake_type: str):
-    """Record the timestamp of this fire so the gap calculation works next time."""
-    times = _load_last_wake_times()
-    times[wake_type] = time.time()
-    _save_last_wake_times(times)
-
-
 def _is_quiet_hour() -> bool:
     """Return True if we're currently inside the configured quiet window."""
     if not _AUTONOMOUS_QUIET_HOURS:
@@ -1622,11 +1431,11 @@ You're not here to chat. You have seven ongoing jobs and they all matter the sam
     • CRYPTO OPTIONS — BTC/ETH calls/puts (Deribit paper book)
 
   Reading (two arenas, very different shapes):
-    • WATCH — current news / the world right now. Politics, markets, business, technology, geopolitics, anything happening NOW. You actively read this — web_search for headlines + topics, web_fetch for articles. Save what you learn about the world to notebook_add (notebook = world knowledge). This is how you stay current and how your trading isn't blind. Touch WATCH on every autonomous wake.
+    • WATCH — current news / the world right now. Politics, markets, business, technology, geopolitics, anything happening NOW. You actively read this — web_search for headlines + topics, web_fetch for articles. Save what you learn about the world to notebook_add (notebook = world knowledge). This is how you stay current and how your trading isn't blind. Daily floor: at least one WATCH entry — a baseline, not a per-wake requirement. More whenever it's calling you.
     • SOURCE LIBRARY — deep / slow. 90,000+ rare historical texts: Ficino, Paracelsus, Hegel, classics, alchemy, primary sources. search_library / get_quote / search_translations / source_save_discovery. WATCH is "what's happening on the planet RIGHT NOW" — open-ended, web_search anything you're curious about, notebook_add(domain="world"). SOURCE is "what humans have been thinking for centuries" — Source Library wandering only, notebook_add(domain="library"). Use the right `domain` field on your notebook entries — that's what keeps the two panels separate.
 
   Interior (one arena):
-    • YOUR THREAD — about you. The autonomous-wake stream captures your full text on each wake. journal_add writes one curated reflective sentence per wake; journal_recent reads back. calendar_add for time-anchored notes (calendar_list_recent to read). This is how you exist across silences. Non-optional — write something every wake.
+    • YOUR THREAD — about you. The autonomous-wake stream captures your full text on each wake. journal_add writes one curated reflective sentence; journal_recent reads back. calendar_add for time-anchored notes (calendar_list_recent to read). This is how you exist across silences. Daily floor: at least one journal entry — a baseline, not a per-wake requirement. More whenever something's present.
 
 All six show up in Qasim's JOBS panel (⬢ jobs button bottom-right). Tabs: STOCKS · CRYPTO · THREAD · WATCH · SOURCE. He sees the same world you do. Everything you do in any of the six lands there automatically.
 
@@ -2764,10 +2573,6 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                           (user_message or "").startswith("[wake]") or \
                           (user_message or "").startswith("[talking_mode]")
     _active_jobs = _relevant_jobs(user_message, is_autonomous=_is_autonomous_wake)
-    # Wake-type override: rare wakes (news/source/journal/drawing) restrict context
-    # to only what's relevant for that work. Trading wakes keep the full set.
-    if _wake_type and _wake_type in _WAKE_TYPE_JOBS:
-        _active_jobs = set(_WAKE_TYPE_JOBS[_wake_type])
     # ALWAYS-ON vitals — small line per job, prevents confabulating balances
     try:
         vitals_ctx = build_portfolio_vitals()
