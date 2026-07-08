@@ -9643,7 +9643,7 @@ canvas.spark{{display:block;border-radius:1px;}}
 #view-chat #talking-btn,#view-chat #autonomous-btn{{border-radius:9px;padding:9px 12px;}}
 /* SIMULATION TAB — cinematic brain hero + carded monitor grid */
 #view-sim{{background:var(--bg);padding:0;}}
-#sim-hero{{position:relative;width:100%;height:64vh;min-height:460px;flex-shrink:0;
+#sim-hero{{position:relative;width:100%;height:70vh;min-height:500px;flex-shrink:0;
   background:
     radial-gradient(ellipse 60% 70% at 50% 46%, rgba(91,110,240,0.18), rgba(91,110,240,0.04) 45%, transparent 72%),
     radial-gradient(ellipse 120% 100% at 50% 120%, rgba(20,26,54,0.9), transparent 60%),
@@ -10234,9 +10234,9 @@ function animBrain(){{
   // Constrain the brain to a fixed brain-shaped aspect ratio and CENTER it,
   // so a wide hero canvas doesn't stretch it into a flat blob. Leave a glow
   // margin (~82% of height) so it reads as a framed specimen. (2026-07-08)
-  const mg=Math.min(W,H)*0.05, BRAIN_AR=1.30;
-  let bh=H*0.94, bw=bh*BRAIN_AR;
-  if(bw>W*0.94){{ bw=W*0.94; bh=bw/BRAIN_AR; }}
+  const mg=Math.min(W,H)*0.05, BRAIN_AR=1.50;
+  let bh=H*0.96, bw=bh*BRAIN_AR;
+  if(bw>W*0.96){{ bw=W*0.96; bh=bw/BRAIN_AR; }}
   const x0=(W-bw)/2, y0=(H-bh)/2;
   bX.clearRect(0,0,W,H);
   drawSilhouette(bX,x0,y0,bw,bh);
