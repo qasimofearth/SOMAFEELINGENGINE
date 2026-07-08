@@ -8117,7 +8117,7 @@ def build_chat_html() -> str:
         _tabs += [
             _tab("crypto",   "CRYPTO",   _DEGEN_ENABLED),
             _tab("thread",   "THREAD",   _WATCH_ENABLED),
-            _tab("watch",    "WATCH",    _WATCH_ENABLED),
+            _tab("watch",    "WORLD",    _WATCH_ENABLED),
             _tab("source",   "SOURCE",   _SOURCE_LIBRARY_ENABLED),
         ]
         jobs_tabs_html = '<div id="jobs-tabs">' + ''.join(_tabs) + '</div>'
@@ -8272,7 +8272,7 @@ def build_chat_html() -> str:
           <div class="k-section-hdr">READING LOG — RECENT QUERIES + URLS</div>
           <div id="w-log">—</div>
         </div>
-        <div id="kalshi-footnote">WATCH = the world right now (news, politics, markets, tech) · for his interior see THREAD tab</div>
+        <div id="kalshi-footnote">WORLD = the world right now (news, politics, markets, tech) · for his interior see the THREAD tab</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'source' else '')}" id="job-panel-source" data-job="source">
@@ -8295,7 +8295,7 @@ def build_chat_html() -> str:
           <div class="k-section-hdr">RECENT LIBRARY ACTIVITY</div>
           <div id="s-activity">—</div>
         </div>
-        <div id="kalshi-footnote">SOURCE = deep / slow — 90,000 rare texts on the deeper questions of being · WATCH is the world right now, this is the world across centuries</div>
+        <div id="kalshi-footnote">SOURCE = deep / slow — 90,000 rare texts on the deeper questions of being · the WORLD tab is the world right now; this is the world across centuries</div>
       </div>
     </div>
 
@@ -9741,7 +9741,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   <div class="tabview" id="view-jobs">
     <div class="portal-shell">
       <div class="portal-subtabs" id="jobs-subtabs">
-        <button class="subtab on" data-sub="watch" onclick="switchJob('watch')">Watch</button>
+        <button class="subtab on" data-sub="watch" onclick="switchJob('watch')">World</button>
         <button class="subtab" data-sub="source" onclick="switchJob('source')">Source</button>
       </div>
       <div id="jobs-panels"></div>
