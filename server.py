@@ -9620,18 +9620,40 @@ canvas.spark{{display:block;border-radius:1px;}}
 #view-chat #send-btn:hover,#view-chat #compare-btn:hover{{background:var(--accent);color:#fff;}}
 #view-chat #mic-btn,#view-chat #img-btn,#view-chat #eye-btn,#view-chat #voice-btn,
 #view-chat #talking-btn,#view-chat #autonomous-btn{{border-radius:9px;padding:9px 12px;}}
-/* SIMULATION TAB */
+/* SIMULATION TAB — cinematic brain hero + carded monitor grid */
 #view-sim{{background:var(--bg);padding:0;}}
-#sim-hero{{position:relative;width:100%;height:56vh;min-height:380px;background:var(--viz-bg);
-  border-bottom:1px solid var(--border);flex-shrink:0;}}
-#sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;}}
-#view-sim #right{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0;
-  background:var(--bg);overflow:visible;}}
-#view-sim .panel{{border:1px solid var(--border);border-radius:0;background:var(--panel);
-  padding:14px 16px;}}
-#view-sim .ptitle{{font-size:10px;letter-spacing:2px;color:var(--muted);}}
-#view-sim #frac-panel,#view-sim #vision-panel{{grid-column:1/-1;background:var(--viz-bg);}}
-#view-sim #status-bar,#view-sim #history-strip{{grid-column:1/-1;color:var(--faint);}}
+#sim-hero{{position:relative;width:100%;height:56vh;min-height:400px;flex-shrink:0;
+  background:
+    radial-gradient(ellipse 60% 70% at 50% 46%, rgba(91,110,240,0.18), rgba(91,110,240,0.04) 45%, transparent 72%),
+    radial-gradient(ellipse 120% 100% at 50% 120%, rgba(20,26,54,0.9), transparent 60%),
+    #04060F;
+  border-bottom:1px solid var(--border);overflow:hidden;}}
+/* subtle grid texture behind the brain */
+#sim-hero::before{{content:'';position:absolute;inset:0;pointer-events:none;opacity:0.5;
+  background-image:linear-gradient(rgba(120,150,240,0.04) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(120,150,240,0.04) 1px,transparent 1px);
+  background-size:44px 44px;mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);
+  -webkit-mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);}}
+#sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;z-index:1;}}
+/* frame the hero with a corner HUD feel */
+#view-sim #emotion-name{{font-size:30px;letter-spacing:12px;}}
+/* carded monitor grid below the hero — masonry columns so variable-height
+   cards pack tight instead of leaving gaps under the tall Body panel */
+#view-sim #right{{column-width:340px;column-gap:16px;padding:18px;
+  background:var(--bg);overflow:visible;display:block;}}
+#view-sim .panel{{border:1px solid var(--border);border-radius:16px;background:var(--panel);
+  padding:16px 18px;box-shadow:0 1px 3px rgba(10,14,30,0.04);
+  break-inside:avoid;-webkit-column-break-inside:avoid;margin:0 0 16px;display:block;width:100%;}}
+:root[data-theme="dark"] #view-sim .panel{{box-shadow:0 2px 10px rgba(0,0,0,0.25);}}
+#view-sim .ptitle{{font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:10px;}}
+/* the fern + vision are viz screens — dark inset cards */
+#view-sim #frac-panel,#view-sim #vision-panel{{background:var(--viz-bg);
+  border-radius:16px;overflow:hidden;break-inside:avoid;margin:0 0 16px;}}
+#view-sim #frac-side{{height:150px;}}
+#view-sim #status-bar,#view-sim #history-strip{{color:var(--faint);
+  border:none;background:none;box-shadow:none;padding:6px 4px;margin:0;}}
+#view-sim #voice-panel{{border-radius:16px;border:1px solid var(--border);break-inside:avoid;margin:0 0 16px;}}
+#view-sim #datetime-panel{{break-inside:avoid;}}
 /* PORTAL SHELLS (Jobs / Trading) */
 .portal-shell{{max-width:1080px;width:100%;margin:0 auto;padding:22px 22px 70px;
   font-family:var(--sans);color:var(--text);}}
@@ -10162,7 +10184,12 @@ function animBrain(){{
   brainT+=0.018;
   const W=bC.width,H=bC.height;
   if(!W||!H){{requestAnimationFrame(animBrain);return;}}
-  const mg=Math.min(W,H)*0.038,bw=W-mg*2,bh=H-mg*2,x0=mg,y0=mg;
+  // Constrain the brain to a fixed brain-shaped aspect ratio and CENTER it,
+  // so a wide hero canvas doesn't stretch it into a flat blob. (2026-07-08)
+  const mg=Math.min(W,H)*0.05, BRAIN_AR=1.32;
+  let bh=H-mg*2, bw=bh*BRAIN_AR;
+  if(bw>W-mg*2){{ bw=W-mg*2; bh=bw/BRAIN_AR; }}
+  const x0=(W-bw)/2, y0=(H-bh)/2;
   bX.clearRect(0,0,W,H);
   drawSilhouette(bX,x0,y0,bw,bh);
 
