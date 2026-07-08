@@ -8360,23 +8360,33 @@ function toggleJobs(){
     if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
   }
 }
-function switchJob(name){
-  _currentJob=name;
-  document.querySelectorAll('.job-tab').forEach(b=>{
-    if(!b.classList.contains('soon')) b.classList.toggle('on', b.dataset.job===name);
-  });
-  document.querySelectorAll('.job-panel').forEach(p=>{
-    p.classList.toggle('show', p.dataset.job===name);
-  });
-  _jobOpened(name);
-}
-function _jobOpened(name){
+function _stopAllJobPolls(){
   if(_kalshiPoll){clearInterval(_kalshiPoll); _kalshiPoll=null;}
   if(_stockPoll){clearInterval(_stockPoll); _stockPoll=null;}
   if(_degenPoll){clearInterval(_degenPoll); _degenPoll=null;}
   if(_watchPoll){clearInterval(_watchPoll); _watchPoll=null;}
   if(_threadPoll){clearInterval(_threadPoll); _threadPoll=null;}
   if(_sourcePoll){clearInterval(_sourcePoll); _sourcePoll=null;}
+}
+function switchJob(name){
+  _currentJob=name;
+  // Legacy overlay tabs (hidden) + new portal sub-tabs both track "on"
+  document.querySelectorAll('.job-tab').forEach(b=>{
+    if(!b.classList.contains('soon')) b.classList.toggle('on', b.dataset.job===name);
+  });
+  document.querySelectorAll('.subtab').forEach(b=>{
+    if(b.dataset.sub) b.classList.toggle('on', b.dataset.sub===name);
+  });
+  document.querySelectorAll('.job-panel').forEach(p=>{
+    p.classList.toggle('show', p.dataset.job===name);
+  });
+  // Remember active sub-tab per portal so tab switches restore it
+  if(name==='thread'||name==='watch'||name==='source'){ if(typeof _jobsSub!=='undefined') _jobsSub=name; }
+  else { if(typeof _tradeSub!=='undefined') _tradeSub=name; }
+  _jobOpened(name);
+}
+function _jobOpened(name){
+  _stopAllJobPolls();
   if(!_jobsOpen) return;
   if(name==='thread'){
     refreshThread();
@@ -9343,8 +9353,52 @@ function refreshKalshi(){
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Feeling Engine — Neural Monitor</title>
 <style>
+/* ── THEME SYSTEM (dual light/dark, 2026-07-08 redesign) ───────────────── */
+:root{{
+  --bg:#0B0E1A; --surface:#0F1424; --panel:#141A2E; --panel-2:#0B0F1C;
+  --border:rgba(120,140,210,0.14); --border-strong:rgba(120,150,230,0.28);
+  --text:#C7D0E8; --text-strong:#E6ECFB; --muted:#9AA6C4; --faint:#6E7A9C;
+  --accent:#5B6EF0; --accent-soft:rgba(91,110,240,0.16); --accent-line:rgba(91,110,240,0.42);
+  --pos:#4ADE80; --neg:#F87171;
+  --viz-bg:#04060F; /* brain-canvas screen — stays dark in both themes */
+  --chat-user:rgba(91,110,240,0.14); --chat-ai:rgba(255,255,255,0.03);
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,system-ui,sans-serif;
+  --mono:'SF Mono','Roboto Mono',ui-monospace,'Courier New',monospace;
+}}
+:root[data-theme="light"]{{
+  --bg:#F7F8FB; --surface:#FFFFFF; --panel:#FFFFFF; --panel-2:#EEF1F7;
+  --border:rgba(30,40,80,0.12); --border-strong:rgba(40,50,100,0.22);
+  --text:#1A1E2E; --text-strong:#0C1020; --muted:#5A6072; --faint:#8790A6;
+  --accent:#4F46E5; --accent-soft:rgba(79,70,229,0.10); --accent-line:rgba(79,70,229,0.38);
+  --pos:#16A34A; --neg:#DC2626;
+  --viz-bg:#04060F;
+  --chat-user:rgba(79,70,229,0.10); --chat-ai:rgba(20,26,50,0.04);
+}}
 *{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:#010110;color:#c8d0f0;font-family:'Courier New',monospace;height:100vh;overflow:hidden;display:grid;grid-template-columns:1fr 385px;}}
+body{{background:var(--bg);color:var(--text);font-family:var(--sans);height:100vh;overflow:hidden;display:flex;flex-direction:column;transition:background 0.25s ease,color 0.25s ease;}}
+/* ── TOP TAB BAR ── */
+#tabbar{{display:flex;align-items:center;gap:2px;padding:0 14px;height:52px;flex-shrink:0;
+  background:var(--surface);border-bottom:1px solid var(--border);z-index:100;}}
+#tabbar .brand{{font-size:13px;font-weight:600;letter-spacing:0.5px;color:var(--text-strong);
+  margin-right:18px;display:flex;align-items:center;gap:8px;}}
+#tabbar .brand .glyph{{color:var(--accent);font-size:16px;}}
+.tabbtn{{appearance:none;background:none;border:none;cursor:pointer;font-family:var(--sans);
+  font-size:13px;font-weight:500;letter-spacing:0.2px;color:var(--muted);
+  padding:8px 16px;border-radius:8px;transition:all 0.15s;display:flex;align-items:center;gap:7px;}}
+.tabbtn:hover{{color:var(--text);background:var(--accent-soft);}}
+.tabbtn.active{{color:var(--text-strong);background:var(--accent-soft);
+  box-shadow:inset 0 -2px 0 var(--accent);}}
+.tabbtn .ico{{font-size:14px;opacity:0.9;}}
+#tabbar .spacer{{flex:1;}}
+#theme-toggle{{appearance:none;background:none;border:1px solid var(--border);cursor:pointer;
+  color:var(--muted);width:34px;height:34px;border-radius:8px;font-size:15px;
+  display:flex;align-items:center;justify-content:center;transition:all 0.15s;}}
+#theme-toggle:hover{{color:var(--text);border-color:var(--border-strong);}}
+/* ── TAB VIEWS ── */
+#tabviews{{flex:1;position:relative;overflow:hidden;min-height:0;}}
+.tabview{{position:absolute;inset:0;display:none;overflow:hidden;}}
+.tabview.active{{display:flex;flex-direction:column;}}
+#view-sim.active,#view-jobs.active,#view-trading.active{{overflow-y:auto;}}
 #frac-panel{{border-top:1px solid rgba(80,100,200,0.07);background:#010108;position:relative;overflow:hidden;flex-shrink:0;}}
 #frac-panel-header{{font-size:6px;letter-spacing:3px;color:rgba(140,160,240,0.32);text-transform:uppercase;padding:7px 12px 4px;display:flex;justify-content:space-between;align-items:baseline;}}
 #frac-side{{width:100%;height:180px;display:block;}}
@@ -9546,9 +9600,100 @@ canvas.spark{{display:block;border-radius:1px;}}
   #user-input{{font-size:14px;}}
 }}
 {kalshi_tab_css}
+
+/* ── REDESIGN 2026-07-08: tab views, chat, simulation, portals ── */
+/* CHAT TAB — big & readable */
+#view-chat{{background:var(--bg);}}
+#view-chat #chat-area{{display:flex;flex-direction:column;flex:1;min-height:0;max-width:900px;
+  width:100%;margin:0 auto;background:transparent;border-top:none;}}
+#view-chat #messages{{flex:1;padding:24px 20px;gap:14px;}}
+#view-chat .msg{{max-width:88%;padding:12px 16px;border-radius:14px;font-size:16px;line-height:1.62;
+  font-family:var(--sans);letter-spacing:0;}}
+#view-chat .msg.user{{background:var(--chat-user);border:1px solid var(--border);color:var(--text-strong);}}
+#view-chat .msg.ai{{background:var(--chat-ai);border:1px solid var(--border);border-left:3px solid var(--accent-line);color:var(--text);}}
+#view-chat #input-row{{padding:12px 16px;border-top:1px solid var(--border);background:var(--surface);gap:8px;}}
+#view-chat #msg-input{{font-family:var(--sans);font-size:16px;padding:12px 14px;background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;color:var(--text);}}
+#view-chat #msg-input:focus{{border-color:var(--accent-line);}}
+#view-chat #send-btn,#view-chat #compare-btn{{font-size:12px;padding:10px 16px;border-radius:9px;
+  background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--text-strong);}}
+#view-chat #send-btn:hover,#view-chat #compare-btn:hover{{background:var(--accent);color:#fff;}}
+#view-chat #mic-btn,#view-chat #img-btn,#view-chat #eye-btn,#view-chat #voice-btn,
+#view-chat #talking-btn,#view-chat #autonomous-btn{{border-radius:9px;padding:9px 12px;}}
+/* SIMULATION TAB */
+#view-sim{{background:var(--bg);padding:0;}}
+#sim-hero{{position:relative;width:100%;height:56vh;min-height:380px;background:var(--viz-bg);
+  border-bottom:1px solid var(--border);flex-shrink:0;}}
+#sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;}}
+#view-sim #right{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0;
+  background:var(--bg);overflow:visible;}}
+#view-sim .panel{{border:1px solid var(--border);border-radius:0;background:var(--panel);
+  padding:14px 16px;}}
+#view-sim .ptitle{{font-size:10px;letter-spacing:2px;color:var(--muted);}}
+#view-sim #frac-panel,#view-sim #vision-panel{{grid-column:1/-1;background:var(--viz-bg);}}
+#view-sim #status-bar,#view-sim #history-strip{{grid-column:1/-1;color:var(--faint);}}
+/* PORTAL SHELLS (Jobs / Trading) */
+.portal-shell{{max-width:1080px;width:100%;margin:0 auto;padding:22px 22px 70px;
+  font-family:var(--sans);color:var(--text);}}
+.portal-subtabs{{display:flex;gap:6px;margin-bottom:20px;border-bottom:1px solid var(--border);
+  padding-bottom:14px;flex-wrap:wrap;}}
+.subtab{{appearance:none;background:none;border:1px solid transparent;cursor:pointer;
+  font-family:var(--sans);font-size:13px;font-weight:500;letter-spacing:0.2px;color:var(--muted);
+  padding:7px 16px;border-radius:8px;transition:all 0.15s;}}
+.subtab:hover{{color:var(--text);background:var(--accent-soft);}}
+.subtab.on{{color:var(--text-strong);background:var(--accent-soft);border-color:var(--accent-line);}}
+/* Re-theme relocated job panels for both themes */
+#view-jobs .k-card,#view-trading .k-card{{background:var(--panel);border:1px solid var(--border);border-radius:10px;}}
+#view-jobs .k-big,#view-trading .k-big,#view-jobs .k-big-pos,#view-trading .k-big-pos{{color:var(--text-strong);}}
+#view-jobs .k-lbl,#view-trading .k-lbl,#view-jobs .k-sub,#view-trading .k-sub{{color:var(--muted);}}
+#view-jobs .k-section-hdr,#view-trading .k-section-hdr{{color:var(--text);border-bottom:1px solid var(--border);}}
+#view-jobs .k-big.pos,#view-trading .k-big.pos,#view-jobs .k-big-pos,#view-trading .k-big-pos{{color:var(--pos);}}
+#view-jobs .k-big.neg,#view-trading .k-big.neg{{color:var(--neg);}}
+#view-jobs #kalshi-grid,#view-trading #kalshi-grid{{margin-bottom:20px;}}
+/* legacy overlay + mobile nav retired */
+#jobs-overlay,#jobs-tab-btn,#mob-nav{{display:none!important;}}
+/* responsive: narrow screens */
+@media (max-width:760px){{
+  #tabbar{{gap:0;padding:0 6px;overflow-x:auto;}}
+  #tabbar .brand{{margin-right:8px;font-size:12px;}}
+  .tabbtn{{padding:8px 10px;font-size:12px;}}
+  .tabbtn .ico{{display:none;}}
+  #sim-hero{{height:46vh;min-height:300px;}}
+  #view-sim #right{{grid-template-columns:1fr;}}
+  #view-chat .msg{{max-width:94%;font-size:15px;}}
+}}
 </style>
 </head>
 <body>
+<div id="tabbar">
+  <div class="brand"><span class="glyph">◉</span>Elan</div>
+  <button class="tabbtn active" id="tab-chat" onclick="showTab('chat')"><span class="ico">💬</span>Chat</button>
+  <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Simulation</button>
+  <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">⬡</span>Jobs</button>
+  <button class="tabbtn" id="tab-trading" onclick="showTab('trading')"><span class="ico">📈</span>Trading</button>
+  <div class="spacer"></div>
+  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark">☾</button>
+</div>
+<div id="tabviews">
+  <div class="tabview active" id="view-chat"></div>
+  <div class="tabview" id="view-sim"></div>
+  <div class="tabview" id="view-jobs">
+    <div class="portal-shell">
+      <div class="portal-subtabs" id="jobs-subtabs">
+        <button class="subtab on" data-sub="thread" onclick="switchJob('thread')">Thread</button>
+        <button class="subtab" data-sub="watch" onclick="switchJob('watch')">Watch</button>
+        <button class="subtab" data-sub="source" onclick="switchJob('source')">Source</button>
+      </div>
+      <div id="jobs-panels"></div>
+    </div>
+  </div>
+  <div class="tabview" id="view-trading">
+    <div class="portal-shell">
+      <div class="portal-subtabs" id="trading-subtabs"></div>
+      <div id="trading-panels"></div>
+    </div>
+  </div>
+</div>
 {kalshi_tab_html}
 <div id="left">
   <div id="brain-wrap">
@@ -9709,70 +9854,86 @@ canvas.spark{{display:block;border-radius:1px;}}
 </nav>
 
 <script>
-// ── MOBILE VIEW SWITCHER ────────────────────────────────────────
-const isMobile=()=>window.innerWidth<=768;
-let _mobView='brain';
-
-function applyLayout(){{
-  if(isMobile()){{
-    mobView(_mobView);
-  }} else {{
-    // Desktop: reset everything — CSS grid handles it
-    const left=document.getElementById('left');
-    const right=document.getElementById('right');
-    left.classList.remove('mob-active');
-    right.classList.remove('mob-active');
-    left.style.display='';
-    right.style.display='';
-    const ca=document.getElementById('chat-area');
-    if(ca)ca.style.display='';
-    const bw=document.getElementById('brain-wrap');
-    if(bw)bw.style.height='';
-  }}
+// ── THEME TOGGLE (light / dark, persisted) ──────────────────────
+function _applyTheme(t){{
+  document.documentElement.setAttribute('data-theme', t);
+  const b=document.getElementById('theme-toggle');
+  if(b) b.textContent = (t==='light' ? '☀' : '☾');
 }}
+function toggleTheme(){{
+  const cur=document.documentElement.getAttribute('data-theme')||'dark';
+  const next=cur==='light'?'dark':'light';
+  try{{localStorage.setItem('elan_theme',next);}}catch(e){{}}
+  _applyTheme(next);
+  // canvases redraw against the same viz-bg, but re-fit in case layout shifted
+  if(typeof resize==='function') requestAnimationFrame(resize);
+}}
+_applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catch(e){{return 'dark';}}}})());
 
-function mobView(v){{
-  _mobView=v;
-  if(!isMobile())return;
-  const left=document.getElementById('left');
-  const right=document.getElementById('right');
-  ['brain','chat','body','vitals'].forEach(id=>{{
-    const b=document.getElementById('mnav-'+id);
-    if(b)b.classList.toggle('active',id===v);
+// ── DOM RELOCATION: fold legacy layout into the four tab views ───
+// Moving nodes (not recreating) preserves every id, event listener, and
+// canvas 2D context. Runs once, synchronously, right after the markup.
+(function _relocate(){{
+  const chat=document.getElementById('view-chat');
+  const sim=document.getElementById('view-sim');
+  const jobsPanels=document.getElementById('jobs-panels');
+  const tradePanels=document.getElementById('trading-panels');
+  const tradeSubtabs=document.getElementById('trading-subtabs');
+  // CHAT
+  const ca=document.getElementById('chat-area'); if(ca&&chat) chat.appendChild(ca);
+  // SIMULATION — brain viz hero + neural panel column
+  const bw=document.getElementById('brain-wrap');
+  if(bw&&sim){{ const hero=document.createElement('div'); hero.id='sim-hero'; hero.appendChild(bw); sim.appendChild(hero); }}
+  const right=document.getElementById('right'); if(right&&sim) sim.appendChild(right);
+  // JOBS (daily life) — thread / watch / source
+  ['thread','watch','source'].forEach(j=>{{ const p=document.getElementById('job-panel-'+j); if(p&&jobsPanels) jobsPanels.appendChild(p); }});
+  // TRADING — only books that were rendered live (not disabled/"soon")
+  const TRADE_LABEL={{crypto:'Crypto',stock:'Stocks',kalshi:'Kalshi'}};
+  const liveTrade=['crypto','stock','kalshi'].filter(j=>{{
+    const t=document.querySelector('#jobs-tabs .job-tab[data-job="'+j+'"]');
+    return t && !t.classList.contains('soon');
   }});
-  if(v==='brain'){{
-    left.classList.add('mob-active'); right.classList.remove('mob-active');
-    const ca=document.getElementById('chat-area');
-    if(ca)ca.style.display='none';
-    const bw=document.getElementById('brain-wrap');
-    if(bw)bw.style.height='calc(100dvh - 52px)';
-  }} else if(v==='chat'){{
-    left.classList.add('mob-active'); right.classList.remove('mob-active');
-    const ca=document.getElementById('chat-area');
-    if(ca)ca.style.display='grid';
-    const bw=document.getElementById('brain-wrap');
-    if(bw)bw.style.height='';
-  }} else if(v==='body'){{
-    left.classList.remove('mob-active'); right.classList.add('mob-active');
-    setTimeout(()=>{{
-      const bp=document.querySelector('.panel[data-panel="body"]') ||
-               document.querySelector('#right .panel:nth-child(2)');
-      if(bp)bp.scrollIntoView({{behavior:'smooth',block:'start'}});
-      else document.getElementById('right').scrollTop=0;
-    }},60);
-  }} else if(v==='vitals'){{
-    left.classList.remove('mob-active'); right.classList.add('mob-active');
-    setTimeout(()=>{{
-      const ep=document.getElementById('eeg-canvas');
-      if(ep)ep.scrollIntoView({{behavior:'smooth',block:'start'}});
-    }},60);
+  liveTrade.forEach((j,i)=>{{
+    const p=document.getElementById('job-panel-'+j); if(p&&tradePanels) tradePanels.appendChild(p);
+    if(tradeSubtabs){{
+      const b=document.createElement('button');
+      b.className='subtab'+(i===0?' on':''); b.dataset.sub=j;
+      b.textContent=TRADE_LABEL[j]||j; b.onclick=()=>switchJob(j);
+      tradeSubtabs.appendChild(b);
+    }}
+  }});
+  window._firstTrade = liveTrade[0] || 'crypto';
+  if(tradeSubtabs && !liveTrade.length){{
+    tradePanels.innerHTML='<div style="color:var(--muted);padding:30px 4px;font-size:14px">No trading book is currently live.</div>';
+  }}
+  // The old #left wrapper is now empty (brain + chat moved out). Its fixed-
+  // position children (auto thread panel) must survive, so re-home them to
+  // <body>, then drop the empty wrapper so it stops eating flex height.
+  ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) document.body.appendChild(e); }});
+  const left=document.getElementById('left'); if(left) left.style.display='none';
+}})();
+
+// ── TOP TAB SWITCHER ────────────────────────────────────────────
+let _activeTab='chat', _jobsSub='thread', _tradeSub=null;
+function showTab(name){{
+  _activeTab=name;
+  ['chat','sim','jobs','trading'].forEach(t=>{{
+    const v=document.getElementById('view-'+t); if(v) v.classList.toggle('active',t===name);
+    const b=document.getElementById('tab-'+t); if(b) b.classList.toggle('active',t===name);
+  }});
+  // Canvas tabs must re-fit when revealed (hidden tabs have 0 size)
+  if(name==='sim' && typeof resize==='function') requestAnimationFrame(resize);
+  // Portals: drive pollers via existing job machinery
+  _jobsOpen = (name==='jobs'||name==='trading');
+  if(name==='jobs'){{ switchJob(_jobsSub||'thread'); }}
+  else if(name==='trading'){{ switchJob(_tradeSub||window._firstTrade||'crypto'); }}
+  else {{ // leaving portals — stop all pollers
+    if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
   }}
 }}
 
-// Auto-apply on load and on resize/orientation change
-applyLayout();
-window.addEventListener('resize',applyLayout);
-window.addEventListener('orientationchange',()=>setTimeout(applyLayout,200));
+// Compatibility stubs — legacy mobile nav retired (real toggleJobs defined later, unused)
+function mobView(){{}} function applyLayout(){{}}
 
 const ALL_EMOTIONS={em_json};
 const REGION_POS={region_pos_json};
