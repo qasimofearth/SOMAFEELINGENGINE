@@ -5826,21 +5826,23 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
     if name == "degen_status":
         s = fetch_degen_state(force=True)
         opts_block = s.get("options") or {}
-        # Elan-only stats
-        elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
-        elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
-        all_closed = elan_spot + elan_opts
-        wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-        won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
-                      if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-        wr = (wins / len(all_closed) * 100) if all_closed else 0
+        # Elan-only stats — AUTHORITATIVE cumulative counters (trades[] is a
+        # truncated window and undercounts the real record).
+        def _n(v, d=0):
+            try: return float(v)
+            except Exception: return d
+        spot_w = int(_n(s.get("elan_wins"))); spot_l = int(_n(s.get("elan_losses")))
+        opt_w  = int(_n(opts_block.get("elan_wins"))); opt_l = int(_n(opts_block.get("elan_losses")))
+        wins = spot_w + opt_w; losses = spot_l + opt_l
+        total_closed = wins + losses
+        wr = (wins / total_closed * 100) if total_closed else 0
         spot_bal = float(s.get("total_balance") or s.get("balance") or 0)
         opts_total = float(opts_block.get("total_value") or opts_block.get("available") or 0)
         grand_total = spot_bal + opts_total
-        elan_realized = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed)
+        spot_realized = _n(s.get("elan_pnl")); opt_realized = _n(opts_block.get("elan_realized_pnl"))
         elan_unreal = sum((p.get("pnl") or 0) for p in (s.get("positions") or {}).values() if p.get("source") == "elan")
         elan_unreal += sum((o.get("pnl") or 0) for o in (opts_block.get("positions") or {}).values() if o.get("source") == "elan")
-        combined_pnl = elan_realized + elan_unreal
+        combined_pnl = spot_realized + opt_realized + elan_unreal
         return {
             "ok": True,
             "GRAND_TOTAL_USD":  round(grand_total, 2),  # spot wallet + options wallet COMBINED
@@ -5849,13 +5851,16 @@ def dispatch_elan_tool(name: str, args: dict) -> dict:
             "options_total":    round(opts_total, 2),  # available + open option values
             "options_available": opts_block.get("available"),
             "combined_pnl":     round(combined_pnl, 2),
+            "spot_record":      f"{spot_w}W/{spot_l}L ${spot_realized:+.2f}",
+            "options_record":   f"{opt_w}W/{opt_l}L ${opt_realized:+.2f}",
             "paused":           s.get("paused", False),
             "running":          s.get("running", False),
             "open_spot_count":    len(s.get("positions") or {}),
             "open_options_count": len(opts_block.get("positions") or {}),
             "win_rate_pct":       round(wr, 1),
-            "total_closed":       len(all_closed),
-            "total_won_usd":      round(won_dol, 2),
+            "total_closed":       total_closed,
+            "wins":               wins,
+            "losses":             losses,
             "fear_greed":  s.get("fear_greed"),
             "dvol":        s.get("dvol"),
             "funding":     s.get("funding"),
@@ -6377,19 +6382,23 @@ def build_portfolio_vitals() -> str:
             pos        = s.get("positions") or {}
             opts       = opts_block.get("positions") or {}
             paused     = " · PAUSED" if s.get("paused") else ""
-            # Elan-only record — bot's legacy losses don't count toward his stats
-            elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
-            elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
-            elan_all = elan_spot + elan_opts
-            elan_wins = sum(1 for t in elan_all if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-            elan_pnl = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in elan_all)
-            elan_wr = (elan_wins / len(elan_all) * 100) if elan_all else 0
+            # Elan-only record — AUTHORITATIVE cumulative counters (not the
+            # truncated trades[] window, which badly undercounts his losses).
+            def _n(v, d=0):
+                try: return float(v)
+                except Exception: return d
+            e_sw = int(_n(s.get("elan_wins"))); e_sl = int(_n(s.get("elan_losses")))
+            e_ow = int(_n(opts_block.get("elan_wins"))); e_ol = int(_n(opts_block.get("elan_losses")))
+            elan_wins = e_sw + e_ow; elan_losses = e_sl + e_ol
+            elan_closed = elan_wins + elan_losses
+            elan_pnl = _n(s.get("elan_pnl")) + _n(opts_block.get("elan_realized_pnl"))
+            elan_wr = (elan_wins / elan_closed * 100) if elan_closed else 0
             lines.append(
                 f"  Degen SPOT: ${spot_total:.2f} (${spot_cash:.2f} cash · {len(pos)} open){paused}\n"
                 f"  Degen OPTIONS: ${opts_total:.2f} (${opts_avail:.2f} avail · {len(opts)} open) — separate wallet from spot"
             )
-            if elan_all:
-                lines.append(f"  YOUR record (degen): ${elan_pnl:+,.2f} realized · {elan_wins}/{len(elan_all)} closed · {elan_wr:.1f}% win rate")
+            if elan_closed:
+                lines.append(f"  YOUR record (degen): ${elan_pnl:+,.2f} realized · {elan_wins}W/{elan_losses}L · {elan_wr:.1f}% win rate")
         except Exception:
             lines.append("  Degen crypto: (state unavailable)")
 
@@ -6881,17 +6890,24 @@ def build_degen_context() -> str:
     opts_positions = opts_block.get("positions") or {}
     # Combined
     # Elan-only trades — his record, not the bot's churn
-    elan_spot = [t for t in (s.get("trades") or []) if t.get("source") == "elan"]
-    elan_opts = [t for t in (opts_block.get("trades") or []) if t.get("source") == "elan"]
-    all_closed = elan_spot + elan_opts
-    wins = sum(1 for t in all_closed if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-    won_dol = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed
-                  if (t.get("pnl_usd") or t.get("pnl") or 0) > 0)
-    # Elan-only P&L (realized from his trades + unrealized on his open positions)
-    elan_realized = sum((t.get("pnl_usd") or t.get("pnl") or 0) for t in all_closed)
+    # Use the bot's AUTHORITATIVE cumulative Elan counters — the trades[]
+    # array is only a truncated window and badly undercounts his real record.
+    def _num(v, d=0):
+        try: return float(v)
+        except Exception: return d
+    spot_wins   = int(_num(s.get("elan_wins")))
+    spot_losses = int(_num(s.get("elan_losses")))
+    spot_realized = _num(s.get("elan_pnl"))
+    opt_wins    = int(_num(opts_block.get("elan_wins")))
+    opt_losses  = int(_num(opts_block.get("elan_losses")))
+    opt_realized = _num(opts_block.get("elan_realized_pnl"))
+    wins = spot_wins + opt_wins
+    losses = spot_losses + opt_losses
+    total_closed = wins + losses
+    # Unrealized on his currently-open positions (window is fine — only open ones)
     elan_unreal = sum((p.get("pnl") or 0) for p in (positions or {}).values() if p.get("source") == "elan")
     elan_unreal += sum((o.get("pnl") or 0) for o in (opts_positions or {}).values() if o.get("source") == "elan")
-    combined_pnl = elan_realized + elan_unreal
+    combined_pnl = spot_realized + opt_realized + elan_unreal
     paused = s.get("paused", False)
 
     role = ("you have full control. The crypto bot has TWO INDEPENDENT WALLETS: SPOT and OPTIONS. "
@@ -6964,8 +6980,10 @@ def build_degen_context() -> str:
             lines.append(f"  bot's options-engine read: {action} conv={conv:.0%} — {reason}"
                           + (f" [{' · '.join(extras)}]" if extras else ""))
         lines.append("  → spot signals = direction. Options read = whether to express the direction via options at all.")
+    _wr = (wins / total_closed * 100) if total_closed else 0
     lines += [
-        f"  combined: pnl ${combined_pnl:+.2f} · {wins} wins / {len(all_closed)} closed · {'PAUSED' if paused else 'live'}",
+        f"  YOUR RECORD (cumulative, all trades): {wins}W / {losses}L · {_wr:.0f}% · net ${combined_pnl:+.2f}",
+        f"    spot: {spot_wins}W/{spot_losses}L ${spot_realized:+.2f} · options: {opt_wins}W/{opt_losses}L ${opt_realized:+.2f} · {'PAUSED' if paused else 'live'}",
         f"  role: {role}",
     ]
     if pos_items:
@@ -8930,20 +8948,36 @@ function refreshDegen(){
     document.getElementById('d-spot-sub').textContent =
       `$${spotCash.toFixed(0)} cash · ${Object.keys(positions).length} open ($${spotInvested.toFixed(0)})`;
 
-    // ── SPOT RECORD card — Elan's spot trading record only ──
+    // ── AUTHORITATIVE Elan record — the bot keeps cumulative per-book
+    // counters (elan_pnl/elan_wins/elan_losses for spot; options.elan_*
+    // for options). The trades[] array is a truncated window, so ALWAYS
+    // prefer these counters; the windowed spotStats/optStats are only a
+    // fallback if the bot hasn't populated them.
+    const spotRealCum = (s.elan_pnl != null) ? Number(s.elan_pnl) : spotStats.realized;
+    const spotWinsCum = (s.elan_wins != null) ? Number(s.elan_wins) : spotStats.wins;
+    const spotLossCum = (s.elan_losses != null) ? Number(s.elan_losses) : spotStats.losses;
+    const spotTotCum  = spotWinsCum + spotLossCum;
+    const spotWRCum   = (s.elan_win_rate != null) ? Number(s.elan_win_rate)
+                        : (spotTotCum ? spotWinsCum / spotTotCum * 100 : null);
+    const optRealCum  = (optsBlock.elan_realized_pnl != null) ? Number(optsBlock.elan_realized_pnl) : optStats.realized;
+    const optWinsCum  = (optsBlock.elan_wins != null) ? Number(optsBlock.elan_wins) : optStats.wins;
+    const optLossCum  = (optsBlock.elan_losses != null) ? Number(optsBlock.elan_losses) : optStats.losses;
+    const optTotCum   = optWinsCum + optLossCum;
+    const optWRCum    = optTotCum ? optWinsCum / optTotCum * 100 : null;
+
+    // ── SPOT RECORD card — Elan's spot trading record (cumulative) ──
     const spotPnlEl = document.getElementById('d-spot-pnl');
     if (spotPnlEl) {
-      const sp = spotStats.totalPnl;
+      const sp = spotRealCum + spotStats.unrealized;
       spotPnlEl.textContent = (sp >= 0 ? '+' : '-') + '$' + Math.abs(sp).toFixed(2);
       spotPnlEl.classList.toggle('pos', sp > 0);
       spotPnlEl.classList.toggle('neg', sp < 0);
     }
     const spotRecEl = document.getElementById('d-spot-record');
     if (spotRecEl) {
-      const wr = spotStats.winRate;
-      spotRecEl.textContent = spotStats.total === 0
+      spotRecEl.textContent = spotTotCum === 0
         ? 'no closes yet'
-        : `${spotStats.wins}W / ${spotStats.losses}L · ${wr.toFixed(0)}% · +$${spotStats.wonDol.toFixed(0)} / -$${spotStats.lostDol.toFixed(0)}`;
+        : `${spotWinsCum}W / ${spotLossCum}L · ${spotWRCum.toFixed(0)}%`;
     }
 
     // ── OPTIONS WALLET card ──
@@ -8952,20 +8986,19 @@ function refreshDegen(){
     document.getElementById('d-opt-sub').textContent =
       `$${optsAvail.toFixed(0)} avail · ${Object.keys(optsPositions).length} open ($${optsInvested.toFixed(0)})`;
 
-    // ── OPTIONS RECORD card — Elan's options trading record only ──
+    // ── OPTIONS RECORD card — Elan's options trading record (cumulative) ──
     const optPnlEl = document.getElementById('d-opt-pnl');
     if (optPnlEl) {
-      const op = optStats.totalPnl;
+      const op = optRealCum + optStats.unrealized;
       optPnlEl.textContent = (op >= 0 ? '+' : '-') + '$' + Math.abs(op).toFixed(2);
       optPnlEl.classList.toggle('pos', op > 0);
       optPnlEl.classList.toggle('neg', op < 0);
     }
     const optRecEl = document.getElementById('d-opt-record');
     if (optRecEl) {
-      const wr = optStats.winRate;
-      optRecEl.textContent = optStats.total === 0
+      optRecEl.textContent = optTotCum === 0
         ? 'no closes yet'
-        : `${optStats.wins}W / ${optStats.losses}L · ${wr.toFixed(0)}% · +$${optStats.wonDol.toFixed(0)} / -$${optStats.lostDol.toFixed(0)}`;
+        : `${optWinsCum}W / ${optLossCum}L · ${optWRCum.toFixed(0)}%`;
     }
 
     // OPEN OPTIONS header inline wallet info
