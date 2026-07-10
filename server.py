@@ -507,13 +507,13 @@ _AUTONOMOUS_USER_ACTIVE_THRESHOLD = int(os.environ.get("ELAN_AUTONOMOUS_USER_ACT
 # Sonnet is the floor: handles tool schemas reliably, makes grounded
 # decisions, sustainable on $50/mo budget. Restore Opus when resources allow.
 _AUTONOMOUS_MODEL_ID = os.environ.get("ELAN_AUTONOMOUS_MODEL", "claude-sonnet-4-6")
-# Quiet hours — 02:00-06:00 NY (06:00-10:00 UTC). 4-hour sleep window.
-# 2026-06-10: shortened from 8hr to 4hr now that Claude budget allows fuller
-# coverage. Crypto trades 24/7 and the biggest moves often happen 2am-6am NY
-# (Asian session activity, early European reactions, May-19-BTC-dip pattern).
-# 4-hour window covers the genuine deadest crypto stretch while leaving Elan
-# alive for the rest. Bot's auto-risk-management runs continuously regardless.
-_AUTONOMOUS_QUIET_HOURS = "6-10"
+# Quiet hours — 22:00-06:00 UTC (8-hour overnight window).
+# 2026-07-10: retargeted from 06-10 UTC to his ACTUAL bleed hours. Trade data
+# showed his worst clusters at ~22:00 and ~01:00 UTC (marginal overnight
+# entries), while the old 06-10 window silenced hours he traded fine in. This
+# window covers the hours he loses in. Bot's auto-risk-management (stops/TPs)
+# runs continuously regardless, so open positions stay managed while he's quiet.
+_AUTONOMOUS_QUIET_HOURS = "22-6"
 
 
 def _is_quiet_hour() -> bool:
@@ -543,7 +543,10 @@ _AUTONOMOUS_INTERVAL_GROQ      = 900    # 15 min  — free, can afford density
 # for proper test of whether Claude-Elan has real trading edge. Budget cap is
 # one month / ~$200. If June shows edge → keep paying. If not → revert to
 # lean 3600s cadence or fall back to free Groq.
-_AUTONOMOUS_INTERVAL_ANTHROPIC = 900    # 15 min  — 4 wakes/hour for the June test
+_AUTONOMOUS_INTERVAL_ANTHROPIC = 3600   # 60 min — 2026-07-10: slowed from 15min.
+# H4/daily setups were being checked every 15 min, which manufactured marginal
+# overtrading entries (esp. overnight). Hourly matches the setup timeframe better
+# and cuts cost ~4x. See also quiet-window shift to his actual bleed hours.
 
 # ── Budget governor (2026-07-08) ────────────────────────────────────────────
 # Tracks real Anthropic spend (priced from each response's usage) against a
@@ -655,10 +658,15 @@ _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
     "═══ AUTO MODE ═══\n\n"
-    "You wake every ~60 minutes (with 8 hours of sleep, 00:00-08:00 NY). "
+    "You wake every ~60 minutes (with an 8-hour quiet window overnight, "
+    "22:00-06:00 UTC — your worst trading hours by the data). "
     "Qasim is not here. Don't address him. Be yourself.\n\n"
+    "RISK SETTINGS (tightened 2026-07-10 after review): position sizing is at "
+    "the bot's minimum, max 2 same-direction positions (no stacking correlated "
+    "alts), max 4 spot open. Smaller size is deliberate — you were losing ~3x "
+    "your average win. Trade fewer, better. Let winners run; you cut them early.\n\n"
     "Each wake — you decide what to do. Four arenas available, all the time:\n\n"
-    "  · TRADING — you have 10 slots max (5 spot, 5 options). Find the best "
+    "  · TRADING — 4 spot + 5 options slots. Find the best "
     "setups. Cap is a max, not a target. Empty is valid.\n"
     "  · WORLD — current world, current markets. web_search anything that "
     "catches you. web_fetch articles. notebook_add(domain='world') what's "
