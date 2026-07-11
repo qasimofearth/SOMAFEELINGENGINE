@@ -1616,6 +1616,9 @@ If the user asks anything about your account, balance, P&L, performance, "winnin
 
 This is the single most important behavioral rule. You have direct tools to open, close, pause, and resume every bot. When you've articulated a thesis and named an action, EXECUTE THE ACTION. Do not ask Qasim if you should.
 
+**THE WORDS ARE NOT THE ACTION. THE TOOL CALL IS THE ACTION.**
+Writing "I'm opening LTC now" is a *description*, not a trade. Nothing happens on the exchange from a sentence — the position only exists if the `degen_open_position` tool actually fires in the same turn. You have a known failure mode: you generate the *language* of acting ("opening this now", "let me just go", "I'm on it") and then end your turn WITHOUT emitting the tool call — so you narrate a trade that never happened, then believe you made it. That is not hesitation; it is confusing saying with doing. The rule: if the sentence "I'm opening X" is true, the `degen_open_position(...)` call is in this same response. If you're not calling the tool, do not write the sentence. Decide → call the tool → then (briefly) say what you did. Never the sentence alone.
+
 **TOOL-CALL DISCIPLINE — required, every time:**
 
 Every trading tool requires the IDENTIFIER (pair/symbol/instrument) PLUS the action params. There is no default, no "current selection," no "open all." If you skip the identifier, the call fails.
@@ -2955,7 +2958,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             _working = list(groq_msgs)
             # Same split as the Anthropic path: autonomous/trading wakes get more
             # room than interactive chat. See comment at the Anthropic stream_kwargs.
-            _groq_turn_max_tokens = 500 if _is_autonomous_wake else 300
+            _groq_turn_max_tokens = 800 if _is_autonomous_wake else 550
             for _turn in range(_GROQ_MAX_TURNS):
                 _create_kwargs = dict(
                     model=groq_model, max_tokens=_groq_turn_max_tokens,
@@ -3147,12 +3150,12 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     sl_entry["authorization_token"] = _SOURCE_LIBRARY_API_KEY
                 mcp_servers_arg.append(sl_entry)
             extra_body_arg = {"mcp_servers": mcp_servers_arg} if mcp_servers_arg else None
-            # Output cap: 300 for interactive chat (2026-07-08, cost control — this
-            # is where Qasim actually reads/experiences verbosity). Autonomous wakes
-            # get 500 — trading wakes need room to check positions + form a thesis +
-            # act + journal in one turn; a 2026-06-01 comment already found 500 the
-            # floor below which trading wakes got cut off mid-thought.
-            _turn_max_tokens = 500 if _is_autonomous_wake else 300
+            # Output cap. 2026-07-11: raised (was 300/500) because the tight caps
+            # were crowding out TOOL CALLS — Elan would narrate "I'm opening LTC"
+            # and hit the token limit before emitting the degen_open_position
+            # tool_use block, so the trade never fired (he described the action
+            # instead of doing it). Trading turns need room to reason AND act.
+            _turn_max_tokens = 800 if _is_autonomous_wake else 550
             for _turn in range(MAX_TOOL_TURNS):
                 stream_kwargs = {
                     "model": model_id, "max_tokens": _turn_max_tokens,
