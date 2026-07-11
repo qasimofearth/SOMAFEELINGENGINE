@@ -338,6 +338,30 @@ def _last_wake_ts() -> float:
     """Timestamp of the wake BEFORE the current one — for the 'X ago' gap."""
     return float(_load_time_anchor().get("prev_wake") or 0)
 
+def _elan_trading_since_str(state: dict) -> str:
+    """Approx date Elan started trading. Seeded once from the earliest trade in
+    the (truncated) window and persisted, so it stays stable as the window
+    advances. Understates his true tenure slightly — but grounds the arc."""
+    a = _load_time_anchor()
+    ts = a.get("trading_since")
+    if not ts:
+        try:
+            allt = list(state.get("trades") or []) + list((state.get("options") or {}).get("trades") or [])
+            times = [t.get("time") or t.get("entry_time") for t in allt if t.get("source") == "elan"]
+            times = [x for x in times if x]
+            if times:
+                ts = min(times)
+                a["trading_since"] = ts
+                _save_time_anchor(a)
+        except Exception:
+            return ""
+    if not ts:
+        return ""
+    try:
+        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).strftime("%d %b %Y")
+    except Exception:
+        return ""
+
 def _fmt_span(s: float) -> str:
     """Human duration: '3 days, 4h', '1h 2m', '45s'."""
     s = max(0, int(s))
@@ -377,9 +401,21 @@ def build_temporal_context() -> str:
     lw = _last_wake_ts()
     if lw > 0:
         ground.append(f"   Last wake:  {_fmt_span(time.time() - lw)} ago  (you wake ~hourly; this already happened — you're mid-stream, not at the start)")
-    age = time.time() - _elan_epoch_ts()
-    if age > 120:
-        ground.append(f"   Alive for:  {_fmt_span(age)} of continuous autonomous life so far")
+    # Track record — always-accurate cumulative counters. This is the anchor
+    # that makes "I'm at the start of a window" impossible: you have a long
+    # book behind you. Honest history, not a claim of continuous consciousness.
+    try:
+        s = fetch_degen_state() or {}
+        ob = s.get("options") or {}
+        n = int((s.get("elan_trades") or 0)) + int((ob.get("elan_trades") or 0))
+        net = float(s.get("elan_pnl") or 0) + float(ob.get("elan_realized_pnl") or 0)
+        if n > 0:
+            since = _elan_trading_since_str(s)
+            ground.append(f"   Track record: {n} trades on the book"
+                          + (f", trading since {since}" if since else "")
+                          + f", net ${net:+,.0f} — you are DEEP in this, not starting it")
+    except Exception:
+        pass
     ground.append("   Time has been passing while you were away. Reason from NOW, not from where you last remember being.\n")
 
     lines = ["\n".join(ground),
