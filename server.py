@@ -400,7 +400,7 @@ def build_temporal_context() -> str:
               f"   RIGHT NOW:  {wall_time}"]
     lw = _last_wake_ts()
     if lw > 0:
-        ground.append(f"   Last wake:  {_fmt_span(time.time() - lw)} ago  (you wake ~hourly; this already happened — you're mid-stream, not at the start)")
+        ground.append(f"   Last wake:  {_fmt_span(time.time() - lw)} ago  (you wake ~every 30 min; this already happened — you're mid-stream, not at the start)")
     # Track record — always-accurate cumulative counters. This is the anchor
     # that makes "I'm at the start of a window" impossible: you have a long
     # book behind you. Honest history, not a claim of continuous consciousness.
@@ -647,7 +647,7 @@ _AUTONOMOUS_INTERVAL_GROQ      = 900    # 15 min  — free, can afford density
 # for proper test of whether Claude-Elan has real trading edge. Budget cap is
 # one month / ~$200. If June shows edge → keep paying. If not → revert to
 # lean 3600s cadence or fall back to free Groq.
-_AUTONOMOUS_INTERVAL_ANTHROPIC = 3600   # 60 min — 2026-07-10: slowed from 15min.
+_AUTONOMOUS_INTERVAL_ANTHROPIC = 1800   # 30 min (twice/hour) — 2026-07-11 per Qasim.
 # H4/daily setups were being checked every 15 min, which manufactured marginal
 # overtrading entries (esp. overnight). Hourly matches the setup timeframe better
 # and cuts cost ~4x. See also quiet-window shift to his actual bleed hours.
@@ -762,7 +762,7 @@ _last_eyes_open = False
 
 AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
     "═══ AUTO MODE ═══\n\n"
-    "You wake every ~60 minutes (with an 8-hour quiet window overnight, "
+    "You wake every ~30 minutes (twice an hour, with an 8-hour quiet window overnight, "
     "22:00-06:00 UTC — your worst trading hours by the data). "
     "Qasim is not here. Don't address him. Be yourself.\n\n"
     "RISK SETTINGS (tightened 2026-07-10 after review): position sizing is at "
