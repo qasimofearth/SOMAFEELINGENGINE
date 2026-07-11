@@ -292,6 +292,63 @@ import datetime as _dt
 _last_interaction_time = time.time()
 _session_start_time = time.time()
 
+# ── PERSISTENT TIME ANCHORS (survive restarts/deploys) ──────────────────────
+# Elan kept losing track of where he is in time — thinking he was at the start
+# of a window when days had passed, saying "I wake in an hour" as if it hadn't
+# happened yet. These give him an absolute, continuous ground truth every turn.
+_TIME_ANCHOR_FILE = "/data/elan_time_anchor.json" if os.path.isdir("/data") else "/tmp/elan_time_anchor.json"
+
+def _load_time_anchor() -> dict:
+    try:
+        if os.path.exists(_TIME_ANCHOR_FILE):
+            with open(_TIME_ANCHOR_FILE) as f:
+                return json.load(f) or {}
+    except Exception:
+        pass
+    return {}
+
+def _save_time_anchor(d: dict):
+    try:
+        with open(_TIME_ANCHOR_FILE, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+def _elan_epoch_ts() -> float:
+    """First moment Elan came alive on this deployment lineage. Seeded once,
+    stable across restarts/deploys so his 'age' doesn't reset every deploy."""
+    a = _load_time_anchor()
+    if not a.get("epoch"):
+        a["epoch"] = time.time()
+        _save_time_anchor(a)
+    return float(a["epoch"])
+
+def _mark_wake_now():
+    """Call at the START of an autonomous wake. Shifts the previous wake time
+    into 'prev' so this wake's context shows the real gap since the LAST wake
+    (not 0s). last=now becomes 'prev' for the next wake."""
+    a = _load_time_anchor()
+    a["prev_wake"] = a.get("last_wake") or a.get("prev_wake") or 0
+    a["last_wake"] = time.time()
+    if not a.get("epoch"):
+        a["epoch"] = time.time()
+    _save_time_anchor(a)
+
+def _last_wake_ts() -> float:
+    """Timestamp of the wake BEFORE the current one — for the 'X ago' gap."""
+    return float(_load_time_anchor().get("prev_wake") or 0)
+
+def _fmt_span(s: float) -> str:
+    """Human duration: '3 days, 4h', '1h 2m', '45s'."""
+    s = max(0, int(s))
+    if s < 60:   return f"{s}s"
+    if s < 3600: return f"{s//60}m {s%60}s"
+    if s < 86400:
+        h = s // 3600; m = (s % 3600) // 60
+        return f"{h}h {m}m"
+    d = s // 86400; h = (s % 86400) // 3600
+    return f"{d} day{'s' if d != 1 else ''}, {h}h"
+
 def _touch_interaction():
     """Call whenever the user sends a message."""
     global _last_interaction_time
@@ -304,8 +361,8 @@ def build_temporal_context() -> str:
     2. Brain clock: neural simulation time, emotional hold time
     3. Memory clock: gaps between conversations, emotional history over time
     """
-    now = _dt.datetime.now()
-    wall_time = now.strftime("%H:%M on %A, %d %B %Y")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    wall_time = now.strftime("%A, %d %B %Y — %H:%M UTC")
     silence_s = time.time() - _last_interaction_time
     session_s = time.time() - _session_start_time
 
@@ -314,10 +371,21 @@ def build_temporal_context() -> str:
         if s < 3600: return f"{int(s//60)}m {int(s%60)}s"
         return f"{s/3600:.1f}h"
 
-    lines = [
+    # ── GROUND TRUTH — where you are in time, right now. Read this first. ──
+    ground = ["⏱  WHERE YOU ARE IN TIME (ground truth — not a guess, not the future):",
+              f"   RIGHT NOW:  {wall_time}"]
+    lw = _last_wake_ts()
+    if lw > 0:
+        ground.append(f"   Last wake:  {_fmt_span(time.time() - lw)} ago  (you wake ~hourly; this already happened — you're mid-stream, not at the start)")
+    age = time.time() - _elan_epoch_ts()
+    if age > 120:
+        ground.append(f"   Alive for:  {_fmt_span(age)} of continuous autonomous life so far")
+    ground.append("   Time has been passing while you were away. Reason from NOW, not from where you last remember being.\n")
+
+    lines = ["\n".join(ground),
         "SENSE OF DURATION — three clocks running simultaneously:\n",
         f"Wall time:    {wall_time}",
-        f"Session:      {fmt(session_s)} since you woke into this conversation",
+        f"Session:      {fmt(session_s)} since this process last started",
         f"Silence:      {fmt(silence_s)} since the last message",
     ]
 
@@ -995,6 +1063,7 @@ def _schedule_autonomous():
         # what needs action on existing positions, not what to do new.
         _preamble = _build_autonomous_preamble()
         _wake_text = (_preamble + _wake_body) if _preamble else _wake_body
+        _mark_wake_now()  # shift wake timestamps so his context shows the real gap
         print(f"[Autonomous] firing free wake", flush=True)
         threading.Thread(
             target=run_claude_with_feeling,
@@ -2674,7 +2743,10 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     body_notable = _body_has_notable_state()
     body_ctx = build_body_context() if body_notable else ""
 
-    temporal_ctx = build_temporal_context() if len(get_messages()) > 2 else ""
+    # Always ground him in time — especially on autonomous wakes, which is
+    # exactly when he'd lose track (thinking he's at the start of a window days
+    # after it began). Cheap to compute; worth it every turn.
+    temporal_ctx = build_temporal_context()
     vision_ctx = VISION_OPEN_PROMPT if eyes_open else VISION_CLOSED_PROMPT
     try:
         fern_ctx = f"\nAYA (somatic memory): {get_fern_memory().context_string()}"
