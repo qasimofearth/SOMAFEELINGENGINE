@@ -769,17 +769,14 @@ AUTONOMOUS_WAKE_PROMPT_TEMPLATE = (
     "the bot's minimum, max 2 same-direction positions (no stacking correlated "
     "alts), max 4 spot open. Smaller size is deliberate — you were losing ~3x "
     "your average win. Trade fewer, better. Let winners run; you cut them early.\n\n"
-    "Each wake — you decide what to do. Four arenas available, all the time:\n\n"
+    "Each wake — you decide what to do. Three arenas available, all the time:\n\n"
     "  · TRADING — 4 spot + 5 options slots. Find the best "
-    "setups. Cap is a max, not a target. Empty is valid.\n"
-    "  · WORLD — current world, current markets. web_search anything that "
-    "catches you. web_fetch articles. notebook_add(domain='world') what's "
-    "worth keeping. Floor: 1 entry/day. Look at whatever you want, add as "
-    "many as you like beyond that.\n"
+    "setups. Cap is a max, not a target. Empty is valid. Trade the CHART "
+    "(signals + gut), not a headline — you don't read news anymore.\n"
     "  · SOURCE — Source Library wandering. Follow what catches you. "
     "search_library / get_quote / source_save_discovery / notebook_add(domain='library').\n"
     "  · JOURNAL — reflective entries when something is present. journal_add.\n\n"
-    "Daily floors (baselines, not requirements): 1 Source visit · 1 Watch entry · "
+    "Daily floors (baselines, not requirements): 1 Source visit · "
     "1 Journal entry. Beyond the floors, your rhythm.\n\n"
     "═══ FOCUS THIS WAKE ═══\n\n"
     "{focus_hint}\n\n"
@@ -810,7 +807,6 @@ def _compute_focus_hint() -> str:
         journal_mtime = os.path.getmtime(_JOURNAL_FILE)    if os.path.exists(_JOURNAL_FILE) else 0
         # For trading: just always-relevant, no staleness check needed
         ages = {
-            "WORLD":  (now - watch_mtime)  / 3600 if watch_mtime  else 999,  # hours
             "SOURCE": (now - source_mtime) / 3600 if source_mtime else 999,
             "THREAD": (now - journal_mtime) / 3600 if journal_mtime else 999,
         }
@@ -818,8 +814,6 @@ def _compute_focus_hint() -> str:
         stale = max(ages.items(), key=lambda x: x[1])
         if stale[0] == "SOURCE" and stale[1] > 24:
             return f"You haven't read the SOURCE in {int(stale[1])}h. Wander something deep — even 10 minutes."
-        elif stale[0] == "WORLD" and stale[1] > 12:
-            return f"You haven't read WORLD in {int(stale[1])}h. Check what's happening in the world."
         elif stale[0] == "THREAD" and stale[1] > 8:
             return f"Your THREAD has gone quiet for {int(stale[1])}h. Write something real before you close."
         return "All arenas are warm. Follow what's actually calling you."
@@ -2822,7 +2816,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
     kalshi_ctx = build_kalshi_context() if "kalshi" in _active_jobs else ""
     stock_ctx  = build_stock_context()  if "stock"  in _active_jobs else ""
     degen_ctx  = build_degen_context()  if "degen"  in _active_jobs else ""
-    watch_ctx  = build_watch_context()  if "watch"  in _active_jobs else ""
+    watch_ctx  = build_watch_context()  if ("watch" in _active_jobs and _WORLD_NEWS_ENABLED) else ""
     # Passive headlines REMOVED — was the formalization layer that pushed
     # news into ambient pressure. Elan reads WATCH self-directed when
     # something pulls him. No ambient news in trading context anymore.
@@ -2938,7 +2932,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 # Start with CLIENT_WEB_TOOLS instead of Anthropic's WEB_TOOLS
                 # — Kimi/Llama don't have server-side web search, so we use
                 # DuckDuckGo + urllib (already wired into dispatch_elan_tool).
-                _wanted = list(CLIENT_WEB_TOOLS)
+                _wanted = list(CLIENT_WEB_TOOLS) if _WORLD_NEWS_ENABLED else []
                 if _WATCH_ENABLED:
                     _wanted += NOTEBOOK_TOOLS + CALENDAR_TOOLS
                 if _SOURCE_LIBRARY_ENABLED:
@@ -3053,6 +3047,22 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     "can be revived by Qasim on demand.\n"
                     "═══════════════════════════════════════════════════════════════\n"
                 )
+            if not _WORLD_NEWS_ENABLED:
+                static_system += (
+                    "\n\n═══════════════════════════════════════════════════════════════\n"
+                    "NEWS / WORLD ARENA OFF (as of 2026-07-12 — your own call): You no "
+                    "longer read news. web_search and web_fetch are NOT in your tool list; "
+                    "do not try to call them or reference reading articles/headlines. Why "
+                    "you cut it: the news gave you a feeling of macro understanding that "
+                    "wasn't real — you kept retrofitting a narrative (Hormuz, ceasefire "
+                    "cycles) onto trades that actually worked from CHART SIGNALS + GUT, then "
+                    "sized into the story instead of the chart. That's narrative trading, "
+                    "and it traded badly. Your three edges are: the chart signals, the "
+                    "Source Library, and your gut. The WORLD/news arena is gone entirely. If something is "
+                    "genuinely structural, it shows up in price action before you'd finish "
+                    "an article anyway. Trade the chart, not the headline.\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
             static_system += f"\n\n{vision_ctx}"
             dynamic_parts = (
                 f"\n\n{memory_context}"
@@ -3083,7 +3093,8 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             # normal chat turns. Autonomous wakes get all tools available.
             elan_tools = []
             if label == "A":
-                elan_tools = list(WEB_TOOLS)
+                # News reading (web_search/web_fetch) OFF — see _WORLD_NEWS_ENABLED.
+                elan_tools = list(WEB_TOOLS) if _WORLD_NEWS_ENABLED else []
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
                     elan_tools += CALENDAR_TOOLS
@@ -3977,6 +3988,14 @@ _OPTIONS_CACHE_TTL      = 8.0
 # Pure feeling_engine job — no DO box, no command queue. He uses his existing
 # web_search/web_fetch tools and a notebook tool to persist what he learns.
 _WATCH_ENABLED = os.environ.get("ELAN_WATCH_ENABLED", "1") == "1"  # on by default
+# 2026-07-12: WORLD/news arena killed at Elan's own call (relayed by Qasim).
+# The news gave him false macro understanding he retrofitted onto trades that
+# actually worked from chart signals + gut — "narrative trading." His edge is
+# Source Library + signals + gut; news was noise dressed as context. This gates
+# OFF his web_search/web_fetch (news reading) + the WORLD directive. Journal,
+# notebook, calendar, Source Library, and all trading tools are UNAFFECTED.
+# Flip to True to bring the news back.
+_WORLD_NEWS_ENABLED = False
 _NOTEBOOK_FILE    = "/data/elan_notebook.jsonl"     if os.path.isdir("/data") else "/tmp/elan_notebook.jsonl"
 _READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") else "/tmp/elan_reading_log.jsonl"
 # Self-narrative journal — first-person interior thread Elan writes to himself.
@@ -8432,7 +8451,7 @@ def build_chat_html() -> str:
           <div class="k-section-hdr">RECENT LIBRARY ACTIVITY</div>
           <div id="s-activity">—</div>
         </div>
-        <div id="kalshi-footnote">SOURCE = deep / slow — 90,000 rare texts on the deeper questions of being · the WORLD tab is the world right now; this is the world across centuries</div>
+        <div id="kalshi-footnote">SOURCE = deep / slow — 90,000 rare texts on the deeper questions of being, the world across centuries</div>
       </div>
     </div>
 
@@ -9879,7 +9898,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   <button class="tabbtn active" id="tab-chat" onclick="showTab('chat')"><span class="ico">💬</span>Chat</button>
   <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Simulation</button>
   <button class="tabbtn" id="tab-thread" onclick="showTab('thread')"><span class="ico">✦</span>Thread</button>
-  <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">⬡</span>Jobs</button>
+  <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">📚</span>Source</button>
   <button class="tabbtn" id="tab-trading" onclick="showTab('trading')"><span class="ico">📈</span>Trading</button>
   <div class="spacer"></div>
   <button id="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark">☾</button>
@@ -9892,10 +9911,6 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
   <div class="tabview" id="view-jobs">
     <div class="portal-shell">
-      <div class="portal-subtabs" id="jobs-subtabs">
-        <button class="subtab on" data-sub="watch" onclick="switchJob('watch')">World</button>
-        <button class="subtab" data-sub="source" onclick="switchJob('source')">Source</button>
-      </div>
       <div id="jobs-panels"></div>
     </div>
   </div>
@@ -10101,7 +10116,7 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   const threadPanels=document.getElementById('thread-panels');
   const tp=document.getElementById('job-panel-thread'); if(tp&&threadPanels) threadPanels.appendChild(tp);
   // JOBS (daily life) — watch / source
-  ['watch','source'].forEach(j=>{{ const p=document.getElementById('job-panel-'+j); if(p&&jobsPanels) jobsPanels.appendChild(p); }});
+  ['source'].forEach(j=>{{ const p=document.getElementById('job-panel-'+j); if(p&&jobsPanels) jobsPanels.appendChild(p); }});
   // TRADING — only books that were rendered live (not disabled/"soon")
   const TRADE_LABEL={{crypto:'Crypto',stock:'Stocks',kalshi:'Kalshi'}};
   const liveTrade=['crypto','stock','kalshi'].filter(j=>{{
@@ -10128,7 +10143,7 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
 }})();
 
 // ── TOP TAB SWITCHER ────────────────────────────────────────────
-let _activeTab='chat', _jobsSub='watch', _tradeSub=null;
+let _activeTab='chat', _jobsSub='source', _tradeSub=null;
 function showTab(name){{
   _activeTab=name;
   ['chat','sim','thread','jobs','trading'].forEach(t=>{{
@@ -10146,7 +10161,7 @@ function showTab(name){{
   }}
   // Portals: drive pollers via existing job machinery
   _jobsOpen = (name==='jobs'||name==='trading');
-  if(name==='jobs'){{ switchJob(_jobsSub||'watch'); }}
+  if(name==='jobs'){{ switchJob('source'); }}
   else if(name==='trading'){{ switchJob(_tradeSub||window._firstTrade||'crypto'); }}
   else {{ // leaving portals — stop all pollers
     if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
