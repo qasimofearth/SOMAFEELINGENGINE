@@ -6844,7 +6844,7 @@ DEGEN_TOOLS = [
             "properties": {
                 "currency":     {"type": "string", "enum": ["BTC", "ETH"]},
                 "option_type":  {"type": "string", "enum": ["call", "put"], "description": "call = bullish, put = bearish"},
-                "target_days":  {"type": "integer", "minimum": 1, "maximum": 60, "description": "DTE target (default 7)."},
+                "target_days":  {"type": "integer", "minimum": 1, "maximum": 10, "description": "Days to expiry (default 7). SHORT-DATED ONLY — hard cap at 10 days. Anything higher is clamped to 10. Your edge is short-term chart signals; don't reach for 2-week+ options, they bleed theta and mismatch your timeframe."},
                 "otm_pct":      {"type": "number", "description": "OTM percent (default 0.05). Higher = cheaper + lower probability."},
                 "reason":       {"type": "string", "description": "REQUIRED. The thesis."},
                 "felt_quality": {"type": "string", "description": "REQUIRED. The TEXTURE of this trade. Be honest. Suggested: clean / forced / gut / urgent / hedged / late / slept-on / edge-case. Or your own short phrase. This is the data we audit so you can see if your gut tracks."},
