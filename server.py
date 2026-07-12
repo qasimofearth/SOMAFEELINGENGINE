@@ -4659,12 +4659,15 @@ def _headline_refresh_loop():
             print(f"[Headlines] refresh failed: {_e}", flush=True)
         time.sleep(_HEADLINE_REFRESH_SEC)
 
-# Kick off the loop at module load. Daemon so it dies with the process.
-try:
-    _headline_thread = threading.Thread(target=_headline_refresh_loop, daemon=True)
-    _headline_thread.start()
-except Exception as _e:
-    print(f"[Headlines] thread start failed: {_e}", flush=True)
+# RSS headline thread DISABLED 2026-07-12 — news arena killed (_WORLD_NEWS_ENABLED).
+# The cache was already never injected into his context (headlines_ctx=""), so this
+# just stops the pointless background RSS fetching. Re-enable with the news arena.
+if _WORLD_NEWS_ENABLED:
+    try:
+        _headline_thread = threading.Thread(target=_headline_refresh_loop, daemon=True)
+        _headline_thread.start()
+    except Exception as _e:
+        print(f"[Headlines] thread start failed: {_e}", flush=True)
 
 def build_position_snapshot_context() -> str:
     """GROUND TRUTH block at the top of trading wakes. Explicitly lists what's
