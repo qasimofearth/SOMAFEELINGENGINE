@@ -12665,8 +12665,26 @@ async function _fetchAndQueueSentence(sentence){{
   if(!ttsQueueRunning)_playTTSQueue();
 }}
 
+// Strip markdown / formatting so he doesn't SAY the symbols ("asterisk
+// asterisk"). Normal punctuation (. , ? ! ; : — …) stays — Kokoro reads those
+// as prosody/pauses, not words. We only remove the characters it vocalizes.
+function _cleanForTTS(t){{
+  return (t||'')
+    .replace(/```[\s\S]*?```/g,' ')                 // fenced code blocks
+    .replace(/`([^`]*)`/g,'$1')                       // inline code
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g,'$1')         // [label](url) / images -> label
+    .replace(/https?:\/\/\S+/g,' ')                   // bare URLs
+    .replace(/^\s*#{{1,6}}\s*/gm,'')                   // heading markers
+    .replace(/^\s*[-*+•]\s+/gm,'')                     // list bullets
+    .replace(/[*_~#>`|^]/g,'')                         // emphasis / quote / table / etc.
+    .replace(/\s{{2,}}/g,' ')                          // collapse whitespace
+    .trim();
+}}
+
 function _queueSentence(sentence){{
   if(!voiceEnabled||!sentence.trim())return;
+  sentence=_cleanForTTS(sentence);
+  if(!sentence.trim())return;
   ttsFetchCount++;
   _fetchAndQueueSentence(sentence);
 }}
