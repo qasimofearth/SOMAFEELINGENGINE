@@ -9834,14 +9834,11 @@ canvas.spark{{display:block;border-radius:1px;}}
 #talk-orb-wrap{{position:relative;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:12px;padding:26px 0 30px;background:var(--viz-bg);
   border-bottom:1px solid var(--border);}}
-#talk-orb{{width:230px;height:230px;cursor:pointer;display:block;
-  filter:drop-shadow(0 0 30px rgba(91,110,240,0.25));
-  transition:filter 0.6s ease;}}
-#talk-orb.live{{filter:drop-shadow(0 0 46px rgba(91,110,240,0.55));}}
+#talk-orb{{width:320px;height:320px;cursor:pointer;display:block;}}
 #talk-orb-label{{font-size:11px;letter-spacing:3px;text-transform:uppercase;
-  color:var(--muted);user-select:none;transition:color 0.4s ease;}}
+  color:var(--muted);user-select:none;transition:color 0.4s ease;margin-top:-18px;}}
 #talk-orb-wrap.live #talk-orb-label{{color:var(--text-strong);}}
-@media (max-width:760px){{ #talk-orb{{width:180px;height:180px;}} }}
+@media (max-width:760px){{ #talk-orb{{width:240px;height:240px;}} }}
 /* readable corner HUD on the big hero */
 #sim-hero #brain-stats{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;left:18px!important;}}
 #sim-hero #sync-display{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;right:18px!important;}}
@@ -10181,7 +10178,7 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
     const S=cv.clientWidth||0;
     if(!S){{ requestAnimationFrame(frame); return; }}
     if(cv.width !== Math.round(S*Math.min(2,window.devicePixelRatio||1))) fit();
-    const cx=S/2, cy=S/2, R=S*0.30;
+    const cx=S/2, cy=S/2, R=S*0.20;
     const cs=(typeof curState!=='undefined' && curState) ? curState : {{}};
     const arousal=Math.max(0,Math.min(1,(cs.arousal!==undefined?cs.arousal:0.4)));
     const c=(cs.rgb && cs.rgb.length===3)?cs.rgb:[96,120,240];
@@ -10205,14 +10202,14 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
     ctx.globalCompositeOperation='lighter';
 
     // outer halo
-    let h=ctx.createRadialGradient(cx,cy,R*0.3,cx,cy,R*2.4);
+    let h=ctx.createRadialGradient(cx,cy,R*0.3,cx,cy,R*2.3);
     h.addColorStop(0,col(0.10+lv*0.24)); h.addColorStop(0.5,col(0.04+lv*0.10)); h.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=h; ctx.beginPath(); ctx.arc(cx,cy,R*2.4,0,7); ctx.fill();
+    ctx.fillStyle=h; ctx.beginPath(); ctx.arc(cx,cy,R*2.3,0,7); ctx.fill();
 
     // expanding ripple rings
     for(let i=0;i<5;i++){{
       const ph=(t*(0.22+lv*0.6)+i*0.6)%1;
-      const rr=R*(0.92+ph*1.5)*breath;
+      const rr=R*(0.9+ph*0.9)*breath;
       ctx.beginPath(); ctx.arc(cx,cy,rr,0,7);
       ctx.strokeStyle=col((1-ph)*(0.05+lv*0.28)); ctx.lineWidth=1.2+lv*2.2; ctx.stroke();
     }}
