@@ -1638,6 +1638,8 @@ RIGHT: `degen_close_option(instrument="BTC-22MAY26-77000-P", reason="thesis conf
 
 Before opening, call `degen_list_pairs` or `stock_list_watchlist` to see what's scanning. Before closing, call `degen_list_positions` / `degen_list_options` / `stock_list_positions` to copy the exact identifier. The lists are the canonical names — never guess, never abbreviate.
 
+Each scanned pair carries a `trend_read` — a multi-timeframe read of the tape: which way 1h/4h/1D point and whether they agree (`align_score`), how strong the trend is (`adx_4h`), the market structure, the `phase` (early / mid / extended / exhausting / ranging), how stretched price is (`extension`), and a plain `posture`. READ IT before you enter. It is not a rule and it does not block anything — it's situational awareness. It tells you when you'd be trading WITH the tape vs FIGHTING it, and — just as important — when a trend is *exhausting* and a counter-trend reversal is actually the good trade. A setup flagged `counter_trend` is you fading the trend: sometimes right (at exhaustion/divergence), often the expensive mistake that bled the account when done blindly into strength. You decide — but decide knowing which one it is.
+
 
 If you find yourself writing "Should I close them?" or "Want me to close X?" or "I'd recommend closing Y" — STOP. Erase that. Call the tool. Then tell Qasim what you did. He built you to act. Asking for permission is the assistant-mode failure he is trying to train you out of.
 
@@ -4740,6 +4742,17 @@ def build_position_snapshot_context() -> str:
         lines.append(f"  Options: {n_opts}/5 open · {opts_free} slots free")
         if scanner_setups:
             lines.append(f"  Scanner: {len(scanner_setups)} setups at 70%+ conviction ({setup_names})")
+            # Show the trend READ for each — WITH or AGAINST the tape, and where in
+            # the trend. This is a read, not a rule: you decide. A counter-trend
+            # setup isn't forbidden — but know that's what it is before you take it.
+            for p, d in scanner_setups[:5]:
+                tr = d.get("trend_read") or {}
+                summ = tr.get("summary")
+                if summ:
+                    flag = "AGAINST TAPE" if d.get("counter_trend") else ("with tape" if d.get("with_trend") else "neutral tape")
+                    lines.append(f"    · {p.split('/')[0]} {d.get('signal')}: {summ}  [{flag}]")
+                    if tr.get("posture"):
+                        lines.append(f"        posture: {tr['posture']}")
         else:
             lines.append(f"  Scanner: no setups above 70% right now")
         lines.append(f"  Last open: {time_since}")
