@@ -7692,8 +7692,6 @@ class FeelingHandler(BaseHTTPRequestHandler):
             year  = int(qs.get("year",  [now.year])[0])
             month = int(qs.get("month", [now.month])[0])
             self.send_json(get_memory_engine().get_calendar_data(year, month))
-        elif path == "/voices":
-            self._get_voices()
         elif path == "/talking_mode":
             self.send_json({"talking_mode": _talking_mode})
         elif path == "/autonomous_mode":
@@ -7704,36 +7702,6 @@ class FeelingHandler(BaseHTTPRequestHandler):
             })
         else:
             self.send_error(404)
-
-    def _get_voices(self):
-        """Return ElevenLabs voice library. Fast-fail — 3s timeout."""
-        import urllib.request, urllib.error
-        el_key = os.environ.get("ELEVENLABS_API_KEY", "")
-        if not el_key:
-            self.send_json({"voices": [], "error": "no key"})
-            return
-        try:
-            req = urllib.request.Request(
-                "https://api.elevenlabs.io/v1/voices",
-                headers={"xi-api-key": el_key},
-            )
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read())
-            voices = [
-                {
-                    "id": v["voice_id"],
-                    "name": v["name"],
-                    "category": v.get("category", "premade"),
-                    "labels": v.get("labels", {}),
-                    "preview_url": v.get("preview_url", ""),
-                }
-                for v in data.get("voices", [])
-            ]
-            order = {"cloned": 0, "generated": 1, "professional": 2, "premade": 3}
-            voices.sort(key=lambda v: (order.get(v["category"], 4), v["name"]))
-            self.send_json({"voices": voices})
-        except Exception as ex:
-            self.send_json({"voices": [], "error": str(ex)})
 
     def do_POST(self):
         global _RUNTIME_API_KEY, _RUNTIME_GROQ_KEY, _PASSWORD  # must be at top of function
@@ -7932,7 +7900,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _handle_tts(self, body: bytes):
-        """TTS: route to elan_sensorium if configured, else ElevenLabs."""
+        """TTS: Elan's own voice via elan_sensorium (/synth)."""
         import urllib.request, urllib.error
         try:
             data = json.loads(body)
@@ -7943,72 +7911,33 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.send_error(400); return
 
         sensorium_url = os.environ.get("ELAN_SENSORIUM_URL", "").rstrip("/")
-        if sensorium_url:
-            try:
-                from elan_sensorium_bridge import body_to_synth
-                body_snap = get_body().get_snapshot()
-                payload = body_to_synth(body_snap, text)
-                req = urllib.request.Request(
-                    sensorium_url + "/synth",
-                    data=json.dumps(payload).encode(),
-                    headers={"Content-Type": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    audio = resp.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "audio/wav")
-                self.send_header("Content-Length", str(len(audio)))
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(audio)
-                return
-            except Exception as ex:
-                print(f"[TTS] sensorium failed: {ex} — falling back to ElevenLabs")
-
-        el_key  = os.environ.get("ELEVENLABS_API_KEY", "")
-        voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam
-        if not el_key:
+        if not sensorium_url:
             self.send_response(503)
-            body_out = b'{"error":"ELEVENLABS_API_KEY not set and ELAN_SENSORIUM_URL not configured"}'
+            body_out = b'{"error":"ELAN_SENSORIUM_URL not configured"}'
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body_out)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers(); self.wfile.write(body_out); return
         try:
-            # Allow per-request voice and settings override (from UI)
-            voice_id = data.get("voice_id", voice_id)
-            voice_settings = data.get("voice_settings", {
-                "stability": 0.45, "similarity_boost": 0.78, "style": 0.05
-            })
-            payload = json.dumps({
-                "text": text,
-                "model_id": "eleven_flash_v2_5",
-                "voice_settings": voice_settings,
-            }).encode()
+            from elan_sensorium_bridge import body_to_synth
+            body_snap = get_body().get_snapshot()
+            payload = body_to_synth(body_snap, text)
             req = urllib.request.Request(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                data=payload,
-                headers={
-                    "xi-api-key": el_key,
-                    "Content-Type": "application/json",
-                    "Accept": "audio/mpeg",
-                },
+                sensorium_url + "/synth",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 audio = resp.read()
             self.send_response(200)
-            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(audio)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(audio)
-        except urllib.error.HTTPError as e:
-            err_body = e.read()
-            print(f"[TTS] ElevenLabs error {e.code}: {err_body[:200]}")
-            self.send_error(502)
         except Exception as ex:
-            print(f"[TTS] Error: {ex}")
-            self.send_error(500)
+            print(f"[TTS] sensorium error: {ex}")
+            self.send_error(502)
 
     def _handle_transcribe(self, body: bytes):
         """Transcribe raw audio. Routes to elan_sensorium if configured (which
@@ -8253,9 +8182,8 @@ def build_chat_html() -> str:
     region_ei = {abbrev: round(r.ei_ratio, 3) for abbrev, r in _BR.items()}
     region_ei_json = json.dumps(region_ei)
 
-    # Pre-configured voice ID from env — skip the ElevenLabs /voices API call
-    configured_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
-    el_key_set = "true" if os.environ.get("ELEVENLABS_API_KEY") else "false"
+    # Elan speaks in his own voice via the sensorium (/synth)
+    sensorium_on = "true" if os.environ.get("ELAN_SENSORIUM_URL") else "false"
 
     # JOBS — floating button bottom-right, full-screen overlay on click.
     any_job_enabled = _STOCK_ENABLED or _KALSHI_ENABLED or _DEGEN_ENABLED or _WATCH_ENABLED or _SOURCE_LIBRARY_ENABLED
@@ -10029,9 +9957,9 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
   <div id="voice-panel" style="padding:5px 12px 4px;border-bottom:1px solid rgba(80,100,200,0.08);display:flex;align-items:center;gap:6px;flex-shrink:0;">
     <span style="font-size:6px;letter-spacing:2px;color:rgba(80,100,180,0.38);text-transform:uppercase;flex-shrink:0;">voice</span>
-    <input id="voice-id-input" value="{configured_voice_id}" placeholder="voice ID..." style="flex:1;background:rgba(255,255,255,0.02);border:1px solid rgba(80,100,200,0.10);border-radius:2px;color:rgba(140,155,220,0.60);font-family:'Courier New',monospace;font-size:7px;padding:3px 5px;outline:none;">
+    <span style="flex:1;font-size:7px;letter-spacing:1px;color:rgba(140,155,220,0.55);font-family:'Courier New',monospace;">Elan — his own voice</span>
     <button id="preview-btn" title="Preview voice" style="padding:3px 7px;background:rgba(40,40,120,0.10);border:1px solid rgba(80,100,200,0.14);border-radius:2px;color:rgba(130,145,215,0.55);font-size:9px;cursor:pointer;line-height:1;">▶</button>
-    <div id="voice-meta" style="font-size:6px;letter-spacing:0.5px;color:rgba(80,100,165,0.38);flex-shrink:0;">{('tts ✓' if el_key_set == 'true' else 'no key')}</div>
+    <div id="voice-meta" style="font-size:6px;letter-spacing:0.5px;color:rgba(80,100,165,0.38);flex-shrink:0;">{('on' if sensorium_on == 'true' else 'off')}</div>
   </div>
   <div class="panel">
     <div class="ptitle">Body — Full Human System</div>
@@ -11842,21 +11770,9 @@ document.getElementById('msg-input').addEventListener('input',()=>{{
   }}
 }});
 
-// ── VOICE PICKER ─────────────────────────────────────────────
-const voiceInput=document.getElementById('voice-id-input');
-let selectedVoiceId=localStorage.getItem('el_voice_id')||voiceInput?.value||'pNInz6obpgDQGcFmaJgB';
-if(voiceInput)voiceInput.value=selectedVoiceId;
-
-if(voiceInput){{
-  voiceInput.addEventListener('input',e=>{{
-    selectedVoiceId=e.target.value.trim()||selectedVoiceId;
-  }});
-  voiceInput.addEventListener('change',e=>{{
-    const v=e.target.value.trim();
-    if(v){{selectedVoiceId=v;localStorage.setItem('el_voice_id',v);}}
-    document.getElementById('voice-meta').textContent='voice ID: '+selectedVoiceId.slice(0,18)+'...';
-  }});
-}}
+// ── VOICE ────────────────────────────────────────────────────
+// Elan speaks in his own voice via the sensorium (/synth). No external TTS.
+let selectedVoiceId='elan';
 
 const previewBtn=document.getElementById('preview-btn');
 if(previewBtn){{
@@ -12358,16 +12274,16 @@ document.addEventListener('keyup',async e=>{{
 }});
 
 // ── VOICE OUTPUT ─────────────────────────────────────────────
-// Primary: ElevenLabs (rich, expressive)
-// Fallback: Web Speech API (browser built-in, always free)
+// Primary: Elan's own voice via the sensorium (/synth)
+// Fallback: Web Speech API (browser built-in, always free) — only on fetch error
 let audioCtx=null, analyser=null, sourceNode=null, pendingTTS=null;
 let webSpeechUtterance=null;
 // Sentence-streaming TTS queue
 let ttsBuffer='';           // accumulates text chunks during streaming
 let ttsAudioQueue=[];       // queued decoded audio items to play
 let ttsQueueRunning=false;  // true while queue is playing
-let ttsFetchCount=0;        // in-flight ElevenLabs fetches
-let ttsElUsedThisResponse=0; // counts sentences sent to ElevenLabs this response
+let ttsFetchCount=0;        // in-flight /tts (sensorium) fetches
+let ttsElUsedThisResponse=0; // counts sentences sent to his voice this response
 
 // Pick best available Web Speech voice on load
 let webSpeechVoice=null;
@@ -12568,7 +12484,7 @@ function speakWithWebSpeech(text){{
   speakNext();
 }}
 
-// ── ELEVENLABS EMOTIONAL PARAMS ──────────────────────────────
+// ── VOICE EMOTIONAL PARAMS (sent with /tts; sensorium derives its own from body) ──
 function _computeElParams(){{
   const st=curState||{{}};
   const nt=ntState||{{}};
@@ -12667,13 +12583,7 @@ function _playTTSQueue(){{
 
 async function _fetchAndQueueSentence(sentence){{
   if(!sentence.trim()||!voiceEnabled){{ttsFetchCount--;_onQueueEmpty();return;}}
-  // ElevenLabs for first 3 sentences — Web Speech fallback for the rest
-  if(ttsElUsedThisResponse>=3){{
-    ttsAudioQueue.push({{type:'ws',text:sentence}});
-    ttsFetchCount--;
-    if(!ttsQueueRunning)_playTTSQueue();
-    return;
-  }}
+  // Elan's own voice (sensorium) for every sentence — Web Speech only on fetch error
   ttsElUsedThisResponse++;
   try{{
     const res=await fetch('/tts',{{
