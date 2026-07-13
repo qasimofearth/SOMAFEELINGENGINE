@@ -7349,72 +7349,86 @@ _LOGIN_PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Soma Feeling Engine</title>
+<title>SOMA</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
-body{background:#03030f;color:#c8d0ff;font-family:'Courier New',monospace;}
+body{background:#040409;color:#dce3ff;
+  font-family:'Avenir Next','Helvetica Neue',system-ui,-apple-system,sans-serif;}
 #fern{position:fixed;inset:0;width:100vw;height:100vh;display:block;z-index:0;
-  transform-origin:50% 52%;will-change:transform;}
-.veil{position:fixed;inset:0;z-index:1;pointer-events:none;
-  background:radial-gradient(ellipse 60% 55% at 50% 46%,transparent 0%,rgba(3,3,15,0.35) 60%,rgba(3,3,15,0.78) 100%);}
-.wrap{position:relative;z-index:2;text-align:center;width:340px;margin:0 auto;
-  top:50%;transform:translateY(-50%);}
-.logo{font-size:9px;letter-spacing:4px;color:rgba(150,165,255,0.55);text-transform:uppercase;margin-bottom:6px}
-h1{font-size:22px;letter-spacing:6px;text-transform:uppercase;font-weight:bold;
-  color:#c4d0ff;text-shadow:0 0 40px rgba(100,120,255,0.7),0 0 90px rgba(80,100,255,0.4);
-  margin-bottom:4px}
-.sub{font-size:8px;letter-spacing:3px;color:rgba(150,165,220,0.6);margin-bottom:44px;text-transform:uppercase}
-.field{position:relative;margin-bottom:16px}
-input[type=password]{
-  width:100%;padding:14px 18px;background:rgba(10,12,32,0.62);backdrop-filter:blur(6px);
-  border:1px solid rgba(100,120,220,0.34);border-radius:6px;
-  color:#dde4ff;font-family:'Courier New',monospace;font-size:14px;letter-spacing:3px;
-  outline:none;transition:border 0.3s,box-shadow 0.3s;}
-input[type=password]:focus{border-color:rgba(130,160,255,0.75);
-  box-shadow:0 0 26px rgba(80,100,255,0.28);}
-input[type=password]::placeholder{letter-spacing:2px;color:rgba(120,140,210,0.4);font-size:11px}
-button{width:100%;padding:13px;background:rgba(60,80,200,0.28);backdrop-filter:blur(6px);
-  border:1px solid rgba(110,140,255,0.5);border-radius:6px;
-  color:#c4d4ff;font-family:'Courier New',monospace;font-size:11px;letter-spacing:4px;
-  text-transform:uppercase;cursor:pointer;transition:all 0.3s;}
-button:hover{background:rgba(80,110,240,0.4);border-color:rgba(140,170,255,0.75);
-  box-shadow:0 0 34px rgba(80,100,255,0.28);color:#e0e8ff}
-button:disabled{opacity:0.6;cursor:default}
-.err{font-size:9px;letter-spacing:1px;color:rgba(255,120,120,0.85);
-  margin-top:14px;padding:8px;border:1px solid rgba(255,90,90,0.24);
-  border-radius:4px;background:rgba(80,10,10,0.34)}
+  transform-origin:66% 46%;will-change:transform;}
+/* vignette — the fern dissolves into the dark; left side deepened for the text */
+.scrim{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:
+    radial-gradient(150% 120% at 70% 50%, transparent 58%, rgba(4,4,10,0.45) 86%, rgba(4,4,10,0.9) 100%),
+    linear-gradient(100deg, rgba(4,4,10,0.9) 0%, rgba(4,4,10,0.5) 26%, transparent 50%);}
+.stage{position:fixed;inset:0;z-index:2;display:flex;align-items:center;
+  justify-content:flex-start;padding:0 9vw;text-align:left;}
+.panel{width:min(430px,86vw);animation:rise 1.5s cubic-bezier(.4,0,.2,1) both 0.35s;}
+@keyframes rise{from{opacity:0;transform:translateY(16px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.mark{font-weight:200;font-size:clamp(44px,6.4vw,74px);line-height:1;
+  letter-spacing:0.52em;padding-left:0.52em;color:rgba(228,234,255,0.95);
+  text-shadow:0 0 50px rgba(110,135,255,0.4);}
+.tag{margin-top:20px;font-size:9px;font-weight:400;letter-spacing:0.46em;
+  text-transform:uppercase;color:rgba(150,168,220,0.4);}
+form{margin-top:52px}
+.key{width:100%;padding:13px 2px;background:transparent;border:none;
+  border-bottom:1px solid rgba(155,175,255,0.4);
+  color:#e8eeff;font-family:inherit;font-size:15px;font-weight:300;letter-spacing:0.34em;
+  outline:none;transition:border-color 0.6s,box-shadow 0.6s;}
+.key::placeholder{color:rgba(160,180,235,0.5);font-size:10px;letter-spacing:0.42em;
+  text-transform:uppercase;font-weight:400;}
+.key:focus{border-color:rgba(160,185,255,0.85);box-shadow:0 8px 24px -12px rgba(90,110,240,0.6);}
+.go{margin-top:28px;background:none;border:none;cursor:pointer;padding:6px 0;
+  color:rgba(185,200,255,0.72);font-family:inherit;font-size:10px;font-weight:400;
+  letter-spacing:0.5em;text-transform:uppercase;
+  transition:color 0.5s,letter-spacing 0.5s;}
+.go:hover{color:rgba(224,232,255,0.95);letter-spacing:0.64em;}
+.go .arw{margin-left:10px;opacity:0.55;}
+.go:disabled{opacity:0.4;cursor:default;}
+.err{margin-top:22px;font-size:9px;font-weight:400;letter-spacing:0.14em;
+  color:rgba(255,130,130,0.82);text-transform:uppercase;}
 form.shake{animation:shk 0.4s}
-@keyframes shk{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-6px)}}
+@keyframes shk{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(3px)}50%{transform:translateX(-5px)}}
+@media (max-width:820px){
+  #fern{transform-origin:50% 44%;}
+  .stage{justify-content:center;padding:0 30px;text-align:center;}
+  .panel{width:min(360px,90vw);}
+  .mark{font-size:clamp(40px,13vw,62px);}
+  .scrim{background:
+    radial-gradient(95% 62% at 50% 42%, transparent 18%, rgba(4,4,10,0.6) 72%, rgba(4,4,10,0.96) 100%),
+    linear-gradient(180deg, transparent 38%, rgba(4,4,10,0.66) 100%);}
+}
 </style>
 </head>
 <body>
 <canvas id="fern"></canvas>
-<div class="veil"></div>
-<div class="wrap">
-  <div class="logo">Soma</div>
-  <h1>Feeling Engine</h1>
-  <div class="sub">Neural &middot; Emotional &middot; Embodied</div>
-  <form id="lf" method="POST" action="/login">
-    <div class="field">
-      <input type="password" name="password" placeholder="enter access key" autofocus autocomplete="off">
-    </div>
-    <button type="submit">Enter</button>
-    <div id="err">__ERR__</div>
-  </form>
+<div class="scrim"></div>
+<div class="stage">
+  <div class="panel">
+    <div class="mark">SOMA</div>
+    <div class="tag">neural &middot; emotional &middot; embodied</div>
+    <form id="lf" method="POST" action="/login">
+      <input class="key" type="password" name="password" placeholder="access key" autofocus autocomplete="off">
+      <div><button class="go" type="submit">enter<span class="arw">&rarr;</span></button></div>
+      <div id="err">__ERR__</div>
+    </form>
+  </div>
 </div>
 <script>
 (function(){
   var cv=document.getElementById('fern'), ctx=cv.getContext('2d');
-  var dpr=Math.min(2, window.devicePixelRatio||1), W=0,H=0;
+  var dpr=Math.min(2, window.devicePixelRatio||1), W=0,H=0,fcx=0.66;
   function fit(){ W=window.innerWidth; H=window.innerHeight;
+    fcx = W>=820 ? 0.66 : 0.5;
+    cv.style.transformOrigin=(fcx*100)+'% 46%';
     cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.globalCompositeOperation='source-over';
-    ctx.fillStyle='#03030f'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#040409'; ctx.fillRect(0,0,W,H);
     ctx.globalCompositeOperation='lighter'; shown=0; }
   // Barnsley fern via the chaos game
   var x=0,y=0, pts=[], ymax=0.0001;
-  for(var i=0;i<62000;i++){
+  for(var i=0;i<64000;i++){
     var r=Math.random(), nx,ny;
     if(r<0.01){ nx=0; ny=0.16*y; }
     else if(r<0.86){ nx=0.85*x+0.04*y; ny=-0.04*x+0.85*y+1.6; }
@@ -7424,34 +7438,34 @@ form.shake{animation:shk 0.4s}
   }
   pts.sort(function(a,b){ return a[1]-b[1]; });   // bottom-up unfurl
   var total=pts.length, shown=0, zooming=false;
-  function sx(px){ return W/2 + px*(H*0.093); }
+  function sx(px){ return W*fcx + px*(H*0.092); }
   function sy(py){ return H*0.965 - (py/ymax)*H*0.9; }
   fit();
-  ctx.globalCompositeOperation='lighter';
   function draw(){
     if(!W){ return; }
-    var step=Math.max(360, Math.floor(total/170)), end=Math.min(total, shown+step);
+    var step=Math.max(340, Math.floor(total/190)), end=Math.min(total, shown+step);
     for(var i=shown;i<end;i++){
       var p=pts[i], t=p[1]/ymax;
-      var R=Math.round(74+t*96), G=Math.round(92+t*84), B=255;
-      ctx.fillStyle='rgba('+R+','+G+','+B+','+(0.42+t*0.34)+')';
+      var R=Math.round(70+t*98), G=Math.round(88+t*86), B=255;
+      ctx.fillStyle='rgba('+R+','+G+','+B+','+(0.38+t*0.34)+')';
       var Xs=sx(p[0]), Ys=sy(p[1]);
-      ctx.fillRect(Xs,Ys,1.25,1.25);
+      ctx.fillRect(Xs,Ys,1.2,1.2);
     }
     shown=end;
     if(shown<total) requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
-  // gentle sway (paused during the zoom)
+  // slow, barely-there sway (paused during the zoom)
   var sw=0.4;
-  (function sway(){ if(!zooming){ sw+=0.008; cv.style.transform='rotate('+(Math.sin(sw)*0.55)+'deg)'; } requestAnimationFrame(sway); })();
+  (function sway(){ if(!zooming){ sw+=0.006; cv.style.transform='rotate('+(Math.sin(sw)*0.4)+'deg)'; } requestAnimationFrame(sway); })();
   window.addEventListener('resize', function(){ if(!zooming){ fit(); requestAnimationFrame(draw);} });
 
   var form=document.getElementById('lf');
   var inp=form.querySelector('input[name=password]');
+  var btn=form.querySelector('button');
   form.addEventListener('submit', function(e){
     e.preventDefault();
-    var btn=form.querySelector('button'); btn.disabled=true; btn.textContent='···';
+    btn.disabled=true; btn.innerHTML='&middot;&middot;&middot;';
     fetch('/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
       body:'password='+encodeURIComponent(inp.value)+'&xhr=1'})
       .then(function(res){ return res.json().catch(function(){ return {ok:false}; }); })
@@ -7459,21 +7473,21 @@ form.shake{animation:shk 0.4s}
         if(d && d.ok){
           try{ sessionStorage.setItem('fe_enter','1'); }catch(_){}
           zooming=true;
-          var wrap=document.querySelector('.wrap'), veil=document.querySelector('.veil');
-          wrap.style.transition='opacity 0.45s'; wrap.style.opacity='0';
-          if(veil){ veil.style.transition='opacity 0.9s'; veil.style.opacity='0'; }
-          cv.style.transition='transform 1.15s cubic-bezier(.5,0,.25,1),opacity 1.15s';
-          cv.style.transformOrigin='50% 50%';
-          cv.style.transform='scale(13)';
-          setTimeout(function(){ window.location.href='/'; }, 1000);
+          var panel=document.querySelector('.panel'), scrim=document.querySelector('.scrim');
+          panel.style.transition='opacity 0.5s'; panel.style.opacity='0';
+          if(scrim){ scrim.style.transition='opacity 1.0s'; scrim.style.opacity='0'; }
+          cv.style.transition='transform 1.2s cubic-bezier(.5,0,.22,1),opacity 1.2s';
+          cv.style.transformOrigin=(fcx*100)+'% 46%';
+          cv.style.transform='scale(14)';
+          setTimeout(function(){ window.location.href='/'; }, 1050);
         } else {
-          btn.disabled=false; btn.textContent='Enter';
+          btn.disabled=false; btn.innerHTML='enter<span class="arw">&rarr;</span>';
           var el=document.getElementById('err');
-          if(el){ el.className='err'; el.textContent=(d&&d.error)||'Incorrect access key.'; }
+          if(el){ el.className='err'; el.textContent=(d&&d.error)||'incorrect access key'; }
           form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
         }
       })
-      .catch(function(){ btn.disabled=false; btn.textContent='Enter'; });
+      .catch(function(){ btn.disabled=false; btn.innerHTML='enter<span class="arw">&rarr;</span>'; });
   });
 })();
 </script>
