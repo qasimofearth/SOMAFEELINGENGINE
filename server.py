@@ -9853,7 +9853,7 @@ canvas.spark{{display:block;border-radius:1px;}}
 <div id="tabbar">
   <div class="brand"><span class="glyph">◉</span>Elan</div>
   <button class="tabbtn active" id="tab-chat" onclick="showTab('chat')"><span class="ico">💬</span>Chat</button>
-  <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Simulation</button>
+  <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Body</button>
   <button class="tabbtn" id="tab-stream" onclick="showTab('stream')"><span class="ico">💭</span>Stream</button>
   <button class="tabbtn" id="tab-thread" onclick="showTab('thread')"><span class="ico">✦</span>Thread</button>
   <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">📚</span>Source</button>
