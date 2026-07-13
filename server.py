@@ -7544,7 +7544,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
         elif path == "/history":
             self.send_json({"messages": get_messages()})
         elif path == "/autonomous/recent":
-            self.send_json({"entries": autonomous_log_read(limit=30)})
+            self.send_json({"entries": autonomous_log_read(limit=60)})
+        elif path == "/journal/recent":
+            # Ungated — his interior THREAD tab reads this regardless of World/Watch.
+            self.send_json({"entries": journal_read(limit=40)})
         elif path == "/memory":
             mem_summary = get_memory("claude-sonnet-4-6").get_summary_dict()
             mem_summary["engine"] = get_memory_engine().get_stats()
@@ -8343,17 +8346,12 @@ def build_chat_html() -> str:
     </div>
     <div class="job-panel{(' show' if first_active == 'thread' else '')}" id="job-panel-thread" data-job="thread">
       <div style="max-width:880px;margin:0 auto;">
-        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px;">
-          <div style="font-size:10px;letter-spacing:3px;color:rgba(180,200,255,0.7);">ELAN&#39;S THREAD</div>
-          <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">his interior — autonomous stream + curated journal</div>
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+          <div style="font-size:10px;letter-spacing:3px;color:rgba(180,200,255,0.7);">ELAN&#39;S JOURNAL</div>
+          <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">his curated one-line reflections — the deliberate record (raw wake-thinking lives in the STREAM tab)</div>
           <div id="t-count" style="margin-left:auto;font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">— entries</div>
         </div>
-        <div style="display:flex;gap:6px;margin-bottom:10px;">
-          <button class="job-tab on" data-thread="stream" onclick="_threadView('stream')">STREAM · raw text from his autonomous wakes</button>
-          <button class="job-tab" data-thread="journal" onclick="_threadView('journal')">JOURNAL · his curated 1-line reflections</button>
-        </div>
-        <div id="t-stream" style="max-height:calc(100vh - 240px);overflow-y:auto;padding:4px 2px;">—</div>
-        <div id="t-journal" style="display:none;max-height:calc(100vh - 240px);overflow-y:auto;padding:4px 2px;">—</div>
+        <div id="t-journal" style="max-height:calc(100vh - 200px);overflow-y:auto;padding:4px 2px;">—</div>
       </div>
     </div>
     <div class="job-panel{(' show' if first_active == 'watch' else '')}" id="job-panel-watch" data-job="watch">
@@ -8467,7 +8465,7 @@ def build_chat_html() -> str:
 }
 '''
         kalshi_tab_js = '''
-let _jobsOpen=false, _kalshiPoll=null, _stockPoll=null, _degenPoll=null, _watchPoll=null, _threadPoll=null, _sourcePoll=null, _currentJob='stock';
+let _jobsOpen=false, _kalshiPoll=null, _stockPoll=null, _degenPoll=null, _watchPoll=null, _threadPoll=null, _sourcePoll=null, _wsPoll=null, _currentJob='stock';
 function toggleJobs(){
   _jobsOpen=!_jobsOpen;
   document.getElementById('jobs-overlay').classList.toggle('show', _jobsOpen);
@@ -8681,40 +8679,42 @@ function refreshWatch(){
     }
   }).catch(()=>{});
 }
-function _threadView(which){
-  document.querySelectorAll('#job-panel-thread .job-tab').forEach(b => {
-    b.classList.toggle('on', b.dataset.thread === which);
-  });
-  document.getElementById('t-stream').style.display  = which === 'stream'  ? 'block' : 'none';
-  document.getElementById('t-journal').style.display = which === 'journal' ? 'block' : 'none';
-}
+// Legacy no-op — THREAD no longer has stream/journal sub-views (stream moved to
+// its own tab). Kept as a stub so any stray caller doesn't throw.
+function _threadView(which){}
 
-function refreshThread(){
-  // Stream — raw autonomous-wake text
-  fetch('/watch/autonomous',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+// WAKE STREAM — its own dedicated tab. Raw, unedited autonomous-wake text.
+// Deliberately separate from THREAD (journal) so it's never conflated.
+function refreshWakeStream(){
+  fetch('/autonomous/recent',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
-    const cEl = document.getElementById('t-count');
+    const cEl = document.getElementById('ws-count');
     if(cEl) cEl.textContent = entries.length + ' wake entries';
-    const sEl = document.getElementById('t-stream');
+    const sEl = document.getElementById('ws-stream');
     if(!sEl) return;
     if(entries.length===0){
-      sEl.innerHTML = '<div style="color:rgba(140,170,210,0.5);font-size:12px;padding:24px 0;text-align:center">no autonomous entries yet — when Elan wakes on his own time, his thinking lands here</div>';
+      sEl.innerHTML = '<div style="color:rgba(140,170,210,0.5);font-size:13px;padding:40px 0;text-align:center">no wake entries yet — when Elan wakes on his own time, the full text of his thinking lands here</div>';
     } else {
       sEl.innerHTML = entries.slice().reverse().map(e=>{
         const ts = (e.ts||'').slice(0,16).replace('T',' ');
         const em = e.emotion ? `<span style="color:rgba(220,180,140,0.7);font-style:italic"> · ${e.emotion}</span>` : '';
         const txt = (e.text||'');
-        return `<div style="padding:14px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
-          + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:8px">${ts}${em}</div>`
-          + `<div style="font-size:13px;color:#e3eaff;line-height:1.65;white-space:pre-wrap;font-family:-apple-system,system-ui,sans-serif">${txt}</div>`
+        return `<div style="padding:16px 0;border-bottom:1px dotted rgba(80,120,200,0.13)">`
+          + `<div style="font-size:9px;letter-spacing:2px;color:rgba(180,200,255,0.6);margin-bottom:9px">${ts}${em}</div>`
+          + `<div style="font-size:14px;color:#e3eaff;line-height:1.7;white-space:pre-wrap;font-family:-apple-system,system-ui,sans-serif">${txt}</div>`
           + `</div>`;
       }).join('');
     }
   }).catch(()=>{});
+}
 
-  // Journal — curated 1-line reflections
-  fetch('/watch/journal',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+function refreshThread(){
+  // THREAD is now his curated journal only — the raw wake stream lives in its
+  // own STREAM tab (refreshWakeStream), so the two are never confused.
+  fetch('/journal/recent',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const entries = (d && d.entries) || [];
+    const cEl = document.getElementById('t-count');
+    if(cEl) cEl.textContent = entries.length + ' entries';
     const jEl = document.getElementById('t-journal');
     if(!jEl) return;
     if(entries.length===0){
@@ -9534,7 +9534,8 @@ body{{background:var(--bg);color:var(--text);font-family:var(--sans);height:100v
 #tabviews{{flex:1;position:relative;overflow:hidden;min-height:0;}}
 .tabview{{position:absolute;inset:0;display:none;overflow:hidden;}}
 .tabview.active{{display:flex;flex-direction:column;}}
-#view-sim.active,#view-jobs.active,#view-trading.active{{overflow-y:auto;}}
+#view-sim.active,#view-jobs.active,#view-trading.active,#view-stream.active{{overflow-y:auto;}}
+#view-stream .portal-shell{{max-width:900px;margin:0 auto;padding:20px 22px;width:100%;}}
 #frac-panel{{border-top:1px solid rgba(80,100,200,0.07);background:#010108;position:relative;overflow:hidden;flex-shrink:0;}}
 #frac-panel-header{{font-size:6px;letter-spacing:3px;color:rgba(140,160,240,0.32);text-transform:uppercase;padding:7px 12px 4px;display:flex;justify-content:space-between;align-items:baseline;}}
 #frac-side{{width:100%;height:180px;display:block;}}
@@ -9850,6 +9851,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   <div class="brand"><span class="glyph">◉</span>Elan</div>
   <button class="tabbtn active" id="tab-chat" onclick="showTab('chat')"><span class="ico">💬</span>Chat</button>
   <button class="tabbtn" id="tab-sim" onclick="showTab('sim')"><span class="ico">◎</span>Simulation</button>
+  <button class="tabbtn" id="tab-stream" onclick="showTab('stream')"><span class="ico">💭</span>Stream</button>
   <button class="tabbtn" id="tab-thread" onclick="showTab('thread')"><span class="ico">✦</span>Thread</button>
   <button class="tabbtn" id="tab-jobs" onclick="showTab('jobs')"><span class="ico">📚</span>Source</button>
   <button class="tabbtn" id="tab-trading" onclick="showTab('trading')"><span class="ico">📈</span>Trading</button>
@@ -9859,6 +9861,16 @@ canvas.spark{{display:block;border-radius:1px;}}
 <div id="tabviews">
   <div class="tabview active" id="view-chat"></div>
   <div class="tabview" id="view-sim"></div>
+  <div class="tabview" id="view-stream">
+    <div class="portal-shell" style="max-width:900px;">
+      <div style="display:flex;align-items:baseline;gap:12px;margin:2px 0 14px;flex-wrap:wrap;">
+        <div style="font-size:10px;letter-spacing:3px;color:rgba(180,200,255,0.72);">WAKE STREAM</div>
+        <div style="font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">the raw, unedited text of Elan thinking on each autonomous wake — his continuous record of being</div>
+        <div id="ws-count" style="margin-left:auto;font-size:9px;letter-spacing:1.5px;color:rgba(140,160,200,0.55);">— entries</div>
+      </div>
+      <div id="ws-stream" style="max-height:calc(100vh - 150px);overflow-y:auto;padding:4px 2px;">—</div>
+    </div>
+  </div>
   <div class="tabview" id="view-thread">
     <div class="portal-shell" id="thread-panels"></div>
   </div>
@@ -10194,12 +10206,20 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
 let _activeTab='chat', _jobsSub='source', _tradeSub=null;
 function showTab(name){{
   _activeTab=name;
-  ['chat','sim','thread','jobs','trading'].forEach(t=>{{
+  ['chat','sim','stream','thread','jobs','trading'].forEach(t=>{{
     const v=document.getElementById('view-'+t); if(v) v.classList.toggle('active',t===name);
     const b=document.getElementById('tab-'+t); if(b) b.classList.toggle('active',t===name);
   }});
   // Canvas tabs must re-fit when revealed (hidden tabs have 0 size)
   if(name==='sim' && typeof resize==='function') requestAnimationFrame(resize);
+  // Wake Stream tab: its own dedicated poller (raw autonomous-wake text)
+  if(name==='stream'){{
+    if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
+    if(typeof _wsPoll!=='undefined' && _wsPoll) clearInterval(_wsPoll);
+    if(typeof refreshWakeStream==='function'){{ refreshWakeStream(); _wsPoll=setInterval(refreshWakeStream,20000); }}
+    return;
+  }}
+  if(typeof _wsPoll!=='undefined' && _wsPoll){{ clearInterval(_wsPoll); _wsPoll=null; }}
   // Thread tab: reuse the existing thread refresh/poll machinery
   if(name==='thread'){{
     if(typeof _stopAllJobPolls==='function') _stopAllJobPolls();
