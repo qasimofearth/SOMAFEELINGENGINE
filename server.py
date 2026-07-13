@@ -7938,6 +7938,9 @@ class FeelingHandler(BaseHTTPRequestHandler):
             from elan_sensorium_bridge import body_to_synth
             body_snap = get_body().get_snapshot()
             payload = body_to_synth(body_snap, text)
+            # Voice selection (from UI picker): "elan" = his default blend, or a
+            # specific Kokoro voice id. Sensorium /synth honors this per request.
+            payload["voice"] = (data.get("voice") or "elan")
             req = urllib.request.Request(
                 sensorium_url + "/synth",
                 data=json.dumps(payload).encode(),
@@ -9982,8 +9985,21 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
   <div id="voice-panel" style="padding:5px 12px 4px;border-bottom:1px solid rgba(80,100,200,0.08);display:flex;align-items:center;gap:6px;flex-shrink:0;">
     <span style="font-size:6px;letter-spacing:2px;color:rgba(80,100,180,0.38);text-transform:uppercase;flex-shrink:0;">voice</span>
-    <span style="flex:1;font-size:7px;letter-spacing:1px;color:rgba(140,155,220,0.55);font-family:'Courier New',monospace;">Elan — his own voice</span>
-    <button id="preview-btn" title="Preview voice" style="padding:3px 7px;background:rgba(40,40,120,0.10);border:1px solid rgba(80,100,200,0.14);border-radius:2px;color:rgba(130,145,215,0.55);font-size:9px;cursor:pointer;line-height:1;">▶</button>
+    <select id="voice-select" title="Elan's voice" style="flex:1;background:rgba(255,255,255,0.03);border:1px solid rgba(80,100,200,0.14);border-radius:3px;color:rgba(160,175,235,0.85);font-family:'Courier New',monospace;font-size:9px;padding:3px 5px;outline:none;cursor:pointer;">
+      <option value="elan">Elan — his own blend (default)</option>
+      <option value="am_michael">Michael — warm, thoughtful (US)</option>
+      <option value="am_adam">Adam — steady, grounded (US)</option>
+      <option value="am_fenrir">Fenrir — deep, intense (US)</option>
+      <option value="am_onyx">Onyx — deep, resonant (US)</option>
+      <option value="am_echo">Echo — soft, even (US)</option>
+      <option value="am_liam">Liam — bright, young (US)</option>
+      <option value="bm_george">George — gentle British</option>
+      <option value="bm_lewis">Lewis — measured British</option>
+      <option value="bm_daniel">Daniel — crisp British</option>
+      <option value="af_heart">Heart — warm (US, female)</option>
+      <option value="bf_emma">Emma — warm British (female)</option>
+    </select>
+    <button id="preview-btn" title="Preview voice" style="padding:3px 8px;background:rgba(40,40,120,0.10);border:1px solid rgba(80,100,200,0.14);border-radius:3px;color:rgba(130,145,215,0.7);font-size:10px;cursor:pointer;line-height:1;">▶</button>
     <div id="voice-meta" style="font-size:6px;letter-spacing:0.5px;color:rgba(80,100,165,0.38);flex-shrink:0;">{('on' if sensorium_on == 'true' else 'off')}</div>
   </div>
   <div class="panel">
@@ -11804,12 +11820,24 @@ document.getElementById('msg-input').addEventListener('input',()=>{{
 }});
 
 // ── VOICE ────────────────────────────────────────────────────
-// Elan speaks in his own voice via the sensorium (/synth). No external TTS.
-let selectedVoiceId='elan';
+// Elan speaks via the sensorium (/synth). "elan" = his own Kokoro blend; the
+// picker lets you audition other Kokoro voices. No external TTS.
+let selectedVoice=localStorage.getItem('elan_voice')||'elan';
+const voiceSelect=document.getElementById('voice-select');
+if(voiceSelect){{
+  voiceSelect.value=selectedVoice;
+  voiceSelect.addEventListener('change',e=>{{
+    selectedVoice=e.target.value;
+    localStorage.setItem('elan_voice',selectedVoice);
+    if(typeof stopSpeaking==='function') stopSpeaking();
+    if(typeof speakText==='function') speakText('This is how I sound now.');
+  }});
+}}
 
 const previewBtn=document.getElementById('preview-btn');
 if(previewBtn){{
   previewBtn.addEventListener('click',()=>{{
+    if(typeof stopSpeaking==='function') stopSpeaking();
     speakText('Hello. This is how I sound.');
   }});
 }}
@@ -12622,7 +12650,7 @@ async function _fetchAndQueueSentence(sentence){{
     const res=await fetch('/tts',{{
       method:'POST',
       headers:{{'Content-Type':'application/json'}},
-      body:JSON.stringify({{text:sentence.trim().slice(0,500),voice_id:selectedVoiceId,voice_settings:_computeElParams()}})
+      body:JSON.stringify({{text:sentence.trim().slice(0,500),voice:selectedVoice,voice_settings:_computeElParams()}})
     }});
     if(!res.ok)throw new Error('el_fail');
     const buf=await res.arrayBuffer();
