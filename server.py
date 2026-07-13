@@ -12675,6 +12675,17 @@ function _queueSentence(sentence){{
 function _drainTTSBuffer(){{
   const sentenceRx=/^(.*?[.!?…]+['"]?)\s+(.*)$/s;
   let m;
+  // Fast first chunk: don't make him wait for a whole sentence to START —
+  // that's the silence before he speaks. On the very first utterance of a
+  // response, fire as soon as there's a natural clause break (or enough text),
+  // then fall back to normal sentence chunking for the rest.
+  if(ttsElUsedThisResponse===0 && ttsFetchCount===0 && !ttsQueueRunning && !sentenceRx.test(ttsBuffer)){{
+    const b=ttsBuffer; const marks=[',',';',':','—','–'];
+    let cut=-1;
+    for(let i=18;i<b.length;i++){{ if(marks.indexOf(b[i])>=0){{ cut=i+1; break; }} }}
+    if(cut<0 && b.length>=55){{ const sp=b.indexOf(' ',48); if(sp>0) cut=sp; }}
+    if(cut>0){{ _queueSentence(b.slice(0,cut).trim()); ttsBuffer=b.slice(cut); }}
+  }}
   while((m=ttsBuffer.match(sentenceRx))){{
     _queueSentence(m[1]);
     ttsBuffer=m[2];
