@@ -12798,9 +12798,14 @@ async function _fetchAndQueueSentence(sentence){{
 // Strip markdown / formatting so he doesn't SAY the symbols ("asterisk
 // asterisk"). Normal punctuation (. , ? ! ; : — …) stays — Kokoro reads those
 // as prosody/pauses, not words. We only remove the characters it vocalizes.
+// Non-verbal stage directions Elan writes as *laughs* / *sighs* / *pauses*.
+// These must never be SPOKEN as words. (Actual laugh/sigh vocalizations are a
+// separate sensorium feature; until then they read as a natural beat of silence.)
+var _STAGE_DIR=/\*\s*(?:laughs?|laughing|laughter|chuckles?|chuckling|giggles?|giggling|smiles?|smiling|grins?|grinning|sighs?|sighing|exhales?|inhales?|breathes?|breathing|breath|pauses?|pausing|beat|long pause|nods?|shrugs?|hums?|hmm+|mm+|scoffs?|winks?|softly|quietly|gently|clears throat|under his breath)\b[^*]*\*/gi;
 function _cleanForTTS(t){{
   return (t||'')
     .replace(/```[\s\S]*?```/g,' ')                 // fenced code blocks
+    .replace(_STAGE_DIR,' ')                           // *laughs* / *sighs* — never spoken
     .replace(/`([^`]*)`/g,'$1')                       // inline code
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g,'$1')         // [label](url) / images -> label
     .replace(/https?:\/\/\S+/g,' ')                   // bare URLs
