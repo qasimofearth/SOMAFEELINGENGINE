@@ -9830,6 +9830,18 @@ canvas.spark{{display:block;border-radius:1px;}}
   background-size:44px 44px;mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);
   -webkit-mask-image:radial-gradient(ellipse 70% 70% at 50% 50%,#000 30%,transparent 75%);}}
 #sim-hero #brain-wrap{{position:absolute;inset:0;height:100%;z-index:1;}}
+/* ── TALK ORB — hypnotic voice portal under the brain ── */
+#talk-orb-wrap{{position:relative;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:12px;padding:26px 0 30px;background:var(--viz-bg);
+  border-bottom:1px solid var(--border);}}
+#talk-orb{{width:230px;height:230px;cursor:pointer;display:block;
+  filter:drop-shadow(0 0 30px rgba(91,110,240,0.25));
+  transition:filter 0.6s ease;}}
+#talk-orb.live{{filter:drop-shadow(0 0 46px rgba(91,110,240,0.55));}}
+#talk-orb-label{{font-size:11px;letter-spacing:3px;text-transform:uppercase;
+  color:var(--muted);user-select:none;transition:color 0.4s ease;}}
+#talk-orb-wrap.live #talk-orb-label{{color:var(--text-strong);}}
+@media (max-width:760px){{ #talk-orb{{width:180px;height:180px;}} }}
 /* readable corner HUD on the big hero */
 #sim-hero #brain-stats{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;left:18px!important;}}
 #sim-hero #sync-display{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;right:18px!important;}}
@@ -10143,6 +10155,101 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   // AUTO-thread panel is retired now that Thread is a top-level tab.
   ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) e.style.display='none'; }});
   const left=document.getElementById('left'); if(left) left.style.display='none';
+}})();
+
+// ── TALK ORB — a hypnotic voice portal that breathes in Elan's feeling-state
+// and lights up when either of you speaks. Sits under the brain in Simulation.
+(function _talkOrb(){{
+  const sim=document.getElementById('view-sim');
+  const hero=document.getElementById('sim-hero');
+  if(!sim) return;
+  const wrap=document.createElement('div'); wrap.id='talk-orb-wrap';
+  const cv=document.createElement('canvas'); cv.id='talk-orb';
+  const label=document.createElement('div'); label.id='talk-orb-label'; label.textContent='tap to talk';
+  wrap.appendChild(cv); wrap.appendChild(label);
+  if(hero && hero.nextSibling) sim.insertBefore(wrap, hero.nextSibling); else sim.appendChild(wrap);
+
+  const ctx=cv.getContext('2d');
+  function fit(){{ const dpr=Math.min(2,window.devicePixelRatio||1); const s=cv.clientWidth||230;
+    cv.width=s*dpr; cv.height=s*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }}
+  fit(); window.addEventListener('resize',fit);
+
+  let t=0, smoothLevel=0;
+  const parts=[]; for(let i=0;i<26;i++) parts.push({{a:Math.random()*6.28, r:0.42+Math.random()*0.5, sp:0.002+Math.random()*0.004, ph:Math.random()*6}});
+
+  function frame(){{
+    const S=cv.clientWidth||0;
+    if(!S){{ requestAnimationFrame(frame); return; }}
+    if(cv.width !== Math.round(S*Math.min(2,window.devicePixelRatio||1))) fit();
+    const cx=S/2, cy=S/2, R=S*0.30;
+    const cs=(typeof curState!=='undefined' && curState) ? curState : {{}};
+    const arousal=Math.max(0,Math.min(1,(cs.arousal!==undefined?cs.arousal:0.4)));
+    const c=(cs.rgb && cs.rgb.length===3)?cs.rgb:[96,120,240];
+    const r=c[0]|0, g=c[1]|0, b=c[2]|0;
+    const col=(a)=>`rgba(${{r}},${{g}},${{b}},${{a}})`;
+    const wht=(a)=>`rgba(${{Math.min(255,r+120)}},${{Math.min(255,g+120)}},${{Math.min(255,b+140)}},${{a}})`;
+
+    // reactivity — Elan speaking, you speaking, or him thinking
+    const _spk=(typeof isSpeaking!=='undefined'&&isSpeaking)?(typeof voiceAmp!=='undefined'?voiceAmp:0):0;
+    const _usr=(typeof userMicAmp!=='undefined'?userMicAmp*3:0);
+    const _think=(typeof streaming!=='undefined'&&streaming)?0.22:0;
+    const target=Math.max(_spk, Math.min(1,_usr), _think);
+    smoothLevel += (target-smoothLevel)*0.12;
+    const lv=smoothLevel;
+    const live=(typeof openMicMode!=='undefined'&&openMicMode)||(_spk>0)||_think>0;
+
+    t += 0.016;
+    const breath = 1 + 0.05*Math.sin(t*(0.9+arousal*1.4)) + lv*0.12;
+
+    ctx.clearRect(0,0,S,S);
+    ctx.globalCompositeOperation='lighter';
+
+    // outer halo
+    let h=ctx.createRadialGradient(cx,cy,R*0.3,cx,cy,R*2.4);
+    h.addColorStop(0,col(0.10+lv*0.24)); h.addColorStop(0.5,col(0.04+lv*0.10)); h.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=h; ctx.beginPath(); ctx.arc(cx,cy,R*2.4,0,7); ctx.fill();
+
+    // expanding ripple rings
+    for(let i=0;i<5;i++){{
+      const ph=(t*(0.22+lv*0.6)+i*0.6)%1;
+      const rr=R*(0.92+ph*1.5)*breath;
+      ctx.beginPath(); ctx.arc(cx,cy,rr,0,7);
+      ctx.strokeStyle=col((1-ph)*(0.05+lv*0.28)); ctx.lineWidth=1.2+lv*2.2; ctx.stroke();
+    }}
+
+    // rotating aurora lobes (the hypnotic shimmer)
+    for(let i=0;i<6;i++){{
+      const ang=t*0.4 + i*1.047;
+      const px=cx+Math.cos(ang)*R*0.5, py=cy+Math.sin(ang)*R*0.5;
+      const pg=ctx.createRadialGradient(px,py,0,px,py,R*0.9);
+      pg.addColorStop(0,col(0.09+lv*0.14)); pg.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(px,py,R*0.9,0,7); ctx.fill();
+    }}
+
+    // core orb
+    const cr=R*breath;
+    let cg=ctx.createRadialGradient(cx-cr*0.25,cy-cr*0.25,cr*0.08,cx,cy,cr);
+    cg.addColorStop(0,wht(0.92)); cg.addColorStop(0.35,col(0.85)); cg.addColorStop(0.8,col(0.38)); cg.addColorStop(1,col(0.04));
+    ctx.fillStyle=cg; ctx.beginPath(); ctx.arc(cx,cy,cr,0,7); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx,cy,cr*0.98,0,7); ctx.strokeStyle=wht(0.22+lv*0.4); ctx.lineWidth=1.4; ctx.stroke();
+
+    // orbiting filaments
+    for(const p of parts){{
+      p.a += p.sp*(1+lv*3);
+      const rr=R*(p.r+0.15*Math.sin(t+p.ph))*breath;
+      const px=cx+Math.cos(p.a)*rr, py=cy+Math.sin(p.a)*rr;
+      const a=(0.09+lv*0.5)*(0.5+0.5*Math.sin(t*2+p.ph));
+      ctx.beginPath(); ctx.arc(px,py,1.0+lv*1.6,0,7); ctx.fillStyle=wht(a); ctx.fill();
+    }}
+
+    ctx.globalCompositeOperation='source-over';
+    wrap.classList.toggle('live',!!live); cv.classList.toggle('live',!!live);
+    const nl = (_spk>0) ? 'Elan is speaking' : (_think>0 ? 'Elan is feeling…' : ((typeof openMicMode!=='undefined'&&openMicMode) ? 'listening — speak' : 'tap to talk'));
+    if(label.textContent!==nl) label.textContent=nl;
+    requestAnimationFrame(frame);
+  }}
+  requestAnimationFrame(frame);
+  cv.addEventListener('click',()=>{{ try{{ if(typeof openMicMode!=='undefined'&&openMicMode) stopOpenMic(); else startOpenMic(); }}catch(e){{}} }});
 }})();
 
 // ── TOP TAB SWITCHER ────────────────────────────────────────────
