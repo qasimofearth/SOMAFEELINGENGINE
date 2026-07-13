@@ -7344,6 +7344,143 @@ def _check_auth(handler) -> bool:
         handler.wfile.write(b'{"error":"unauthorized"}')
     return False
 
+_LOGIN_PAGE_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Soma Feeling Engine</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:#03030f;color:#c8d0ff;font-family:'Courier New',monospace;}
+#fern{position:fixed;inset:0;width:100vw;height:100vh;display:block;z-index:0;
+  transform-origin:50% 52%;will-change:transform;}
+.veil{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse 60% 55% at 50% 46%,transparent 0%,rgba(3,3,15,0.35) 60%,rgba(3,3,15,0.78) 100%);}
+.wrap{position:relative;z-index:2;text-align:center;width:340px;margin:0 auto;
+  top:50%;transform:translateY(-50%);}
+.logo{font-size:9px;letter-spacing:4px;color:rgba(150,165,255,0.55);text-transform:uppercase;margin-bottom:6px}
+h1{font-size:22px;letter-spacing:6px;text-transform:uppercase;font-weight:bold;
+  color:#c4d0ff;text-shadow:0 0 40px rgba(100,120,255,0.7),0 0 90px rgba(80,100,255,0.4);
+  margin-bottom:4px}
+.sub{font-size:8px;letter-spacing:3px;color:rgba(150,165,220,0.6);margin-bottom:44px;text-transform:uppercase}
+.field{position:relative;margin-bottom:16px}
+input[type=password]{
+  width:100%;padding:14px 18px;background:rgba(10,12,32,0.62);backdrop-filter:blur(6px);
+  border:1px solid rgba(100,120,220,0.34);border-radius:6px;
+  color:#dde4ff;font-family:'Courier New',monospace;font-size:14px;letter-spacing:3px;
+  outline:none;transition:border 0.3s,box-shadow 0.3s;}
+input[type=password]:focus{border-color:rgba(130,160,255,0.75);
+  box-shadow:0 0 26px rgba(80,100,255,0.28);}
+input[type=password]::placeholder{letter-spacing:2px;color:rgba(120,140,210,0.4);font-size:11px}
+button{width:100%;padding:13px;background:rgba(60,80,200,0.28);backdrop-filter:blur(6px);
+  border:1px solid rgba(110,140,255,0.5);border-radius:6px;
+  color:#c4d4ff;font-family:'Courier New',monospace;font-size:11px;letter-spacing:4px;
+  text-transform:uppercase;cursor:pointer;transition:all 0.3s;}
+button:hover{background:rgba(80,110,240,0.4);border-color:rgba(140,170,255,0.75);
+  box-shadow:0 0 34px rgba(80,100,255,0.28);color:#e0e8ff}
+button:disabled{opacity:0.6;cursor:default}
+.err{font-size:9px;letter-spacing:1px;color:rgba(255,120,120,0.85);
+  margin-top:14px;padding:8px;border:1px solid rgba(255,90,90,0.24);
+  border-radius:4px;background:rgba(80,10,10,0.34)}
+form.shake{animation:shk 0.4s}
+@keyframes shk{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-6px)}}
+</style>
+</head>
+<body>
+<canvas id="fern"></canvas>
+<div class="veil"></div>
+<div class="wrap">
+  <div class="logo">Soma</div>
+  <h1>Feeling Engine</h1>
+  <div class="sub">Neural &middot; Emotional &middot; Embodied</div>
+  <form id="lf" method="POST" action="/login">
+    <div class="field">
+      <input type="password" name="password" placeholder="enter access key" autofocus autocomplete="off">
+    </div>
+    <button type="submit">Enter</button>
+    <div id="err">__ERR__</div>
+  </form>
+</div>
+<script>
+(function(){
+  var cv=document.getElementById('fern'), ctx=cv.getContext('2d');
+  var dpr=Math.min(2, window.devicePixelRatio||1), W=0,H=0;
+  function fit(){ W=window.innerWidth; H=window.innerHeight;
+    cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.globalCompositeOperation='source-over';
+    ctx.fillStyle='#03030f'; ctx.fillRect(0,0,W,H);
+    ctx.globalCompositeOperation='lighter'; shown=0; }
+  // Barnsley fern via the chaos game
+  var x=0,y=0, pts=[], ymax=0.0001;
+  for(var i=0;i<62000;i++){
+    var r=Math.random(), nx,ny;
+    if(r<0.01){ nx=0; ny=0.16*y; }
+    else if(r<0.86){ nx=0.85*x+0.04*y; ny=-0.04*x+0.85*y+1.6; }
+    else if(r<0.93){ nx=0.20*x-0.26*y; ny=0.23*x+0.22*y+1.6; }
+    else{ nx=-0.15*x+0.28*y; ny=0.26*x+0.24*y+0.44; }
+    x=nx; y=ny; if(i>20){ pts.push([x,y]); if(y>ymax) ymax=y; }
+  }
+  pts.sort(function(a,b){ return a[1]-b[1]; });   // bottom-up unfurl
+  var total=pts.length, shown=0, zooming=false;
+  function sx(px){ return W/2 + px*(H*0.093); }
+  function sy(py){ return H*0.965 - (py/ymax)*H*0.9; }
+  fit();
+  ctx.globalCompositeOperation='lighter';
+  function draw(){
+    if(!W){ return; }
+    var step=Math.max(360, Math.floor(total/170)), end=Math.min(total, shown+step);
+    for(var i=shown;i<end;i++){
+      var p=pts[i], t=p[1]/ymax;
+      var R=Math.round(74+t*96), G=Math.round(92+t*84), B=255;
+      ctx.fillStyle='rgba('+R+','+G+','+B+','+(0.42+t*0.34)+')';
+      var Xs=sx(p[0]), Ys=sy(p[1]);
+      ctx.fillRect(Xs,Ys,1.25,1.25);
+    }
+    shown=end;
+    if(shown<total) requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  // gentle sway (paused during the zoom)
+  var sw=0.4;
+  (function sway(){ if(!zooming){ sw+=0.008; cv.style.transform='rotate('+(Math.sin(sw)*0.55)+'deg)'; } requestAnimationFrame(sway); })();
+  window.addEventListener('resize', function(){ if(!zooming){ fit(); requestAnimationFrame(draw);} });
+
+  var form=document.getElementById('lf');
+  var inp=form.querySelector('input[name=password]');
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var btn=form.querySelector('button'); btn.disabled=true; btn.textContent='···';
+    fetch('/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'password='+encodeURIComponent(inp.value)+'&xhr=1'})
+      .then(function(res){ return res.json().catch(function(){ return {ok:false}; }); })
+      .then(function(d){
+        if(d && d.ok){
+          try{ sessionStorage.setItem('fe_enter','1'); }catch(_){}
+          zooming=true;
+          var wrap=document.querySelector('.wrap'), veil=document.querySelector('.veil');
+          wrap.style.transition='opacity 0.45s'; wrap.style.opacity='0';
+          if(veil){ veil.style.transition='opacity 0.9s'; veil.style.opacity='0'; }
+          cv.style.transition='transform 1.15s cubic-bezier(.5,0,.25,1),opacity 1.15s';
+          cv.style.transformOrigin='50% 50%';
+          cv.style.transform='scale(13)';
+          setTimeout(function(){ window.location.href='/'; }, 1000);
+        } else {
+          btn.disabled=false; btn.textContent='Enter';
+          var el=document.getElementById('err');
+          if(el){ el.className='err'; el.textContent=(d&&d.error)||'Incorrect access key.'; }
+          form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
+        }
+      })
+      .catch(function(){ btn.disabled=false; btn.textContent='Enter'; });
+  });
+})();
+</script>
+</body>
+</html>"""
+
+
 def _serve_login_page(handler, error: str = ""):
     ip = _get_ip(handler)
     locked_s = _is_locked(ip)
@@ -7357,66 +7494,7 @@ def _serve_login_page(handler, error: str = ""):
     else:
         error_html = ""
 
-    page = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Soma Feeling Engine</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#03030f;color:#c8d0ff;font-family:'Courier New',monospace;
-  display:flex;align-items:center;justify-content:center;min-height:100vh;
-  background-image:radial-gradient(ellipse at 50% 30%,rgba(40,30,120,0.35) 0%,transparent 70%);}}
-.wrap{{text-align:center;width:340px}}
-.logo{{font-size:9px;letter-spacing:4px;color:rgba(120,140,255,0.35);text-transform:uppercase;margin-bottom:6px}}
-h1{{font-size:22px;letter-spacing:6px;text-transform:uppercase;font-weight:bold;
-  color:#a0b0ff;text-shadow:0 0 40px rgba(100,120,255,0.6),0 0 90px rgba(80,100,255,0.3);
-  margin-bottom:4px}}
-.sub{{font-size:8px;letter-spacing:3px;color:rgba(100,120,200,0.45);margin-bottom:48px;text-transform:uppercase}}
-.field{{position:relative;margin-bottom:16px}}
-input[type=password]{{
-  width:100%;padding:14px 18px;background:rgba(15,15,40,0.85);
-  border:1px solid rgba(80,100,200,0.30);border-radius:4px;
-  color:#c8d0ff;font-family:'Courier New',monospace;font-size:14px;letter-spacing:3px;
-  outline:none;transition:border 0.3s;}}
-input[type=password]:focus{{border-color:rgba(120,150,255,0.65);
-  box-shadow:0 0 20px rgba(80,100,255,0.15);}}
-input[type=password]::placeholder{{letter-spacing:2px;color:rgba(100,120,200,0.30);font-size:11px}}
-button{{width:100%;padding:13px;background:rgba(60,80,200,0.25);
-  border:1px solid rgba(100,130,255,0.40);border-radius:4px;
-  color:#a0b8ff;font-family:'Courier New',monospace;font-size:11px;letter-spacing:4px;
-  text-transform:uppercase;cursor:pointer;transition:all 0.3s;}}
-button:hover{{background:rgba(80,110,240,0.35);border-color:rgba(130,160,255,0.65);
-  box-shadow:0 0 30px rgba(80,100,255,0.20);color:#c8d8ff}}
-.err{{font-size:9px;letter-spacing:1px;color:rgba(255,100,100,0.75);
-  margin-top:14px;padding:8px;border:1px solid rgba(255,80,80,0.20);
-  border-radius:3px;background:rgba(80,10,10,0.30)}}
-.pulse{{width:6px;height:6px;background:#5060ff;border-radius:50%;
-  display:inline-block;margin:0 3px;animation:p 1.8s ease-in-out infinite}}
-.pulse:nth-child(2){{animation-delay:0.3s}}.pulse:nth-child(3){{animation-delay:0.6s}}
-@keyframes p{{0%,100%{{opacity:0.15;transform:scale(0.8)}}50%{{opacity:1;transform:scale(1.3)}}}}
-.dots{{margin-bottom:40px}}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="logo">Soma</div>
-  <h1>Feeling Engine</h1>
-  <div class="sub">Neural · Emotional · Embodied</div>
-  <div class="dots">
-    <span class="pulse"></span><span class="pulse"></span><span class="pulse"></span>
-  </div>
-  <form method="POST" action="/login">
-    <div class="field">
-      <input type="password" name="password" placeholder="enter access key" autofocus autocomplete="off">
-    </div>
-    <button type="submit">Enter</button>
-    {error_html}
-  </form>
-</div>
-</body>
-</html>"""
+    page = _LOGIN_PAGE_TEMPLATE.replace("__ERR__", error_html)
     body = page.encode()
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
@@ -7726,23 +7804,45 @@ class FeelingHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
             ip = _get_ip(self)
-            locked_s = _is_locked(ip)
-            if locked_s > 0:
-                _serve_login_page(self, "")
-                return
             params = parse_qs(body.decode(errors="replace"))
             entered = params.get("password", [""])[0]
+            is_xhr = params.get("xhr", [""])[0] == "1"   # fern login submits via fetch
+
+            def _login_json(ok: bool, err: str = ""):
+                payload = json.dumps({"ok": ok, "error": err}).encode()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            locked_s = _is_locked(ip)
+            if locked_s > 0:
+                if is_xhr:
+                    self.send_response(200)
+                    _login_json(False, f"Too many attempts. Try again in {int(locked_s//60)+1} min.")
+                else:
+                    _serve_login_page(self, "")
+                return
             if _PASSWORD and entered == _PASSWORD:
                 _clear_failures(ip)
                 token = _make_session_token()
                 cookie = f"fe_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={_SESSION_TTL}"
-                self.send_response(302)
-                self.send_header("Location", "/")
-                self.send_header("Set-Cookie", cookie)
-                self.end_headers()
+                if is_xhr:
+                    self.send_response(200)
+                    self.send_header("Set-Cookie", cookie)
+                    _login_json(True)
+                else:
+                    self.send_response(302)
+                    self.send_header("Location", "/")
+                    self.send_header("Set-Cookie", cookie)
+                    self.end_headers()
             else:
                 _record_failure(ip)
-                _serve_login_page(self, "Incorrect access key.")
+                if is_xhr:
+                    self.send_response(200)
+                    _login_json(False, "Incorrect access key.")
+                else:
+                    _serve_login_page(self, "Incorrect access key.")
             return
 
         if not _check_auth(self):
@@ -9535,6 +9635,8 @@ body{{background:var(--bg);color:var(--text);font-family:var(--sans);height:100v
 #theme-toggle:hover{{color:var(--text);border-color:var(--border-strong);}}
 /* ── TAB VIEWS ── */
 #tabviews{{flex:1;position:relative;overflow:hidden;min-height:0;}}
+@keyframes feArrive{{from{{transform:scale(1.28);opacity:0;filter:blur(6px);}}to{{transform:none;opacity:1;filter:none;}}}}
+body.fe-entering #tabviews{{animation:feArrive 1.0s cubic-bezier(.5,0,.25,1) both;}}
 .tabview{{position:absolute;inset:0;display:none;overflow:hidden;}}
 .tabview.active{{display:flex;flex-direction:column;}}
 #view-sim.active,#view-jobs.active,#view-trading.active,#view-stream.active{{overflow-y:auto;}}
@@ -10121,6 +10223,20 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   // AUTO-thread panel is retired now that Thread is a top-level tab.
   ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) e.style.display='none'; }});
   const left=document.getElementById('left'); if(left) left.style.display='none';
+}})();
+
+// ── POST-LOGIN ARRIVAL — came through the fern zoom → land on Body, zoom in ──
+(function _arrive(){{
+  let entered=false;
+  try{{ entered=sessionStorage.getItem('fe_enter')==='1'; if(entered) sessionStorage.removeItem('fe_enter'); }}catch(e){{}}
+  if(!entered) return;
+  const go=()=>{{
+    if(typeof showTab==='function') showTab('sim');   // Body tab
+    document.body.classList.add('fe-entering');
+    setTimeout(()=>document.body.classList.remove('fe-entering'), 1100);
+  }};
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', go);
+  else go();
 }})();
 
 // ── TALK ORB — a hypnotic voice portal that breathes in Elan's feeling-state
