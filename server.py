@@ -634,7 +634,9 @@ def _is_quiet_hour() -> bool:
         return start <= now_hour < end
     # Overnight wrap (e.g., 22-6 means 22:00 UTC through 06:00 UTC)
     return now_hour >= start or now_hour < end
-_autonomous_mode = False
+# Default ON at launch whenever autonomous is allowed — the wake cycle arms
+# itself on boot so it doesn't need to be clicked on each time (see _background_init).
+_autonomous_mode = _ELAN_AUTONOMOUS_ENABLED
 _autonomous_timer = None
 _autonomous_interval = max(_AUTONOMOUS_MIN_INTERVAL, _AUTONOMOUS_DEFAULT_INTERVAL)
 
@@ -13526,6 +13528,15 @@ if __name__ == "__main__":
 
         # ── Seed brain from memory baseline ──
         _seed_brain_from_memory()
+
+        # ── Arm the autonomous wake cycle on boot (default ON when allowed) ──
+        # First wake fires one interval out, not immediately.
+        try:
+            if _autonomous_mode:
+                _schedule_autonomous()
+                print(f"  [AUTO] Autonomous wake cycle armed on boot — first wake in ~{_autonomous_interval//60} min")
+        except Exception as ae:
+            print(f"  [AUTO] Arm-on-boot warning: {ae}")
 
     _init_thread = threading.Thread(target=_background_init, daemon=True)
     _init_thread.start()
