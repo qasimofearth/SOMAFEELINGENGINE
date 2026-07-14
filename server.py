@@ -9362,26 +9362,37 @@ function refreshDegen(){
         if (ivNow < 30)       dteHint = '30-60d (cheap vol — buy time)';
         else if (ivNow < 60)  dteHint = '14-30d (balanced)';
         else                  dteHint = '7-14d (expensive — avoid theta)';
-        // Engine action
+        // Engine action (redesigned engine: trend-spine + expected-move + tier)
         const action = (optSig.action || 'unknown').toUpperCase();
         const conv = optSig.conviction || 0;
-        const reason = (optSig.reason || '').slice(0, 120);
-        const days_out = optSig.days_out;
-        const otm_pct = optSig.otm_pct;
+        const tier = (optSig.tier && optSig.tier !== '-') ? optSig.tier : '';
+        const reason = (optSig.reason || '').slice(0, 140);
+        const thesis = optSig.thesis || '';
+        const engineDte = optSig.days_out;
+        const needs = optSig.needs_pct, expm = optSig.exp_move_pct, favor = optSig.favorability;
         let actColor;
         if (action === 'WAIT')                  actColor = 'rgba(255,200,140,0.85)';
         else if (action.startsWith('BUY'))      actColor = 'rgba(127,255,176,0.85)';
         else                                    actColor = 'rgba(200,220,255,0.85)';
+        const tierColor = tier==='A' ? 'rgba(127,255,176,0.92)' : (tier==='B' ? 'rgba(200,220,255,0.85)' : 'rgba(255,205,150,0.85)');
+        // the options "R:R": the move it needs vs the move the vol implies
+        const moveLine = (needs!=null && expm!=null)
+          ? `needs ${needs}% vs expected ±${expm}%${favor!=null?` · favor ${favor}`:''}`
+          : (expm!=null ? `expected move ±${expm}% over the window` : '');
+        const detail = thesis || reason;
         // Pill in header
-        if (optSigPill) optSigPill.textContent = `${action} · IV ${ivNow.toFixed(0)}% (${ivLabel.toLowerCase()})`;
-        // Body — three rows
+        if (optSigPill) optSigPill.textContent = `${action}${tier?' '+tier:''} · IV ${ivNow.toFixed(0)}% (${ivLabel.toLowerCase()})`;
+        // Body
         const rows = [
           `<div class="k-row"><span class="k-tk">IV rank</span><span style="color:${ivColor};letter-spacing:1.5px">${ivNow.toFixed(0)}% · ${ivLabel}</span></div>`,
           `<div class="k-row"><span class="k-tk">DVOL</span><span>${dvolNow.toFixed(0)}% · ${dvolTrend}</span></div>`,
-          `<div class="k-row"><span class="k-tk">suggested DTE</span><span style="color:rgba(180,200,240,0.75);font-size:11px">${dteHint}</span></div>`,
-          `<div class="k-row has-detail"><span class="k-tk">engine</span><span class="k-side" style="color:${actColor};letter-spacing:1.5px">${action}</span>`
-            + `<span>conv ${Math.round(conv*100)}%</span></div>`
-            + (reason ? `<div class="k-row-detail"><i>${reason}</i>${days_out?` · target ${days_out}d`:''}${otm_pct?` · ${(otm_pct*100).toFixed(0)}% OTM`:''}</div>` : ''),
+          `<div class="k-row"><span class="k-tk">expiry</span><span style="color:rgba(180,200,240,0.75);font-size:11px">${engineDte?`${engineDte}d`:dteHint} · cap 10d</span></div>`,
+          `<div class="k-row has-detail"><span class="k-tk">engine</span>`
+            + `<span class="k-side" style="color:${actColor};letter-spacing:1.5px">${action}</span>`
+            + (tier?`<span style="color:${tierColor};font-weight:600;font-size:11px;margin-left:6px">${tier}</span>`:'')
+            + `<span style="margin-left:auto">conv ${Math.round(conv*100)}%</span></div>`
+            + (detail ? `<div class="k-row-detail"><i>${detail}</i></div>` : '')
+            + (moveLine ? `<div class="k-row-detail" style="color:rgba(150,180,225,0.62);font-style:normal">${moveLine}</div>` : ''),
         ];
         optSigEl.innerHTML = rows.join('');
       }
