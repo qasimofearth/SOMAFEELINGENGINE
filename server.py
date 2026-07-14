@@ -9302,15 +9302,28 @@ function refreshDegen(){
       .sort((a,b)=>(b[1].conviction||0)-(a[1].conviction||0))
       .slice(0,6);
     const sigEl = document.getElementById('d-signals');
-    if(sigs.length===0){ sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no spot signals</div>'; }
+    if(sigs.length===0){ sigEl.innerHTML = '<div style="color:rgba(140,170,210,0.4);font-size:11px;padding:8px 0">no clean setups right now</div>'; }
     else{
       sigEl.innerHTML = sigs.map(([pair, d])=>{
         const side = (d.side||'').toLowerCase();
         const sideCls = side==='long' ? 'yes' : (side==='short' ? 'no' : '');
-        return `<div class="k-row"><span class="k-tk">${pair}</span>`
-             + `<span class="k-side ${sideCls}">${d.signal}</span>`
-             + `<span>$${d.price}</span>`
-             + `<span>conv ${Math.round((d.conviction||0)*100)}%</span></div>`;
+        const tier = d.tier||'-';
+        const conv = Math.round((d.conviction||0)*100);
+        const tierColor = tier==='A' ? 'rgba(127,255,176,0.92)' : (tier==='B' ? 'rgba(200,220,255,0.85)' : 'rgba(255,205,150,0.85)');
+        const rr = (d.rr!=null && d.rr>0) ? ('R:R '+d.rr) : '';
+        const flag = d.counter_trend ? ' <span style="color:rgba(255,180,120,0.9)">· reversal</span>' : '';
+        const esl = (d.entry && d.stop && d.target)
+          ? `entry ${d.entry} · stop ${d.stop} · tgt ${d.target}` : '';
+        return `<div style="padding:6px 0;border-bottom:1px solid rgba(80,110,200,0.07)">`
+             + `<div class="k-row" style="margin:0">`
+             +   `<span class="k-tk">${pair}</span>`
+             +   `<span class="k-side ${sideCls}">${d.signal}</span>`
+             +   `<span style="flex:1;color:rgba(190,205,240,0.82);font-size:11px;letter-spacing:0.5px">${d.setup||''}${flag}</span>`
+             +   `<span style="color:${tierColor};font-weight:600;font-size:11px">${tier} ${conv}%</span>`
+             +   `<span style="color:rgba(160,180,220,0.72);font-size:11px;margin-left:8px">${rr}</span>`
+             + `</div>`
+             + (esl ? `<div style="font-size:9px;color:rgba(150,170,210,0.5);letter-spacing:0.5px;margin-top:2px">${esl}</div>` : '')
+             + `</div>`;
       }).join('');
     }
 
