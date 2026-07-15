@@ -4262,6 +4262,53 @@ def reading_log_read(limit: int = 60) -> list:
         return []
 
 
+def _source_stats() -> dict:
+    """TRUE all-time counts for the Source cards — reads the whole files rather
+    than a windowed slice, so the numbers keep climbing instead of plateauing at
+    the query limits (that was the 'stale 60/33/26' bug)."""
+    disc_total = 0
+    latest_title = ""
+    latest_ts = ""
+    try:
+        if os.path.exists(_DISCOVERIES_FILE):
+            with open(_DISCOVERIES_FILE) as f:
+                dlines = [ln for ln in f if ln.strip()]
+            disc_total = len(dlines)
+            if dlines:
+                try:
+                    last = json.loads(dlines[-1])
+                    latest_title = last.get("title", "") or ""
+                    latest_ts = last.get("ts", "") or ""
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    searches = reads = 0
+    try:
+        if os.path.exists(_READING_LOG_FILE):
+            with open(_READING_LOG_FILE) as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        r = json.loads(ln)
+                    except Exception:
+                        continue
+                    kind = str(r.get("kind", ""))
+                    if not (kind.startswith("source") or kind.startswith("mcp:source")):
+                        continue
+                    tool = str(r.get("tool", ""))
+                    if tool.startswith("search"):
+                        searches += 1
+                    elif tool.startswith("get_") or tool == "list_books":
+                        reads += 1
+    except Exception:
+        pass
+    return {"discoveries": disc_total, "searches": searches, "reads": reads,
+            "latest_title": latest_title, "latest_ts": latest_ts}
+
+
 def journal_append(entry: dict):
     try:
         entry = {**entry, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
@@ -7772,6 +7819,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             if not _SOURCE_LIBRARY_ENABLED:
                 self.send_response(404); self.end_headers(); return
             self.send_json({"entries": notebook_read(limit=60, domain="library")})
+        elif path == "/source/stats":
+            if not _SOURCE_LIBRARY_ENABLED:
+                self.send_response(404); self.end_headers(); return
+            self.send_json(_source_stats())
         elif path == "/source/activity":
             if not _SOURCE_LIBRARY_ENABLED:
                 self.send_response(404); self.end_headers(); return
@@ -8650,14 +8701,18 @@ function _jobOpened(name){
 }
 
 function refreshSource(){
+  // True all-time totals for the cards (not window-capped — fixes the stale 60/33/26)
+  fetch('/source/stats',{cache:'no-store'}).then(r=>r.json()).then(st=>{
+    if(!st) return;
+    const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null) e.textContent=v;};
+    set('s-disc-count', st.discoveries);
+    set('s-search-count', st.searches);
+    set('s-read-count', st.reads);
+    if(st.latest_title) set('s-latest', st.latest_title.slice(0,18));
+    if(st.latest_ts) set('s-latest-when', st.latest_ts.slice(0,16).replace('T',' '));
+  }).catch(()=>{});
   fetch('/source/discoveries',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const ds = (d && d.discoveries) || [];
-    document.getElementById('s-disc-count').textContent = ds.length;
-    if(ds.length){
-      const latest = ds[ds.length-1];
-      document.getElementById('s-latest').textContent = (latest.title||'').slice(0,18);
-      document.getElementById('s-latest-when').textContent = (latest.ts||'').slice(0,16).replace('T',' ');
-    }
     const el = document.getElementById('s-discoveries');
     if(!el) return;
     if(ds.length===0){
@@ -8705,10 +8760,7 @@ function refreshSource(){
   }).catch(()=>{});
   fetch('/source/activity',{cache:'no-store'}).then(r=>r.json()).then(d=>{
     const act = (d && d.activity) || [];
-    const searches = act.filter(x=>x.tool && x.tool.startsWith('search')).length;
-    const reads    = act.filter(x=>x.tool && (x.tool.startsWith('get_') || x.tool === 'list_books')).length;
-    document.getElementById('s-search-count').textContent = searches;
-    document.getElementById('s-read-count').textContent   = reads;
+    // (search/read totals now come from /source/stats — all-time, not this window)
     const el = document.getElementById('s-activity');
     if(!el) return;
     if(act.length===0){
