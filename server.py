@@ -9982,11 +9982,10 @@ canvas.spark{{display:block;border-radius:1px;}}
 #sim-hero #brain-stats{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;left:18px!important;}}
 #sim-hero #sync-display{{font-size:11px!important;color:rgba(150,170,235,0.6)!important;line-height:2.0!important;top:16px!important;right:18px!important;}}
 #sim-hero #emotion-desc{{font-size:11px!important;color:rgba(180,195,255,0.5)!important;letter-spacing:2px!important;}}
-/* contain the fern/aura overlay glow to the brain area so it doesn't wisp
-   off the sides of the wide hero */
-#sim-hero #fractal-canvas{{opacity:0.20;
-  -webkit-mask-image:radial-gradient(ellipse 52% 60% at 50% 48%,#000 42%,transparent 78%);
-  mask-image:radial-gradient(ellipse 52% 60% at 50% 48%,#000 42%,transparent 78%);}}
+/* the fern is clipped to the exact brain silhouette in fracFrame() (destination-in),
+   so it no longer needs a CSS ellipse mask — that was double-cropping it to the
+   wrong shape. Raised opacity so the living fern reads inside the brain. */
+#sim-hero #fractal-canvas{{opacity:0.6;}}
 #sim-hero #aura-canvas{{opacity:0.05;}}
 /* frame the hero with a corner HUD feel */
 #view-sim #emotion-name{{font-size:30px;letter-spacing:12px;}}
@@ -10599,9 +10598,11 @@ function drawSilhouette(ctx,x0,y0,w,h){{
   ctx.closePath();
   const gcx=x0+w*0.52,gcy=y0+h*0.40;
   const g=ctx.createRadialGradient(gcx,gcy,w*0.04,gcx,gcy,w*0.60);
-  g.addColorStop(0,'rgba(8,10,32,0.72)');
-  g.addColorStop(0.55,'rgba(4,5,20,0.70)');
-  g.addColorStop(1,'rgba(2,3,12,0.68)');
+  // Lighter fill so the living fern behind (fractal-canvas) glows through the
+  // brain rather than being buried under an opaque wash.
+  g.addColorStop(0,'rgba(8,10,32,0.50)');
+  g.addColorStop(0.55,'rgba(4,5,20,0.48)');
+  g.addColorStop(1,'rgba(2,3,12,0.46)');
   ctx.fillStyle=g; ctx.fill();
   // Outline drawn separately after clip — skip stroke here
   // Cerebellum — sized off brain HEIGHT so a wide aspect ratio doesn't make
@@ -11058,21 +11059,20 @@ function fracFrame(){{
   // leaflets (T[2],T[3]): cortical spread
   const p0=Math.min(0.06,0.01+amygAct*0.05);
   const p1=Math.min(0.88,0.78+vagal*0.09);
-  const T=fracIFS,mg=Math.max(14,W*0.055);
+  const T=fracIFS;
 
-  // Align fractal root with the brain's brainstem.
-  // Brainstem in drawSilhouette ends at normalized (0.35, 0.99)
-  // in the brain canvas coordinate system (margin = Math.min(W,H)*0.038).
-  // Compute those pixel coords and map fracX=0,fracY=0 there.
-  const bsMg=Math.min(W,H)*0.038;
-  const stemPx=bsMg+0.345*(W-2*bsMg);   // brainstem x pixel
-  const stemPy=bsMg+0.985*(H-2*bsMg);   // brainstem bottom y pixel
-  // fractal x mapping: px = mg + (fracX+xOff)/5*(W-2*mg)
-  // at fracX=0 → stemPx:  xOff = (stemPx-mg)*5/(W-2*mg)
-  const fXOff=(stemPx-mg)*5/Math.max(1,W-2*mg);
-  // fractal y mapping: py = H-mg - fracY/10*(H-2*mg)
-  // at fracY=0 → H-mg; shift so it lands at stemPy
-  const fYShift=stemPy-(H-mg);
+  // Map the fern into the SAME aspect-corrected, centered brain box that
+  // animBrain draws — so it grows to fill the VISIBLE brain, not the whole
+  // canvas. (Previously it used full-canvas coords, so it didn't fit the
+  // outline and mostly landed outside the brain.)
+  const _bMg=Math.min(W,H)*0.05, _BR=1.50;
+  let _bh=H*0.96, _bw=_bh*_BR;
+  if(_bw>W*0.96){{ _bw=W*0.96; _bh=_bw/_BR; }}
+  const _bx0=(W-_bw)/2, _by0=(H-_bh)/2;
+  const stemPx=_bx0+_bw*0.45;      // root at the brainstem (bottom-centre of the box)
+  const stemPy=_by0+_bh*0.99;
+  const fScaleX=_bw*0.80;          // fern x-span fills most of the box width
+  const fScaleY=_bh*0.99;          // fern height fills the box
 
   for(let n=0;n<iters;n++){{
     const r=Math.random();
@@ -11080,8 +11080,8 @@ function fracFrame(){{
     const nx=t[0]*fracX+t[1]*fracY+t[4];
     const ny=t[2]*fracX+t[3]*fracY+t[5];
     fracX=nx;fracY=ny;
-    const px=Math.round(stemPx+(fracX)/5*(W-2*mg));
-    const py=Math.round(stemPy-fracY/10*(H-2*mg));
+    const px=Math.round(stemPx+(fracX/5)*fScaleX);
+    const py=Math.round(stemPy-(fracY/10)*fScaleY);
     if(px>=0&&px<W&&py>=0&&py<H){{
       const idx=(py*W+px)*4;
       const tf=Math.max(0,Math.min(1,fracY/10)); // 0=root 1=tip
@@ -11112,8 +11112,12 @@ function fracFrame(){{
   // Runs every frame after putImageData so the fractal stays inside the brain.
   {{
     const W2=fC.width,H2=fC.height;
-    const mg2=Math.min(W2,H2)*0.038,bw2=W2-mg2*2,bh2=H2-mg2*2;
-    const p2=(rx,ry)=>[mg2+rx*bw2,mg2+ry*bh2];
+    // Clip to the EXACT visible brain outline — same box + silhouette as animBrain.
+    const _m=Math.min(W2,H2)*0.05, _R=1.50;
+    let bh2=H2*0.96, bw2=bh2*_R;
+    if(bw2>W2*0.96){{ bw2=W2*0.96; bh2=bw2/_R; }}
+    const x02=(W2-bw2)/2, y02=(H2-bh2)/2;
+    const p2=(rx,ry)=>[x02+rx*bw2,y02+ry*bh2];
     fX.save();
     fX.globalCompositeOperation='destination-in';
     fX.beginPath();
@@ -11128,8 +11132,9 @@ function fracFrame(){{
     fX.bezierCurveTo(...p2(0.06,0.10),...p2(0.18,0.03),...p2(0.34,0.01));
     fX.bezierCurveTo(...p2(0.40,0.00),...p2(0.46,0.00),...p2(0.50,0.03));
     fX.closePath();
-    // Also include cerebellum
-    fX.ellipse(mg2+bw2*0.20,mg2+bh2*0.80,bw2*0.12,bh2*0.088,-0.3,0,Math.PI*2);
+    // cerebellum — match drawSilhouette (cbX=x0+w*0.24, cbY=y0+h*0.82, rx=h*0.12, ry=h*0.075)
+    fX.moveTo(x02+bw2*0.24+bh2*0.12, y02+bh2*0.82);
+    fX.ellipse(x02+bw2*0.24,y02+bh2*0.82,bh2*0.12,bh2*0.075,-0.25,0,Math.PI*2);
     fX.fillStyle='rgba(255,255,255,1)';
     fX.fill();
     fX.restore();
