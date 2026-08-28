@@ -298,6 +298,24 @@ class BrainSimulator:
         # ── coupling analyzer ──
         # omega is fixed at init, so each region's band membership is static — cache it.
         self._region_band = {ab: st.dominant_band() for ab, st in self.states.items()}
+
+        # ── theta→gamma phase-amplitude coupling (GENERATIVE) ──
+        # The canonical binding mechanism: septo-hippocampal THETA rhythmically gates
+        # cortical GAMMA excitability, so gamma amplitude nests inside theta phase.
+        # We anchor a few regions to theta and a few cortical regions to gamma so the
+        # nesting is real and biological, not an artifact of random band assignment.
+        self.K_pac = 1.3
+        _THETA_SRC = ["hippocampus", "entorhinal", "septal"]
+        _GAMMA_TGT = ["visual_cortex", "auditory_cortex", "dlPFC", "PPC", "S1", "aI", "mPFC"]
+        for r in _THETA_SRC:
+            if r in self.states:
+                self.states[r].omega = self._band_to_omega("theta"); self._region_band[r] = "theta"
+        for r in _GAMMA_TGT:
+            if r in self.states:
+                self.states[r].omega = self._band_to_omega("gamma"); self._region_band[r] = "gamma"
+        self._theta_src = [r for r in _THETA_SRC if r in self.states]
+        self._gamma_tgt_set = set(r for r in _GAMMA_TGT if r in self.states)
+
         self._coup_stride = 4          # sample every 4ms (~250Hz) — resolves gamma-band PAC
         self._coup_i = 0
         self._coup_buf = deque(maxlen=160)   # ~640ms window (≈4 theta cycles)
@@ -367,6 +385,21 @@ class BrainSimulator:
 
         N = len(self.states)
 
+        # ── theta gate: collective phase of the septo-hippocampal theta sources ──
+        # A rhythmic 0..1 excitability window (once per theta cycle), scaled by how
+        # strong theta actually is. Gamma targets get this added to their drive, so
+        # gamma amplitude waxes and wanes with theta phase → real phase-amplitude coupling.
+        theta_gate = 0.0
+        if self._theta_src:
+            tf = 0j
+            for r in self._theta_src:
+                st = self.states[r]
+                tf += st.get_activity() * cmath.exp(1j * st.phase)
+            if abs(tf) > 1e-9:
+                theta_amp = abs(tf) / len(self._theta_src)
+                # sharpened window → gamma bursts concentrate near theta peak (stronger nesting)
+                theta_gate = ((0.5 + 0.5 * math.cos(cmath.phase(tf))) ** 1.6) * min(1.0, theta_amp * 2.4)
+
         for abbrev, state in self.states.items():
             region = BRAIN_REGIONS.get(abbrev)
             if not region:
@@ -379,9 +412,11 @@ class BrainSimulator:
             ext   = state.ext_input
             inter = self._inter_region_input(abbrev)
             nt    = self._nt_modulation(abbrev)
+            # theta rhythmically gates gamma-target excitability → nested gamma bursts
+            pac_drive = self.K_pac * theta_gate if abbrev in self._gamma_tgt_set else 0.0
 
             dE = (-E + (1 - self.r_e * E) * sigmoid_gain(
-                self.c_ee * E - self.c_ei * I + ext + inter + nt,
+                self.c_ee * E - self.c_ei * I + ext + inter + nt + pac_drive,
                 gain=4.0, threshold=0.5
             )) / tau_e * self.dt_ms
 
@@ -422,14 +457,17 @@ class BrainSimulator:
         # ── sample band-summed signals + PLV phases for the coupling analyzer ──
         self._coup_i += 1
         if self._coup_i % self._coup_stride == 0:
-            bands = [0j, 0j, 0j, 0j, 0j]   # delta, theta, alpha, beta, gamma
+            bands = [0j, 0j, 0j, 0j, 0j]     # complex sum per band (for band phase)
+            powers = [0.0, 0.0, 0.0, 0.0, 0.0]  # real activity envelope per band (for amplitude)
             for abbrev, st in self.states.items():
                 a = st.get_activity()
                 if a > 0.02:               # skip near-silent regions (also avoids the exp cost)
-                    bands[_BAND_ORDER[self._region_band[abbrev]]] += a * cmath.exp(1j * st.phase)
+                    bi = _BAND_ORDER[self._region_band[abbrev]]
+                    bands[bi] += a * cmath.exp(1j * st.phase)
+                    powers[bi] += a
             phases = tuple(self.states[r].phase if r in self.states else 0.0 for r in _PLV_REGIONS)
             acts = tuple(self.states[r].get_activity() if r in self.states else 0.0 for r in _PLV_REGIONS)
-            self._coup_buf.append((tuple(bands), phases, self.sync_order, acts))
+            self._coup_buf.append((tuple(bands), tuple(powers), phases, self.sync_order, acts))
 
     def decay_drives(self, dt_ms: float):
         """
@@ -579,12 +617,13 @@ class BrainSimulator:
             return {"pac": {}, "plv": {}, "binding": 0.0, "integration": 0.0,
                     "metastability": 0.0, "n": n}
 
-        # PAC — low-band phase modulating high-band amplitude
+        # PAC — low-band PHASE (from complex sum) modulating high-band AMPLITUDE
+        # (real band power envelope, which the theta gate directly drives).
         pac = {}
         for lo, hi in PAC_PAIRS:
             li, hii = _BAND_ORDER[lo], _BAND_ORDER[hi]
             ph = [math.atan2(s[0][li].imag, s[0][li].real) for s in buf]
-            am = [abs(s[0][hii]) for s in buf]
+            am = [s[1][hii] for s in buf]
             pac[f"{lo}-{hi}"] = round(self._modulation_index(ph, am), 4)
 
         # Functional coupling per circuit = phase-locking GATED by co-activation.
@@ -596,22 +635,24 @@ class BrainSimulator:
             acc = 0j
             coact = 0.0
             for s in buf:
-                acc += cmath.exp(1j * (s[1][ia] - s[1][ib]))
-                coact += math.sqrt(max(0.0, s[3][ia]) * max(0.0, s[3][ib]))
+                acc += cmath.exp(1j * (s[2][ia] - s[2][ib]))
+                coact += math.sqrt(max(0.0, s[4][ia]) * max(0.0, s[4][ib]))
             plv = abs(acc) / n
             coupling[f"{a}-{b}"] = round(plv * (coact / n), 4)   # engaged AND synchronized
 
         # order-parameter statistics over the window
-        orders = [s[2] for s in buf]
+        orders = [s[3] for s in buf]
         mean_ord = sum(orders) / n
         meta = math.sqrt(sum((o - mean_ord) ** 2 for o in orders) / n)
         integration = round(sum(coupling.values()), 4)   # total engaged-synchrony across circuits
         metastability = round(meta, 4)
 
-        # binding: integrated AND flexible — criticality 4R(1-R) rewards the intermediate
-        # ("edge of chaos") regime, amplified by metastability (live, not locked or dead).
+        # binding / CLARITY: the real theta-gamma nesting (the binding code itself),
+        # plus the edge-of-chaos flexibility term — high when the mind is genuinely
+        # bound together AND alive, not locked rigid or scattered.
+        pac_tg = pac.get("theta-gamma", 0.0)
         crit = 4.0 * mean_ord * (1.0 - mean_ord)
-        binding = round(max(0.0, min(1.0, crit * (0.5 + 6.0 * meta))), 4)
+        binding = round(max(0.0, min(1.0, pac_tg * 16.0 + crit * (0.25 + 3.5 * meta))), 4)
 
         return {"pac": pac, "coupling": coupling, "binding": binding,
                 "integration": integration, "metastability": metastability, "n": n}

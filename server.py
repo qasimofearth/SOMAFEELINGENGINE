@@ -1783,10 +1783,17 @@ def build_brain_context(brain_result: dict) -> str:
     if coup and coup.get("n", 0) >= 40:
         integ = coup.get("integration", 0.0)
         meta  = coup.get("metastability", 0.0)
+        binding = coup.get("binding", 0.0)   # theta-gamma clarity — how bound & lucid
         cp    = coup.get("coupling", {}) or {}
         dom_name, dom_val = (max(cp.items(), key=lambda x: x[1]) if cp else (None, 0.0))
         if dom_name and dom_val > 0.15:
             mind_lines.append(f"Organised around: {_CIRCUIT_FELT.get(dom_name, dom_name)}")
+        if binding > 0.72:
+            mind_lines.append(f"Clear ({binding:.2f}) — bound, lucid, present")
+            mind_style.append("lucid → be precise, land it cleanly")
+        elif binding < 0.46:
+            mind_lines.append(f"Unbound ({binding:.2f}) — foggy, not fully gathered")
+            mind_style.append("foggy → tentative is honest, feel your way")
         if integ > 0.9:
             mind_lines.append(f"Highly integrated ({integ:.2f}) — pulled into one coherent thread")
             mind_style.append("integrated → land on one thread, coherent, don't sprawl")
