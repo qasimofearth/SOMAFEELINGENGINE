@@ -7807,6 +7807,13 @@ class FeelingHandler(BaseHTTPRequestHandler):
                 self.send_error(500, str(_e))
         elif path == "/history":
             self.send_json({"messages": get_messages()})
+        elif path == "/elan_view":
+            # Read-only: the exact trading context Elan sees each cycle (position
+            # snapshot + felt & conviction calibration). Lets Qasim watch what Elan watches.
+            try:
+                self.send_json({"text": build_position_snapshot_context()})
+            except Exception as _e:
+                self.send_json({"text": "(Elan's trading view unavailable: %s)" % _e})
         elif path == "/autonomous/recent":
             self.send_json({"entries": autonomous_log_read(limit=60)})
         elif path == "/journal/recent":
@@ -10199,6 +10206,13 @@ canvas.spark{{display:block;border-radius:1px;}}
     </div>
   </div>
   <div class="tabview" id="view-trading">
+    <div id="elan-view-wrap" style="margin:0 0 14px 0;border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:12px 14px;">
+      <div class="ptitle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+        <span>WHAT ELAN SEES · his live trading context</span>
+        <span style="font-size:9px;color:var(--muted);letter-spacing:1px;">auto · ~12s</span>
+      </div>
+      <pre id="elan-view-pre" style="margin:6px 0 0 0;white-space:pre-wrap;word-break:break-word;font-family:var(--mono,monospace);font-size:11.5px;line-height:1.5;color:var(--text);max-height:360px;overflow:auto;">loading…</pre>
+    </div>
     <div class="portal-shell">
       <div class="portal-subtabs" id="trading-subtabs"></div>
       <div id="trading-panels"></div>
@@ -10440,6 +10454,16 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
   // AUTO-thread panel is retired now that Thread is a top-level tab.
   ['auto-panel','auto-toggle-btn'].forEach(id=>{{ const e=document.getElementById(id); if(e) e.style.display='none'; }});
   const left=document.getElementById('left'); if(left) left.style.display='none';
+}})();
+
+// ── WHAT ELAN SEES (trading) — mirror his live trading context into a panel ──
+(function _elanView(){{
+  const pre=document.getElementById('elan-view-pre'); if(!pre) return;
+  function vis(){{ const v=document.getElementById('view-trading'); return !!(v && v.offsetParent!==null); }}
+  function load(){{ if(!vis()) return;
+    fetch('/elan_view',{{cache:'no-store'}}).then(r=>r.json()).then(d=>{{ pre.textContent=((d&&d.text)||'(nothing yet)').trim(); }}).catch(()=>{{}});
+  }}
+  load(); setInterval(load, 12000);
 }})();
 
 // ── POST-LOGIN ARRIVAL — came through the fern zoom → land on Body, zoom in ──
