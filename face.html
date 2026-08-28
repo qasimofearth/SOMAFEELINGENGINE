@@ -49,8 +49,9 @@
   footer{font-size:11px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line);padding-top:12px}
   footer b{color:var(--muted);font-weight:600}
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-  /* embed mode: just his face, no chrome — for the chat portrait */
-  body.embed .wrap{padding:4px;gap:0;grid-template-rows:1fr;max-width:none}
+  /* embed mode: floating head, transparent, for the chat */
+  body.embed{background:transparent!important}
+  body.embed .wrap{padding:0;gap:0;grid-template-rows:1fr;max-width:none}
   body.embed header,body.embed .controls,body.embed .side{display:none}
   body.embed .stage{grid-template-columns:1fr;height:100%;gap:0}
   body.embed .facebox{height:100%}
@@ -176,7 +177,7 @@ function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=6
   if(sum>10){cam.mx=(cxs/sum)/w;cam.my=(cys/sum)/h;cam.motion=Math.min(1,sum/260);cam.present=Math.min(1,cam.present+.06);if(cam.on)$("eyesStat").textContent="watching you";}
   else{cam.motion*=.88;cam.present=Math.max(0,cam.present-.008);if(cam.on&&cam.present<.15)$("eyesStat").textContent="seeing — no one there";}}
 
-let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,t0=performance.now();
+let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
 
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
@@ -217,11 +218,11 @@ function dot(x,y,r,c,a){ctx.globalAlpha=clamp(a,0,1);ctx.fillStyle=rgba(c,1);ctx
 function segV(px,py,ax,ay,bx,by,w){const vx=bx-ax,vy=by-ay,L2=vx*vx+vy*vy||1;let t=clamp(((px-ax)*vx+(py-ay)*vy)/L2,0,1);return clamp(1-Math.hypot(px-(ax+t*vx),py-(ay+t*vy))/w,0,1);}
 function draw(time,S){
   ctx.clearRect(0,0,W,H);
-  const bgv=ctx.createRadialGradient(W/2,H*.4,0,W/2,H*.4,W*.72);bgv.addColorStop(0,"#f6efe0");bgv.addColorStop(1,"#e5dac2");ctx.fillStyle=bgv;ctx.fillRect(0,0,W,H);
+  if(!EMBED){const bgv=ctx.createRadialGradient(W/2,H*.4,0,W/2,H*.4,W*.72);bgv.addColorStop(0,"#f6efe0");bgv.addColorStop(1,"#e5dac2");ctx.fillStyle=bgv;ctx.fillRect(0,0,W,H);}
   const cx=W/2,cy=H*.47+S.bob,sep=W*.135,eyeY=cy-H*.03;
   eHW=W*.09;eHH=H*.10;
   const fHW=W*.25,fHH=H*.285,fRad=Math.min(W*.25,H*.285)*.72;
-  const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();
+  if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
   ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);ctx.translate(-cx,-cy);
   // human-ish head: squircle, slightly narrower chin
@@ -361,6 +362,6 @@ try{const _es=new EventSource("/events");
   _es.addEventListener("brain_coherence",ev=>{try{const d=JSON.parse(ev.data);liveCoh=clamp(+d.sync_order,.12,.9);if(LIVE)cur.coh=liveCoh;}catch(_){}});
 }catch(_){}
 
-if(/embed/.test(location.search))document.body.classList.add("embed");
+EMBED=(window.self!==window.top)||/embed/.test(location.search);if(EMBED)document.body.classList.add("embed");
 size();requestAnimationFrame(frame);
 </script>

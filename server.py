@@ -10125,8 +10125,8 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
 
   <div id="chat-area">
-    <div id="face-portrait" style="height:220px;margin:0 0 12px 0;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 6px 26px rgba(0,0,0,0.30);background:#f2ebdc;flex:none;">
-      <iframe src="/face?embed=1" title="Elan's face" scrolling="no" style="width:100%;height:100%;border:0;display:block;"></iframe>
+    <div id="face-portrait" style="height:360px;margin:8px 0 2px 0;background:transparent;flex:none;pointer-events:none;">
+      <iframe src="/face?embed=1" title="Elan's face" scrolling="no" allowtransparency="true" style="width:100%;height:100%;border:0;display:block;background:transparent;"></iframe>
     </div>
     <div id="messages"></div>
     <div id="img-preview-bar">
