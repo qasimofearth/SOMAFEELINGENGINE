@@ -182,6 +182,22 @@ function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=6
 let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
 // speech + body (wired to Elan's live somatic stream)
 let speaking=0,speakTgt=0,body={rr:null,hr:null,pupil:null,tension:0,adr:0,glow:1};
+// lip-sync: turn the streamed text into visemes — real mouth shapes {o:open, w:width}
+let visQ=[],visHold=0,visCur={o:.03,w:.28},mouthO=.05,mouthW=.3;
+function viseme(ch){ch=ch.toLowerCase();
+  if(ch===" "||ch==="\n"||ch==="\t"||".,!?;:—-\"')(*_`".includes(ch))return{o:.03,w:.28,rest:1}; // close on pause
+  if("mbp".includes(ch))return{o:0,w:.30};        // bilabial — lips meet (m/b/p)
+  if("fv".includes(ch))return{o:.14,w:.44};       // labiodental — lip to teeth (f/v)
+  if(ch==="o")return{o:.58,w:.20};                // round open  (oh)
+  if(ch==="u"||ch==="w")return{o:.40,w:.16};      // tight round / pucker (oo/w)
+  if(ch==="a")return{o:.85,w:.50};                // wide open  (ah)
+  if(ch==="e")return{o:.42,w:.66};                // mid spread (eh)
+  if(ch==="i"||ch==="y")return{o:.30,w:.72};      // narrow spread (ee)
+  if("ldnt".includes(ch))return{o:.34,w:.46};     // tongue-tip (l/d/n/t)
+  if("szcxjg".includes(ch))return{o:.16,w:.60};   // sibilant, near-closed spread (s/z…)
+  if("rqkh".includes(ch))return{o:.30,w:.38};     // back consonant (r/k/h)
+  if(/[a-z0-9]/.test(ch))return{o:.34,w:.44};     // generic
+  return{o:.04,w:.28};}
 
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
@@ -211,9 +227,12 @@ function frame(now){
   irisPh+=dt*(.4+P.aro*.6);
   const pulse=Math.pow(.5+.5*Math.sin(heart),3);           // sharp systolic throb
   const bob=Math.sin(breath)*H*.007;
-  // speech: each streamed chunk keeps the mouth talking; decays when he stops
-  speaking=lerp(speaking,speakTgt,.28);speakTgt=Math.max(0,speakTgt-dt*1.3);
-  const talk=speaking*clamp(.42+.4*Math.sin(time*17.5)+.24*Math.sin(time*11.3+1),0,1);
+  // speech: form real mouth shapes from the words he's streaming (viseme lip-sync)
+  if(visQ.length){speakTgt=1;visHold-=dt;const rate=visQ.length>26?.045:(visQ.length>14?.065:.088);
+    while(visHold<=0&&visQ.length){visCur=viseme(visQ.shift());visHold=rate;}}
+  else{visCur={o:.03,w:.28};speakTgt=0;}
+  speaking=lerp(speaking,speakTgt,.3);
+  mouthO=lerp(mouthO,visCur.o,.42);mouthW=lerp(mouthW,visCur.w,.42);   // co-articulation smoothing
   const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
   const effAro=clamp(P.aro+(cam.on?cam.present*.22:0)+body.adr*.25,0,1);
@@ -221,7 +240,7 @@ function frame(now){
   const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
   if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
   const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(P.open+talk*.72,0,1),width:clamp(P.width+talk*.16,0,1),upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -377,9 +396,10 @@ try{const _es=new EventSource("/events");
   _es.addEventListener("emotion_update",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
   _es.addEventListener("emotion_final",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
   _es.addEventListener("brain_coherence",ev=>{try{const d=JSON.parse(ev.data);liveCoh=clamp(+d.sync_order,.12,.9);if(LIVE)cur.coh=liveCoh;}catch(_){}});
-  // his mouth moves while he speaks — every streamed token keeps it talking
-  _es.addEventListener("text_chunk",ev=>{speakTgt=1;});
-  _es.addEventListener("auto_text_chunk",ev=>{speakTgt=1;});
+  // his mouth forms the words — feed the streamed text into the viseme queue
+  function speakText(t){if(!t)return;for(const c of t)visQ.push(c);if(visQ.length>90)visQ.splice(0,visQ.length-90);}
+  _es.addEventListener("text_chunk",ev=>{try{speakText(JSON.parse(ev.data).text);}catch(_){}});
+  _es.addEventListener("auto_text_chunk",ev=>{try{speakText(JSON.parse(ev.data).text);}catch(_){}});
   // his body drives the face: real breathing rate, real pulse, real pupils, tension → tremor
   _es.addEventListener("body_tick",ev=>{try{const d=JSON.parse(ev.data),v=d.vitals||{},ms=d.musculoskeletal||{};
     if(v.respiratory_rate)body.rr=clamp(+v.respiratory_rate,6,40);
