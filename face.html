@@ -284,8 +284,8 @@ function segV(px,py,ax,ay,bx,by,w){const vx=bx-ax,vy=by-ay,L2=vx*vx+vy*vy||1;let
 function draw(time,S){
   ctx.clearRect(0,0,W,H);
   if(!EMBED){const bgv=ctx.createRadialGradient(W/2,H*.4,0,W/2,H*.4,W*.72);bgv.addColorStop(0,"#f6efe0");bgv.addColorStop(1,"#e5dac2");ctx.fillStyle=bgv;ctx.fillRect(0,0,W,H);}
-  const cx=W/2,cy=H*.47+S.bob,sep=W*.135,eyeY=cy-H*.03;
-  eHW=W*.09;eHH=H*.10;
+  const cx=W/2,cy=H*.47+S.bob,sep=W*.152,eyeY=cy-H*.025;
+  eHW=W*.108;eHH=H*.125;
   const fHW=W*.25,fHH=H*.285,fRad=Math.min(W*.25,H*.285)*.72;
   if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
@@ -296,9 +296,9 @@ function draw(time,S){
   const feelCol=lerpRgb(S.c1,S.c2,.4),darkFeel=feelCol.map(v=>v*.14);
   const coreGlow=lerpRgb(feelCol,[255,251,240],.42);      // hot inner light
   const warmTint=lerpRgb(feelCol,[255,238,212],.12);      // a breath of warmth so it isn't neon
-  const browCol=lerpRgb(feelCol,darkFeel,.4),lipCol=lerpRgb(feelCol,[255,240,226],.14);
+  const browCol=lerpRgb(feelCol,darkFeel,.4),lipCol=lerpRgb(feelCol,[255,238,224],.42);   // warm, luminous — reads against the glow
   S.darkFeel=darkFeel;S.feelCol=feelCol;S.coreGlow=coreGlow;
-  const mouthY=cy+H*.14,mW=W*.085,mAmp=H*.05,mOpenAmp=H*.058,mThick=H*.0085;
+  const mouthY=cy+H*.145,mW=W*.09,mAmp=H*.052,mOpenAmp=H*.06,mThick=H*.0115;
   // brow endpoints (do the grammar)
   const bBaseY=eyeY-eHH*1.35-S.browUp*eHH*.7;
   function brow(side){const s=side; // s=-1 left, +1 right
@@ -338,7 +338,7 @@ function draw(time,S){
       if(S.shimmer>.04)pa*=1+.3*S.shimmer*Math.sin((gx+gy)*.026+time*3.6);
       if(S.sharpen>.04){dx-=nx*STEP*.5*S.sharpen;dy-=ny*STEP*.5*S.sharpen;pa*=1+.15*S.sharpen;}
       const edge=clamp((1-ins)*2.2,0,1);
-      dot(gx+dx,gy+dy,STEP*.6,col,clamp(edge*1.15,0,1)*.94*clamp(pa,0,1.5));
+      dot(gx+dx,gy+dy,STEP*.66,col,clamp(edge*1.15,0,1)*.94*clamp(pa,0,1.5));
     }
     // eyes — radiant orbs, no drop-shadow (that made them holes)
     let ec=null,ea=0;for(const ex of[cx-sep,cx+sep]){const e=eyeDot(gx,gy,ex,eyeY,S);if(e&&e.a>ea){ec=e.c;ea=e.a;}}
@@ -359,45 +359,50 @@ function draw(time,S){
       const thick=mThick*(1+press*1.5-stre*.35), taper=clamp(1.12-Math.abs(t),0,1);
       const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.15),0,1)*taper;
       const lipv=Math.max(dU,dL*(.85+low*.3));
-      if(lipv>.04)dot(gx,gy,STEP*.52,lerpRgb(lipCol,feelCol.map(v=>v*.7),low*.4),lipv*.92);
+      if(lipv>.04)dot(gx,gy,STEP*.56,lerpRgb(lipCol,feelCol.map(v=>v*.7),low*.4),clamp(lipv*1.05,0,1));
       if(openG>H*.005&&gy>yUp&&gy<yLo&&Math.abs(t)<.94){
         dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.5),clamp(.5*S.open+.18,0,.7));
         if(cAvg>.3&&gy<yUp+openG*.34)dot(gx,gy,STEP*.46,lerpRgb(lipCol,[255,250,246],.75),.42*taper); // teeth on a real smile
       }
     }
   }
-  // eye halos — each eye is a small sun of his feeling, breathing with his pulse
+  // eye halos — each iris a small sun of his feeling, breathing with his pulse (clipped by the lids so it stays eye-shaped)
   ctx.save();ctx.globalCompositeOperation="lighter";
-  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.46,icy=eyeY+S.gazeY*eHH*.42;
-    const gA=clamp(S.eyeOpen,0,1)*(.3+.55*(S.aro||0))*(.7+.6*(S.emis||0))*(S.glow||1)*(.82+.42*(S.pulse||0));
-    if(gA>.012){const R=eHW*1.55,gg=ctx.createRadialGradient(icx,icy,0,icx,icy,R);
-      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.5),clamp(gA,0,.95)));gg.addColorStop(.4,rgba(S.c2,gA*.55));gg.addColorStop(1,"rgba(0,0,0,0)");
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.5,icy=eyeY+S.gazeY*eHH*.45;
+    const gA=clamp(S.eyeOpen,0,1)*(.26+.5*(S.aro||0))*(.7+.6*(S.emis||0))*(S.glow||1)*(.82+.42*(S.pulse||0));
+    if(gA>.012){const R=eHW*1.35,gg=ctx.createRadialGradient(icx,icy,0,icx,icy,R);
+      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.35),clamp(gA,0,.85)));gg.addColorStop(.42,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
       ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,R,0,6.2832);ctx.fill();}}
   ctx.restore();
-  // a single soft glint of life (not a harsh white block)
-  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.46,icy=eyeY+S.gazeY*eHH*.42;if(S.eyeOpen>.14){
-    dot(icx-eHW*.2,icy-eHH*.26,STEP*.42,[255,255,255],.6);}}
+  // one soft glint of life, upper-left of each iris
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.5,icy=eyeY+S.gazeY*eHH*.45;if(S.eyeOpen>.14){
+    dot(icx-eHW*.26,icy-eHH*.3,STEP*.5,[255,255,255],.62);}}
   ctx.restore();
 }
-// each eye = a radiant orb: deep-feeling pupil, luminous iris with living light-rings, glowing rim — never a dark hole
+// each eye = a luminous iris SHAPED BY REAL EYELIDS — the lids carry the emotion (sad obliques, anger glare, joy squint, surprise, blink)
 function eyeDot(px,py,ex,ey,S){
-  const open=clamp(S.eyeOpen,0,1.35);
-  const eh=eHH*clamp(.14+open*.92,.05,1.3);                    // vertical aperture — blink squashes the orb
-  const rx=(px-ex)/(eHW*1.02),ry=(py-ey)/eh,rr=Math.hypot(rx,ry);
-  if(rr>1)return null;
-  const aEdge=clamp((1-rr)*3.4,0,1);                           // soft orb edge
-  const icx=ex+S.gazeX*eHW*.46,icy=ey+S.gazeY*eh*.42;          // iris tracks his gaze
-  const ir=Math.hypot((px-icx)/(eHW*.82),(py-icy)/(eHH*.82));
-  const pupR=.26+.30*S.pupil;
-  if(ir<pupR){const core=clamp(1-ir/pupR,0,1);                 // pupil — a deep well of feeling, faintly lit
-    return {c:lerpRgb(S.darkFeel,S.c2,.18+core*.28),a:aEdge};}
-  if(ir<1.04){const t=clamp((ir-pupR)/(1.04-pupR),0,1);        // luminous iris
-    let col=lerpRgb(lerpRgb(S.c2,[255,253,246],.55),S.c1,t);   // hot by the pupil → feeling color outward
-    const ring=.80+.24*Math.sin(ir*11-S.irisPh*1.5);           // living concentric light-rings
-    col=col.map(v=>v*ring);
-    if(t>.82)col=lerpRgb(col,S.darkFeel,(t-.82)/.18*.55);      // soft limbal ring keeps the orb defined
-    return {c:col,a:aEdge};}
-  return {c:lerpRgb(S.c1,[255,255,255],.28).map(v=>v*.55),a:aEdge*.6};   // faint halo edge, no white sclera
+  const side=ex<W/2?-1:1;
+  const u=(px-ex)/eHW, dyN=(py-ey)/eHH;
+  if(Math.abs(u)>=.99)return null;
+  const innerFrac=clamp((-u*side+1)/2,0,1);                    // 1 at the inner (nose-side) corner
+  const open=clamp(S.eyeOpen,0,1.4), half=.06+open*.86;
+  // ── the lids: this is where the feeling lives ──
+  let top=-half-(S.browUp||0)*.10 + .16*(u*u);                 // upper lid (brow lifts it, arches at the sides)
+  let bot= half-(S.cheek||0)*.42-(S.lidTight||0)*.30 - .10*(u*u); // lower lid rises with the cheek (Duchenne) / squint
+  top += -(S.browInner||0)*.30*innerFrac + (S.furrow||0)*.30*innerFrac;  // sadness lifts the inner lid; anger drops it
+  if(dyN<top||dyN>bot)return null;
+  const aEdge=clamp((dyN-top)/.13,0,1)*clamp((bot-dyN)/.13,0,1)*clamp((1-Math.abs(u))/.12,0,1);
+  // ── the luminous iris within ──
+  const icx=S.gazeX*.5,icy=S.gazeY*.45, ir=Math.hypot((u-icx)/.94,(dyN-icy)/.94);
+  const pupR=.30+.26*S.pupil;
+  let col;
+  if(ir<pupR){const core=clamp(1-ir/pupR,0,1);col=lerpRgb(S.darkFeel,S.c2,.16+core*.24);}     // soft pupil well (tracks gaze)
+  else{const t=clamp((ir-pupR)/(1.02-pupR),0,1);
+    col=lerpRgb(S.c2,S.c1,t);                                  // glowing feeling color across the iris
+    col=lerpRgb(col,S.coreGlow,.30*clamp(1-t*1.5,0,1));        // soft inner light (not harsh white)
+    col=col.map(v=>v*(.85+.17*Math.sin(ir*8-S.irisPh*1.4)));   // living light-rings
+    if(t>.8)col=lerpRgb(col,S.darkFeel,(t-.8)/.2*.5);}         // soft limbal ring
+  return {c:col,a:aEdge};
 }
 
 // ── UI ──
