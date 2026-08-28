@@ -206,6 +206,12 @@ function viseme(ch){ch=ch.toLowerCase();
   if("rqkh".includes(ch))return{o:.30,w:.38};     // back consonant (r/k/h)
   if(/[a-z0-9]/.test(ch))return{o:.34,w:.44};     // generic
   return{o:.04,w:.28};}
+// when audio is playing but the text has already streamed, keep forming plausible shapes
+const AUTOVIS=[{o:.72,w:.50},{o:.42,w:.66},{o:.30,w:.72},{o:.56,w:.22},{o:.40,w:.16},{o:0,w:.30,p:.45},{o:.34,w:.46},{o:.16,w:.60}];
+function autoViseme(){return AUTOVIS[(Math.random()*AUTOVIS.length)|0];}
+// his real voice: read the parent chat's live TTS loudness (same-origin) so lips move WITH the audio
+let pAmp=0,pSpeaking=false;
+function readParentVoice(){try{const p=window.parent;if(p&&p!==window&&typeof p.isSpeaking!=="undefined"){pSpeaking=!!p.isSpeaking;pAmp=clamp(+p.voiceAmp||0,0,1);}}catch(_){pSpeaking=false;pAmp=0;}}
 
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
@@ -235,12 +241,17 @@ function frame(now){
   irisPh+=dt*(.4+P.aro*.6);
   const pulse=Math.pow(.5+.5*Math.sin(heart),3);           // sharp systolic throb
   const bob=Math.sin(breath)*H*.007;
-  // speech: form real mouth shapes from the words he's streaming (viseme lip-sync)
+  // speech: mouth shapes from the streamed words; openness gated by his REAL voice loudness when audio plays
+  readParentVoice();
+  const audioOut=pSpeaking&&pAmp>0.004;
   if(visQ.length){speakTgt=1;visHold-=dt;const rate=visQ.length>26?.045:(visQ.length>14?.065:.088);
     while(visHold<=0&&visQ.length){visCur=viseme(visQ.shift());visHold=rate;}}
+  else if(audioOut){speakTgt=1;visHold-=dt;if(visHold<=0){visCur=autoViseme();visHold=.06+Math.random()*.07;}} // audio still sounding, text drained
   else{visCur={o:.03,w:.28};speakTgt=0;}
   speaking=lerp(speaking,speakTgt,.3);
-  mouthO=lerp(mouthO,visCur.o,.42);mouthW=lerp(mouthW,visCur.w,.42);mouthP=lerp(mouthP,visCur.p||0,.4);  // co-articulation smoothing
+  let moT=visCur.o;
+  if(audioOut)moT=clamp(visCur.o*(.4+.8*pAmp)+pAmp*.55,0,1);   // louder → mouth opens more; silence → closes
+  mouthO=lerp(mouthO,moT,audioOut?.55:.42);mouthW=lerp(mouthW,visCur.w,.42);mouthP=lerp(mouthP,visCur.p||0,.4);
   const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
   const effAro=clamp(P.aro+(cam.on?cam.present*.22:0)+body.adr*.25,0,1);
