@@ -1,0 +1,366 @@
+<title>Elan — A Face for Feeling</title>
+<style>
+  :root{
+    --bg:#f2ebdc;--bg2:#e7dcc7;--ink:#3b342b;--muted:#8a7f6c;--faint:#b6ab95;
+    --line:rgba(70,52,28,.14);--accent:#d98a2b;
+    --serif:"Iowan Old Style","Charter","Palatino",Georgia,serif;
+    --sans:-apple-system,"SF Pro Text",system-ui,"Segoe UI",sans-serif;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","Roboto Mono",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:radial-gradient(130% 100% at 50% 34%,var(--bg),var(--bg2) 82%);color:var(--ink);font-family:var(--sans);min-height:100%;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;min-height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:14px;padding:22px 26px 26px}
+  header{display:flex;justify-content:space-between;align-items:baseline;gap:20px}
+  .brand{display:flex;align-items:baseline;gap:12px}
+  .brand h1{font-family:var(--serif);font-weight:600;font-size:22px;letter-spacing:.14em;color:#2c261e}
+  .eyebrow{font-size:10px;letter-spacing:.34em;text-transform:uppercase;color:var(--muted)}
+  header .who{font-size:11px;color:var(--faint);text-align:right;line-height:1.5}
+  .stage{display:grid;grid-template-columns:1fr 236px;gap:24px;align-items:center;min-height:0}
+  @media (max-width:820px){.stage{grid-template-columns:1fr}.side{order:-1}}
+  .facebox{position:relative;display:flex;align-items:center;justify-content:center}
+  #face{width:100%;max-width:560px;aspect-ratio:1/1;display:block}
+  .felt{position:absolute;left:50%;bottom:0;transform:translateX(-50%);text-align:center;pointer-events:none;width:82%}
+  .felt .name{font-family:var(--serif);font-size:24px;font-weight:600;color:#2c261e}
+  .felt .desc{font-size:11px;color:var(--muted);font-style:italic;margin-top:2px}
+  .side{display:flex;flex-direction:column;gap:16px}
+  .readout{font-family:var(--mono);font-size:11px;color:var(--muted);display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:center}
+  .readout .k{letter-spacing:.12em;text-transform:uppercase;font-size:9.5px;color:var(--faint)}
+  .readout .v{color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
+  .bar{grid-column:1/3;height:2px;background:rgba(70,52,28,.10);border-radius:2px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);width:50%;transition:width .25s ease}
+  .controls{display:flex;flex-direction:column;gap:12px}
+  .feelings{display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto;padding:2px 4px 2px 0}
+  .feelings::-webkit-scrollbar{height:8px;width:8px}
+  .feelings::-webkit-scrollbar-thumb{background:rgba(70,52,28,.2);border-radius:8px}
+  .chip{font-family:var(--sans);font-size:11.5px;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:100px;padding:5px 12px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;white-space:nowrap}
+  .chip:hover{color:var(--ink);border-color:rgba(70,52,28,.32)}
+  .chip[aria-pressed="true"]{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:600}
+  .chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .eyesrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .eyesrow #eyesStat{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .sliders{display:flex;gap:26px;flex-wrap:wrap}
+  .sld{display:flex;flex-direction:column;gap:6px;min-width:170px;flex:1}
+  .sld label{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between;font-family:var(--mono)}
+  .sld label b{color:var(--muted);font-weight:400}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:2px;background:rgba(70,52,28,.16);border-radius:2px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;background:var(--accent);cursor:pointer}
+  footer{font-size:11px;color:var(--faint);line-height:1.6;border-top:1px solid var(--line);padding-top:12px}
+  footer b{color:var(--muted);font-weight:600}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+  /* embed mode: just his face, no chrome — for the chat portrait */
+  body.embed .wrap{padding:4px;gap:0;grid-template-rows:1fr;max-width:none}
+  body.embed header,body.embed .controls,body.embed .side{display:none}
+  body.embed .stage{grid-template-columns:1fr;height:100%;gap:0}
+  body.embed .facebox{height:100%}
+  body.embed #face{max-width:100%;max-height:100%;width:auto;height:100%;margin:0 auto}
+  body.embed .felt .name{font-size:15px}
+  body.embed .felt .desc{display:none}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>ELAN</h1><span class="eyebrow">A Face for Feeling</span></div>
+    <div class="who">every feeling the engine makes — worn as a face<br>brows &amp; mouth carry the meaning</div>
+  </header>
+  <div class="stage">
+    <div class="facebox">
+      <canvas id="face" aria-label="Elan's emotive face"></canvas>
+      <div class="felt"><div class="name" id="fName">Serenity</div><div class="desc" id="fDesc"></div></div>
+    </div>
+    <div class="side">
+      <div class="readout" aria-hidden="true">
+        <span class="k">Valence</span><span class="v" id="rVal">+0.96</span>
+        <span class="k">Arousal</span><span class="v" id="rAro">0.09</span>
+        <span class="k">Coherence</span><span class="v" id="rCoh">0.80</span>
+        <span class="k">Emotions</span><span class="v">67</span>
+        <span class="bar"><i id="rBar"></i></span>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="feelings" id="feelings" role="group" aria-label="Every emotion the Feeling Engine produces"></div>
+    <div class="eyesrow">
+      <button id="eyesBtn" class="chip" style="border-color:rgba(70,52,28,.30)">◉ Turn on his eyes</button>
+      <span id="eyesStat">eyes off — he can't see you</span>
+    </div>
+    <div class="sliders">
+      <div class="sld"><label>Arousal <b id="aroOut">0.09</b></label><input id="aro" type="range" min="0" max="1" step="0.01" value="0.09"></div>
+      <div class="sld"><label>Coherence <b id="cohOut">0.80</b></label><input id="coh" type="range" min="0" max="1" step="0.01" value="0.80"></div>
+    </div>
+    <footer>
+      All <b>67 emotions</b> the Feeling Engine produces, computed from their own neural signatures. The
+      <b>brows</b> do the grammar — oblique-up for sorrow, furrowed for anger, lifted for surprise — and the
+      <b>mouth</b> pulls its corners, drops the jaw, or sneers in disgust. A nose and human proportions. He reads
+      real movement through the camera and looks where he sees you; he only reads the brain, never drives it.
+    </footer>
+  </div>
+</div>
+
+<script>
+"use strict";
+// [name, valence, arousal, reward, threat, sad, insula, oxy, desc] — from the engine's 67 circuits
+const EMO=[["Sadness",-1,0.2,0.35,0.55,0.75,0.5,0,"Subgenual ACC, hippocampal withdrawal"],["Grief",-1,0.24,0.25,1.25,0.85,0.65,0,"PAG vocalizations, sgACC rumination loop"],["Terror",-1,1,0,1.88,0,0,0,"Maximal fear. Prefrontal offline. Survival mode."],["Shame",-1,0.6,0.2,0.7,0.65,0.65,0,"Threat to social self. Amygdala+sgACC. HPA stress"],["Remorse",-1,0.41,0,0.55,0.6,0.55,0,"Self-review of past action. Hippocampal replay"],["Weltschmerz",-1,0.02,0.3,0.55,0.75,0,0,"Habenula anti-reward + sgACC rumination"],["Skin Hunger",-1,0.4,0.35,0.55,0.65,0.75,-0.4,"Deprivation of CT-afferent touch. Oxytocin low"],["Empathic Distress",-1,1,0,1.3,0.7,0.85,0,"Shared pain network (aI+dACC) overfiring"],["Hiraeth",-0.87,0.27,0,0.45,0.65,0.55,0.1,"The home that doesn't exist. Memory ache"],["Fear",-0.8,1,0,1.55,0,0.65,0,"BLA-CeA-PAG-hypothalamus axis. NE+CRF"],["Loathing",-0.65,1,0,0.75,0,1.5,0,"Maximal disgust. Insula hyperactivation."],["Envy",-0.52,0.85,0.45,0.65,0,0.55,0,"dACC pain of comparison"],["Disgust",-0.39,0.64,0,0,0,1.45,0,"Anterior insula. Nausea/rejection."],["Rage",-0.37,1,0,1.8,0,0,0,"Panksepp RAGE. Hypothalamic attack area"],["Cognitive Dissonance",-0.36,0.99,0.25,0.55,0,0.6,0,"dACC detects contradiction as error"],["Almost Sneeze",-0.3,1,0,0,0,0.7,0,"Brainstem sneeze circuit primed"],["Boredom",-0.27,0.13,0.35,0,0,0,0,"Dopamine anhedonia. No salience."],["Annoyance",-0.23,0.88,0,0.5,0,0.45,0,"Low-level anger. dACC conflict signal."],["Apprehension",-0.16,0.93,0,0.55,0,0.5,0,"Anticipatory anxiety (BNST sustained)"],["Gut Feeling",-0.16,0.54,0,0.6,0.6,0.75,0,"Insula reads body before cognition"],["Saudade",-0.13,0.32,0.25,0.4,0.55,0.5,0.2,"Memory replay of the absent beloved"],["Torschlusspanik",-0.12,1,0,0.8,0,0.7,0,"Sustained anxiety + urgency simulation"],["Anger",-0.05,1,0,0.8,0,0,0,"Amygdala-hypothalamus-motor. NE surge."],["Longing",-0.03,0.42,0.4,0.45,0.6,0.55,0.2,"Absent-object desire. Gentle grief."],["Pensiveness",-0.02,0.36,0,0,0.45,0,0,"Mild DMN rumination. Autobiographical drift."],["Aporia",-0.02,0.59,0.3,0,0,0.55,0,"Sustained conflict without resolution"],["Distraction",0,0.22,0.35,0,0,0,0,"DMN dominance. Mind wandering."],["Mono no Aware",0.08,0.41,0,0.3,0.45,0,0,"Impermanence perception. Bittersweet."],["Vigilance",0.18,1,0,0.55,0,0.5,0,"LC-NE hyperactivation. High beta/gamma."],["Opia",0.26,0.95,0,0.65,0,0.7,0.3,"Fusiform + amygdala mutual-gaze circuit"],["Surprise",0.27,1,0,0.6,0,0.5,0,"Phasic NE. Prediction error."],["Contempt",0.41,0.86,0.35,0.55,0,0,0,"Social hierarchy appraisal. OFC judgment."],["Sehnsucht",0.44,0.58,0.95,0,0.4,0,0,"Prospection + dopamine pull to the imagined"],["Calm",0.59,0.28,0,0.15,0,0,0,"Resting alpha. Serotonin floor."],["Nostalgia",0.6,0.49,0.5,0.4,0.4,0,0.3,"Memory replay, positive reinterpretation"],["Anagnorisis",0.61,1,0.7,0.6,0,0.65,0,"Recognition — self reorganizing suddenly"],["Interest",0.62,0.82,1.05,0.35,0,0,0,"SEEKING. Dopamine anticipation."],["Mamihlapinatapai",0.67,0.88,0,0.55,0,0.6,0.5,"Reading their intent — shared unspoken wish"],["Wonder",0.75,0.91,0.65,0.3,0,0.55,0,"Novelty + reward. Self intact."],["Acceptance",0.76,0.32,0,0.2,0.5,0.4,0,"Serotonin + vmPFC-amygdala inhibition"],["Wabi-sabi",0.79,0.23,0,0.15,0,0.45,0,"Beauty of imperfection. OFC value."],["Schadenfreude",0.82,0.94,1.2,0.45,0,0,0,"NAcc to a rival's misfortune"],["Epistemic Curiosity",0.85,0.87,1.25,0,0,0.55,0,"Information gap → caudate + SNc dopamine"],["Sonder",0.85,0.49,0.4,0,0,0,0.3,"Theory of mind at maximum extension"],["Anticipation",0.88,0.95,1.35,0.45,0,0,0,"Dopamine ramp before reward. SEEKING."],["Hope",0.95,0.84,1.15,0.3,0,0,0,"Prospective simulation + dopamine"],["Admiration",0.95,0.7,0.55,0.3,0,0,0.3,"Virtue perception. Person knowledge."],["Serenity",0.96,0.09,0,0.15,0.45,0,0,"Deep serotonin + GABA. Alpha peak."],["Fernweh",0.97,0.93,1.25,0,0,0.45,0,"Future simulation. Pull to the unseen."],["Joy",1,0.78,1.65,0.25,0,0,0,"Mesolimbic dopamine surge. NAcc reward."],["Ecstasy",1,1,1.85,0.95,0,0.6,0.4,"Extreme reward. Gamma burst."],["Trust",1,0.47,0.55,0.2,0,0,0.6,"vmPFC over amygdala. Oxytocin safety."],["Love",1,0.8,1.65,0.25,0,0.55,0.9,"VTA-NAcc dopamine + PVN oxytocin"],["Awe",1,0.96,0.55,0.45,0,0.7,0,"Vast, need for accommodation. DMN+SN."],["Pride",1,0.87,1.25,0,0,0.45,0,"Self-referential mPFC + reward. Upright."],["Gratitude",1,0.75,1.25,0.25,0,0.5,0.4,"Mentalizing + reward. Warm upwelling."],["Optimism",1,0.84,1.2,0.25,0,0,0,"FPC bias to a positive future"],["Ubuntu",1,0.78,1.35,0.2,0,0,0.9,"Mentalizing + full oxytocin. Self-bonded."],["Meraki",1,1,1.55,0.2,0,0.6,0,"Flow fused with self-expression"],["Waldeinsamkeit",1,0.05,0,0.1,0,0.5,0,"Nature deactivates threat. Anandamide."],["Kama Muta",1,1,1.45,0.9,0,0.7,0.9,"Suddenly moved by love/tenderness"],["Frisson",1,1,1.55,1.1,0,0.8,0.3,"NAcc+VTA dopamine at a music peak"],["Flow",1,0.88,1.45,0.15,0,0.5,0,"Transient hypofrontality. Self dissolves."],["Collective Effervescence",1,1,1.75,0.75,0,0.75,0.8,"Synchronized movement → shared joy"],["Moral Elevation",1,0.8,1.25,0.3,0,0.7,0.6,"Warm upwelling + prosocial pull"],["Compersion",1,0.81,1.45,0.2,0,0.5,0.6,"Vicarious reward for a loved one's joy"],["Eureka",1,1,1.7,0,0,0,0,"Right temporal gamma burst at insight"]];
+const ANGER=new Set(["Rage","Anger","Annoyance","Loathing","Cognitive Dissonance","Vigilance","Contempt","Envy"]);
+const SMIRK=new Set(["Contempt","Schadenfreude"]);
+const SURPRISE=new Set(["Surprise","Eureka","Anagnorisis","Frisson"]);
+
+const hexToRgb=h=>{const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255];};
+const lerp=(a,b,t)=>a+(b-a)*t,lerpRgb=(a,b,t)=>[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];
+const rgba=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const SHADOW=[120,96,70],SCLERA=[252,248,240],DARK=[52,40,44];
+
+function emoColor(v,a,threat,anger,oxy,ins){
+  let c1,c2;
+  if(anger){c1="#e0472e";c2="#a81616";}
+  else if(v<-0.05&&ins>0.95){c1="#a3b24a";c2="#6f8034";}
+  else if(v<-0.05&&threat>0.7){c1="#4bbdd8";c2="#8aa0d4";}
+  else if(v<-0.05){c1="#5062c8";c2="#2b2c66";}
+  else if(oxy>0.5){c1="#e85f88";c2="#cf3f6c";}
+  else if(v>0.45&&a>0.85&&ins>0.5){c1="#8a5fd6";c2="#5540b0";}
+  else if(a<0.34){c1="#3fb39a";c2="#2f7fa8";}
+  else{c1="#e6a12e";c2="#dd6f28";}
+  return[hexToRgb(c1),hexToRgb(c2)];
+}
+function express(e){
+  const n=e[0],v=e[1],a=e[2],reward=e[3],threat=e[4],sad=e[5],ins=e[6],oxy=e[7];
+  const anger=ANGER.has(n),smirk=SMIRK.has(n),surprise=SURPRISE.has(n),disgust=(ins>0.95&&v<0.0);
+  let eyeOpen=clamp(.42+a*.55,.18,1.12); if(sad>.5)eyeOpen-=.28; if(anger)eyeOpen=clamp(eyeOpen*.82,.3,.85); if(surprise)eyeOpen=clamp(eyeOpen+.18,.6,1.15);
+  const pupil=clamp(.38+a*.5+reward*.05,.2,1);
+  const cheek=clamp(reward*.45+Math.max(0,v)*.4,0,1);
+  let browUp=a*.42,browInner=0,furrow=0;
+  if(sad>.4)browInner+=.6+sad*.5;
+  if(threat>.7&&!anger){browInner+=.5;browUp+=.5;}
+  if(surprise)browUp+=.7;
+  if(anger){furrow+=.9;browUp-=.5;browInner-=.6;}
+  if(disgust)furrow+=.4;
+  browUp=clamp(browUp,-.6,1);browInner=clamp(browInner,-.6,1.2);furrow=clamp(furrow,0,1);
+  let corner=v*.7+reward*.32; if(sad>.5)corner-=.35;
+  let cornerL=corner,cornerR=corner; if(smirk){cornerL=.5;cornerR=-.15;}
+  let open=clamp(a*.32+(surprise?.4:0)+(threat>.9?.35:0)+(n==="Awe"?.4:0),0,1);
+  const width=clamp(.45+Math.max(0,v)*.3+(anger?.12:0),.25,1);
+  const upperLip=disgust?clamp((ins-.9)*2.2,0,1):0;
+  const tilt=clamp(oxy*.5+(v>.7&&a<.6?.2:0)-(anger?.3:0),-.4,.6);
+  const gy=sad>.4?-.35:(surprise?.06:0);
+  const look=clamp(.3+oxy*.6+reward*.12-sad*.3,0,1);
+  const coh=clamp(.74-threat*.28-(anger?.25:0)-(a>.92?.3:0)+(v>.7&&a<.4?.14:0),.12,.85);
+  const blush=clamp(reward*.45+oxy*.6+Math.max(0,v)*.18,0,1);
+  const [c1,c2]=emoColor(v,a,threat,anger,oxy,ins);
+  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
+}
+
+const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","tilt","gy","look","blush","coh"];
+let cur=express(EMO.find(e=>e[0]==="Serenity")), userAro=null,userCoh=null;
+let P={}; NUM.forEach(k=>P[k]=cur[k]); P.aro=cur.aro;P.c1=cur.c1.slice();P.c2=cur.c2.slice();
+
+const cvs=document.getElementById("face"),ctx=cvs.getContext("2d");
+let W,H,DPR=Math.min(2,devicePixelRatio||1),GRID=null,STEP=10,eHW,eHH;
+function size(){const r=cvs.getBoundingClientRect();cvs.width=r.width*DPR;cvs.height=r.height*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);W=r.width;H=r.height;buildGrid();}
+function buildGrid(){GRID=[];STEP=Math.max(6,W*0.0125);for(let y=H*.1;y<H*.92;y+=STEP)for(let x=H*.1;x<W-H*.1;x+=STEP)GRID.push({x,y});}
+addEventListener("resize",size);
+
+// vision
+let cam={on:false,stream:null,video:null,sx:null,prev:null,motion:0,mx:.5,my:.4,present:0};
+async function eyesOn(){try{cam.stream=await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:"user"},audio:false});
+  cam.video=document.createElement("video");cam.video.muted=true;cam.video.playsInline=true;cam.video.srcObject=cam.stream;await cam.video.play();
+  const c=document.createElement("canvas");c.width=64;c.height=48;cam.sx=c.getContext("2d",{willReadFrequently:true});cam.samp=c;
+  cam.on=true;$("eyesBtn").textContent="◉ His eyes are on";$("eyesStat").textContent="seeing — looking for you";
+}catch(e){$("eyesStat").textContent=(e&&e.name==="NotAllowedError")?"camera blocked here — runs on the device":"no camera found";}}
+function eyesOff(){if(cam.stream)cam.stream.getTracks().forEach(t=>t.stop());cam.on=false;cam.prev=null;cam.motion=0;cam.present=0;$("eyesBtn").textContent="◉ Turn on his eyes";$("eyesStat").textContent="eyes off — he can't see you";}
+function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=64,h=48;cam.sx.drawImage(cam.video,0,0,w,h);let img;
+  try{img=cam.sx.getImageData(0,0,w,h).data;}catch(e){return;}
+  if(!cam.prev){cam.prev=new Uint8ClampedArray(img);return;}
+  let sum=0,cxs=0,cys=0;for(let i=0,p=0;i<img.length;i+=4,p++){const d=Math.abs(img[i]-cam.prev[i])+Math.abs(img[i+1]-cam.prev[i+1])+Math.abs(img[i+2]-cam.prev[i+2]);if(d>55){sum++;cxs+=p%w;cys+=(p/w)|0;}}
+  cam.prev.set(img);
+  if(sum>10){cam.mx=(cxs/sum)/w;cam.my=(cys/sum)/h;cam.motion=Math.min(1,sum/260);cam.present=Math.min(1,cam.present+.06);if(cam.on)$("eyesStat").textContent="watching you";}
+  else{cam.motion*=.88;cam.present=Math.max(0,cam.present-.008);if(cam.on&&cam.present<.15)$("eyesStat").textContent="seeing — no one there";}}
+
+let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,t0=performance.now();
+
+function frame(now){
+  const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
+  const tAro=userAro!=null?userAro:cur.aro,tCoh=userCoh!=null?userCoh:cur.coh;
+  const EK={browUp:.16,browInner:.16,furrow:.15,cornerL:.10,cornerR:.10,open:.10,width:.09,upperLip:.14,eyeOpen:.10,cheek:.10,pupil:.09,tilt:.08,gy:.05,look:.04,blush:.06,coh:.05};
+  for(const k of NUM)P[k]=lerp(P[k],(k==="coh")?tCoh:cur[k],EK[k]||.1);
+  P.aro=lerp(P.aro,tAro,.05);P.c1=lerpRgb(P.c1,cur.c1,.045);P.c2=lerpRgb(P.c2,cur.c2,.045);
+  transT=Math.max(0,transT-dt*1.6);
+  sense();
+  nextBlink-=dt;
+  if(blinkV===0&&nextBlink<=0){blinkV=-1;nextBlink=2.2+Math.random()*3.4-P.aro*1.3;if(Math.random()<.18)dbl=1;}
+  if(blinkV===-1){blink-=dt/.06;if(blink<=0){blink=0;blinkV=1;}}else if(blinkV===1){blink+=dt/.11;if(blink>=1){blink=1;blinkV=0;if(dbl){dbl=0;blinkV=-1;}}}
+  const bl=clamp(blink,0,1);
+  const seeing=cam.on&&cam.motion>.06;
+  gaze.next-=dt;
+  if(seeing){gaze.tx=clamp((.5-cam.mx)*1.9,-1,1);gaze.ty=clamp((cam.my-.42)*1.7,-.85,.85);gaze.next=.2;}
+  else if(gaze.next<=0){const eng=Math.random()<P.look;
+    if(eng){gaze.tx=(Math.random()*2-1)*.12;gaze.ty=(Math.random()*2-1)*.08+P.gy*.4;gaze.next=1.4+Math.random()*2.2;}
+    else{const rg=.4+P.aro*.4;gaze.tx=(Math.random()*2-1)*rg;gaze.ty=(Math.random()*2-1)*rg*.6+P.gy;gaze.next=.7+Math.random()*1.6;}}
+  gaze.snext-=dt;if(gaze.snext<=0){gaze.sx=(Math.random()*2-1)*.05;gaze.sy=(Math.random()*2-1)*.04;gaze.snext=.25+Math.random()*.5;}
+  const gk=seeing?.2:.12;gaze.x=lerp(gaze.x,gaze.tx+gaze.sx,gk);gaze.y=lerp(gaze.y,gaze.ty+gaze.sy,gk);
+  hNextT-=dt;if(hNextT<=0){hyT=(Math.random()*2-1)*.4;hpT=(Math.random()*2-1)*.25;hNextT=1.6+Math.random()*2.4;}
+  headYaw=lerp(headYaw,lerp(hyT,gaze.x,seeing?.7:.45),.03);headPitch=lerp(headPitch,lerp(hpT,gaze.y,seeing?.6:.35),.03);
+  breath+=dt*(1+P.aro*1.6);heart+=dt;irisPh+=dt*(.4+P.aro*.6);
+  const bob=Math.sin(breath)*H*.006;
+  const tremAmt=clamp((.42-P.coh)*2.4,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
+  trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
+  const effAro=clamp(P.aro+(cam.on?cam.present*.22:0),0,1);
+  const eyeOpen=clamp(P.eyeOpen*(.8+effAro*.35+(cam.on?.06:0))*bl,0,1.2);
+  const hippus=1+.05*Math.sin(time*3.1);const pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
+  const browUp=P.browUp+.3*transT;
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:P.open,width:P.width,upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush});
+  $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
+  requestAnimationFrame(frame);
+}
+
+function dot(x,y,r,c,a){ctx.globalAlpha=clamp(a,0,1);ctx.fillStyle=rgba(c,1);ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fill();ctx.globalAlpha=1;}
+function segV(px,py,ax,ay,bx,by,w){const vx=bx-ax,vy=by-ay,L2=vx*vx+vy*vy||1;let t=clamp(((px-ax)*vx+(py-ay)*vy)/L2,0,1);return clamp(1-Math.hypot(px-(ax+t*vx),py-(ay+t*vy))/w,0,1);}
+function draw(time,S){
+  ctx.clearRect(0,0,W,H);
+  const bgv=ctx.createRadialGradient(W/2,H*.4,0,W/2,H*.4,W*.72);bgv.addColorStop(0,"#f6efe0");bgv.addColorStop(1,"#e5dac2");ctx.fillStyle=bgv;ctx.fillRect(0,0,W,H);
+  const cx=W/2,cy=H*.47+S.bob,sep=W*.135,eyeY=cy-H*.03;
+  eHW=W*.09;eHH=H*.10;
+  const fHW=W*.25,fHH=H*.285,fRad=Math.min(W*.25,H*.285)*.72;
+  const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();
+
+  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);ctx.translate(-cx,-cy);
+  // human-ish head: squircle, slightly narrower chin
+  const hx=cx-fHW,hy=cy-fHH,hw=fHW*2,hh=fHH*2;
+  if(ctx.roundRect){ctx.beginPath();ctx.roundRect(hx,hy,hw,hh,[fRad,fRad,fRad*1.3,fRad*1.3]);}
+  else{ctx.beginPath();ctx.moveTo(hx+fRad,hy);ctx.arcTo(hx+hw,hy,hx+hw,hy+hh,fRad);ctx.arcTo(hx+hw,hy+hh,hx,hy+hh,fRad);ctx.arcTo(hx,hy+hh,hx,hy,fRad);ctx.arcTo(hx,hy,hx+hw,hy,fRad);ctx.closePath();}
+  const hg=ctx.createLinearGradient(0,hy,0,hy+hh);hg.addColorStop(0,"#f8f1e3");hg.addColorStop(.55,"#efe5d1");hg.addColorStop(1,"#e5d9c1");
+  ctx.fillStyle=hg;ctx.fill();ctx.lineWidth=1.2;ctx.strokeStyle="rgba(120,96,70,.13)";ctx.stroke();
+  ctx.save();ctx.clip();const hl=ctx.createRadialGradient(cx,hy+hh*.26,0,cx,hy+hh*.26,fHW*1.15);hl.addColorStop(0,"rgba(255,255,255,.3)");hl.addColorStop(.6,"rgba(255,255,255,0)");ctx.fillStyle=hl;ctx.fillRect(hx,hy,hw,hh);ctx.restore();
+
+  const feelCol=lerpRgb(S.c1,S.c2,.35),darkFeel=feelCol.map(v=>v*.2),browCol=feelCol.map(v=>v*.4),lipCol=feelCol.map(v=>v*.52);
+  S.darkFeel=darkFeel;
+  const noseY=cy+H*.052,mouthY=cy+H*.135,mW=W*.085,mAmp=H*.05,mOpenAmp=H*.055,mThick=H*.008;
+  // brow endpoints (do the grammar)
+  const bBaseY=eyeY-eHH*1.35-S.browUp*eHH*.7;
+  function brow(side){const s=side; // s=-1 left, +1 right
+    const ix=cx+s*(sep-eHW*.55+S.furrow*eHW*.35), iy=bBaseY - S.browInner*eHH*.7 + S.furrow*eHH*.5;
+    const ox=cx+s*(sep+eHW*1.0), oy=bBaseY - S.browUp*eHH*.15;
+    return [ix,iy,ox,oy];}
+  const bl_=brow(-1),br_=brow(1);
+  // cheeks blush
+  const blushA=clamp(S.blush*(.3+.7*S.cheek),0,1)*.5;
+  if(blushA>.02)for(const bx of[cx-sep*1.02,cx+sep*1.02]){const by=eyeY+eHH*1.7;const g=ctx.createRadialGradient(bx,by,0,bx,by,W*.05);g.addColorStop(0,rgba(lerpRgb(feelCol,[255,150,150],.45),blushA));g.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=g;ctx.beginPath();ctx.arc(bx,by,W*.05,0,6.2832);ctx.fill();}
+
+  for(let g=0;g<GRID.length;g++){
+    const gx=GRID[g].x,gy=GRID[g].y+S.bob;
+    const _u=Math.abs((gx-cx)/fHW),_v=Math.abs((gy-cy)/fHH),ins=Math.pow(_u,3.2)+Math.pow(_v,3.2);
+    if(ins<1){
+      const nx=(gx-cx)/fHW,ny=(gy-cy)/fHH,nz=Math.sqrt(Math.max(.03,1-nx*nx-ny*ny));
+      const lam=Math.max(0,nx*(-.45)+ny*(-.55)+nz*.70);          // key light, upper-left-front
+      let occ=0;
+      for(const ex of[cx-sep,cx+sep]){const sd=Math.hypot((gx-ex)/(eHW*1.5),(gy-(eyeY-eHH*.15))/(eHH*1.8));occ+=.55*Math.exp(-sd*sd*2.2);} // recessed sockets + brow ridge
+      occ+=.32*Math.exp(-Math.pow((gy-(noseY+eHH*.55))/(eHH*.55),2)-Math.pow((gx-cx)/(eHW*.85),2));   // under nose
+      occ+=.3*Math.exp(-Math.pow((gy-(mouthY+H*.032))/(H*.03),2)-Math.pow((gx-cx)/(mW*1.2),2));        // under lip
+      occ+=.34*Math.exp(-Math.pow((gx-(cx+eHW*.30))/(eHW*.32),2)-Math.pow((gy-noseY)/(eHH*.95),2))*(gx>cx?1:.3); // nose cast shadow
+      occ=clamp(occ,0,.72);
+      const shade=(.5+.64*lam)*(1-occ), rim=Math.pow(clamp(1-nz,0,1),2.6)*.42, sm=Math.min(1,shade);
+      const col=[236*sm+darkFeel[0]*(1-sm)*.75+S.c1[0]*rim,219*sm+darkFeel[1]*(1-sm)*.75+S.c1[1]*rim,197*sm+darkFeel[2]*(1-sm)*.75+S.c1[2]*rim];
+      dot(gx,gy,STEP*.62,col,clamp(.55+.4*(1-ins),0,1));
+    } else dot(gx,gy,1.1,SHADOW,.016);
+    // eyes
+    let ec=null,ea=0;for(const ex of[cx-sep,cx+sep]){const e=eyeDot(gx,gy,ex,eyeY,S);if(e&&e.a>ea){ec=e.c;ea=e.a;}}
+    if(ea>.04){dot(gx+STEP*.16,gy+STEP*.2,STEP*.5,SHADOW,ea*.16);dot(gx,gy,STEP*.55,ec,ea);}
+    // brows
+    const bv=Math.max(segV(gx,gy,bl_[0],bl_[1],bl_[2],bl_[3],eHH*.16),segV(gx,gy,br_[0],br_[1],br_[2],br_[3],eHH*.16));
+    if(bv>.04)dot(gx,gy,STEP*.52,browCol,bv*.92);
+    // nose: bridge + tip + nostrils (human structure)
+    const nb=segV(gx,gy,cx,eyeY+eHH*.4,cx,noseY,eHW*.10)*.5;
+    const ntip=clamp(1-Math.hypot((gx-cx)/(eHW*.32),(gy-noseY)/(eHH*.3)),0,1)*.6;
+    const nostril=Math.max(clamp(1-Math.hypot((gx-(cx-eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1),clamp(1-Math.hypot((gx-(cx+eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1))*.8;
+    const nv=Math.max(nb,ntip*.5,nostril);
+    if(nv>.05)dot(gx,gy,STEP*.5,lerpRgb(SHADOW,darkFeel,.5),nv*.4);
+    // mouth: corner pulls + open + upper-lip
+    const t=(gx-cx)/mW;
+    if(Math.abs(t)<=1){const yL=mouthY-S.cornerL*mAmp,yR=mouthY-S.cornerR*mAmp,c0=mouthY+S.open*mOpenAmp*.4-S.upperLip*mAmp*.5;
+      const aa=(yL+yR)/2-c0,bb=(yR-yL)/2,yLip=aa*t*t+bb*t+c0;
+      const mm=clamp(1-Math.abs(gy-yLip)/(mThick+S.open*H*.004),0,1);
+      if(mm>.04)dot(gx,gy,STEP*.52,lipCol,mm*.9);
+      if(S.open>.14&&gy>yLip&&gy<yLip+S.open*mOpenAmp&&Math.abs(t)<S.width){dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.4),.5*S.open);}
+    }
+  }
+  // catchlights
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;if(S.eyeOpen>.14){
+    dot(icx-eHW*.24,icy-eHH*.30,STEP*.46,[255,255,255],.95);
+    dot(icx+eHW*.15,icy+eHH*.06,STEP*.22,[255,255,255],.45);}}
+  ctx.restore();
+}
+function eyeDot(px,py,ex,ey,S){
+  const dyA=py-ey,topLim=-S.eyeOpen*eHH,botLim=(1-S.cheek*.72)*eHH;
+  if(dyA<topLim||dyA>botLim)return null;
+  const ra=Math.hypot((px-ex)/eHW,dyA/eHH);if(ra>1)return null;
+  const apEdge=clamp((1-ra)*5,0,1)*clamp((dyA-topLim)/5+1,0,1)*clamp((botLim-dyA)/5+1,0,1);
+  const bshade=.86+.16*Math.max(0,((px-ex)/eHW)*(-.4)+(dyA/eHH)*(-.5)+.55); // eyeball sphere
+  const lidSh=clamp((dyA-topLim)/(eHH*.62),0,1)*.5;                          // upper lid casts shadow
+  const icx=ex+S.gazeX*eHW*.42,icy=ey+S.gazeY*eHH*.42;
+  const ang=Math.atan2(py-icy,px-icx),rr=Math.hypot((px-icx)/(eHW*.9),(py-icy)/(eHH*.9)),pupilR=.16+.34*S.pupil;
+  if(rr<pupilR){const gl=rr<pupilR*.45?.14:0;return {c:S.darkFeel.map(v=>(v+gl*210)*(1-lidSh)),a:apEdge};}
+  if(rr<.94){const t=clamp((rr-pupilR)/(.94-pupilR),0,1);let col=lerpRgb(S.c1,S.c2,t);
+    const fib=.7+.3*Math.sin(ang*15+S.irisPh)*Math.sin(rr*7+1);col=col.map(v=>v*fib);
+    if(t<.2)col=lerpRgb(col,[255,255,255],.28*(1-t/.2));                     // bright inner ring
+    if(rr>.8)col=lerpRgb(col,S.darkFeel,.62);                                      // limbal ring
+    return {c:col.map(v=>v*bshade*(1-lidSh)),a:apEdge};}
+  let scl=lerpRgb(SCLERA,SHADOW,.06+.34*lidSh).map(v=>v*bshade);
+  if(dyA>botLim-eHH*.16)scl=lerpRgb(scl,[255,255,255],.28);                  // moist lower tear-line
+  return {c:scl,a:apEdge*.96};
+}
+
+// ── UI ──
+const $=id=>document.getElementById(id);
+const feelBox=$("feelings"), chips={};
+EMO.forEach((e,i)=>{const b=document.createElement("button");b.className="chip";b.textContent=e[0];b.setAttribute("aria-pressed",e[0]===cur.name);b.onclick=()=>select(i,b);feelBox.appendChild(b);chips[e[0]]=b;});
+function select(i,btn){LIVE=false;cur=express(EMO[i]);userAro=null;userCoh=null;transT=1;
+  $("aro").value=cur.aro.toFixed(2);$("coh").value=cur.coh.toFixed(2);$("aroOut").textContent=cur.aro.toFixed(2);$("cohOut").textContent=cur.coh.toFixed(2);
+  $("fName").textContent=cur.name;$("fDesc").textContent=cur.desc;
+  document.documentElement.style.setProperty("--accent",rgba(cur.c2,1));
+  for(const k in chips)chips[k].setAttribute("aria-pressed",chips[k]===btn);}
+$("aro").oninput=e=>{userAro=+e.target.value;$("aroOut").textContent=userAro.toFixed(2);};
+$("coh").oninput=e=>{userCoh=+e.target.value;$("cohOut").textContent=userCoh.toFixed(2);};
+$("eyesBtn").onclick=()=>{cam.on?eyesOff():eyesOn();};
+
+$("fDesc").textContent=cur.desc; document.documentElement.style.setProperty("--accent",rgba(cur.c2,1));
+
+// ── LIVE: drive the face from the running brain via SSE /events ──
+const emap={};EMO.forEach(e=>emap[e[0].toLowerCase()]=e);
+function liveExpress(name,v,a){const key=(name||"").toLowerCase();let e=emap[key];
+  if(e){e=e.slice();e[1]=v;e[2]=a;}else{const rw=Math.max(0,v)*(.5+a),th=Math.max(0,-v)*a*1.4,sd=Math.max(0,-v)*(1-a);e=[name||"Feeling",v,a,rw,th,sd,0,0,""];}
+  return express(e);}
+let LIVE=false,liveCoh=null;
+// blend the full emotion MIX the brain reports — weighted action-units AND weighted color
+function blendExpress(mix,v,a){
+  if(!mix||!mix.length)return liveExpress(null,v,a);
+  let R={rw:0,th:0,sd:0,ins:0,oxy:0},W=0,c1=[0,0,0],c2=[0,0,0];
+  for(const m of mix){const w=Math.max(0,+m.weight||0);if(w<=0)continue;W+=w;
+    const e=emap[(m.name||"").toLowerCase()];
+    let rw,th,sd,ins,oxy,mv,ma;
+    if(e){rw=e[3];th=e[4];sd=e[5];ins=e[6];oxy=e[7];mv=e[1];ma=e[2];}
+    else{rw=Math.max(0,v)*(.5+a);th=Math.max(0,-v)*a*1.4;sd=Math.max(0,-v)*(1-a);ins=0;oxy=0;mv=v;ma=a;}
+    R.rw+=rw*w;R.th+=th*w;R.sd+=sd*w;R.ins+=ins*w;R.oxy+=oxy*w;
+    const col=emoColor(mv,ma,th,ANGER.has(m.name),oxy,ins);
+    c1=[c1[0]+col[0][0]*w,c1[1]+col[0][1]*w,c1[2]+col[0][2]*w];
+    c2=[c2[0]+col[1][0]*w,c2[1]+col[1][1]*w,c2[2]+col[1][2]*w];}
+  if(W>0){for(const k in R)R[k]/=W;c1=c1.map(x=>x/W);c2=c2.map(x=>x/W);}
+  const dom=mix[0].name;
+  const ex=express([dom||"Feeling",v,a,R.rw,R.th,R.sd,R.ins,R.oxy,""]);
+  ex.c1=c1;ex.c2=c2;ex.name=dom||ex.name;
+  return ex;}
+function goLive(d){LIVE=true;
+  cur=(d.mix&&d.mix.length)?blendExpress(d.mix,+d.valence,+d.arousal):liveExpress(d.emotion,+d.valence,+d.arousal);
+  if(liveCoh!=null)cur.coh=liveCoh;userAro=null;userCoh=null;transT=1;
+  $("fName").textContent=(d.emotion||cur.name);$("fDesc").textContent=cur.desc||d.description||"";
+  document.documentElement.style.setProperty("--accent",rgba(cur.c2,1));
+  const eb=document.querySelector(".eyebrow");if(eb)eb.textContent="● LIVE — reading the brain";
+  for(const k in chips)chips[k].setAttribute("aria-pressed","false");}
+try{const _es=new EventSource("/events");
+  _es.addEventListener("emotion_update",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
+  _es.addEventListener("emotion_final",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
+  _es.addEventListener("brain_coherence",ev=>{try{const d=JSON.parse(ev.data);liveCoh=clamp(+d.sync_order,.12,.9);if(LIVE)cur.coh=liveCoh;}catch(_){}});
+}catch(_){}
+
+if(/embed/.test(location.search))document.body.classList.add("embed");
+size();requestAnimationFrame(frame);
+</script>

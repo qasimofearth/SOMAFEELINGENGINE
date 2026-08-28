@@ -7682,6 +7682,16 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.serve_html(set_cookie=cookie)
         elif path == "/events":
             self.serve_sse()
+        elif path == "/face":
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "face.html"), encoding="utf-8") as _f:
+                    _html = _f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(_html.encode("utf-8"))
+            except Exception as _e:
+                self.send_error(500, str(_e))
         elif path == "/history":
             self.send_json({"messages": get_messages()})
         elif path == "/autonomous/recent":
@@ -10115,6 +10125,9 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
 
   <div id="chat-area">
+    <div id="face-portrait" style="height:220px;margin:0 0 12px 0;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 6px 26px rgba(0,0,0,0.30);background:#f2ebdc;flex:none;">
+      <iframe src="/face?embed=1" title="Elan's face" scrolling="no" style="width:100%;height:100%;border:0;display:block;"></iframe>
+    </div>
     <div id="messages"></div>
     <div id="img-preview-bar">
       <img id="img-thumb" src="" alt=""/>
