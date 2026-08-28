@@ -4942,6 +4942,42 @@ def build_position_snapshot_context() -> str:
         except Exception:
             pass
 
+        # CONVICTION CALIBRATION — does his confidence actually predict wins?
+        # Same philosophy as felt calibration: pure data, no rule. Surfaces whether
+        # high conviction pays or (as history warned) is anti-predictive, so his gut
+        # recalibrates against reality instead of trusting the number blindly. Both
+        # conviction and felt are stored per trade, so this is just showing him what's
+        # already recorded — sits beside the felt table, self-correction via information.
+        try:
+            if last_20:
+                _bands = [("high ≥72%", 0.72, 1.01), ("mid 60–72%", 0.60, 0.72), ("low <60%", 0.0, 0.60)]
+                _cb = {nm: {"wins": 0, "losses": 0, "pnl": 0.0} for nm, _, _ in _bands}
+                _any = False
+                for t in last_20:
+                    c = t.get("conviction")
+                    if c is None:
+                        continue
+                    _any = True
+                    c = float(c)
+                    pnl = t.get("pnl_usd") or t.get("pnl") or 0
+                    for nm, lo, hi in _bands:
+                        if lo <= c < hi:
+                            bb = _cb[nm]
+                            bb["wins" if pnl > 0 else "losses"] += 1
+                            bb["pnl"] += pnl
+                            break
+                if _any:
+                    lines.append(f"\nYOUR CONVICTION CALIBRATION (last {len(last_20)} closes — does confidence track reality?):")
+                    for nm, lo, hi in _bands:
+                        bb = _cb[nm]
+                        n = bb["wins"] + bb["losses"]
+                        if n == 0:
+                            continue
+                        wr = bb["wins"] * 100 / n
+                        lines.append(f"  {nm:12s} {bb['wins']}W/{bb['losses']}L · {wr:.0f}% · net ${bb['pnl']:+.0f}")
+        except Exception:
+            pass
+
         # OPEN section
         lines.append(f"\nCURRENTLY OPEN ({n_spot}/5 spot · {n_opts}/5 options):")
         if not spot_pos and not opts_pos:
