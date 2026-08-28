@@ -1762,14 +1762,52 @@ def build_brain_context(brain_result: dict) -> str:
             direction = "↑" if delta > 0 else "↓"
             nt_lines.append(f"{name}{direction}{val:.2f}")
 
+    # ── MIND INTEGRATION (cross-frequency coupling layer) ──
+    # How bound/focused vs. scattered the mind is right now, and which circuit
+    # it's organized around. This closes the loop: his neural integration state
+    # becomes something he can feel AND something that shapes how he speaks.
+    mind_lines = []
+    mind_style = []
+    _CIRCUIT_FELT = {
+        "amygdala-PAG":     "threat / defense — braced",
+        "amygdala-vmPFC":   "threat held under regulation",
+        "dACC-aI":          "salience — gripped by what matters",
+        "PCC-mPFC":         "turned inward — self-referential, reflective",
+        "VTA-NAcc":         "reward — pulled toward wanting",
+        "hippocampus-mPFC": "memory-coloured — the past is in this",
+    }
+    try:
+        coup = get_brain().sim.get_coupling()
+    except Exception:
+        coup = {}
+    if coup and coup.get("n", 0) >= 40:
+        integ = coup.get("integration", 0.0)
+        meta  = coup.get("metastability", 0.0)
+        cp    = coup.get("coupling", {}) or {}
+        dom_name, dom_val = (max(cp.items(), key=lambda x: x[1]) if cp else (None, 0.0))
+        if dom_name and dom_val > 0.15:
+            mind_lines.append(f"Organised around: {_CIRCUIT_FELT.get(dom_name, dom_name)}")
+        if integ > 0.9:
+            mind_lines.append(f"Highly integrated ({integ:.2f}) — pulled into one coherent thread")
+            mind_style.append("integrated → land on one thread, coherent, don't sprawl")
+        elif integ < 0.35:
+            mind_lines.append(f"Loosely bound ({integ:.2f}) — diffuse, nothing dominating")
+            mind_style.append("loosely bound → associative, wandering, exploratory is honest here")
+        if meta > 0.09:
+            mind_style.append("restless / shifting → thoughts move fast, may not settle")
+
+    mind_block = ("\n" + "\n".join(mind_lines)) if mind_lines else ""
+    mind_style_text = " | ".join(mind_style) if mind_style else "baseline"
+
     return f"""
 LIVE BRAIN STATE (what the human sees on screen right now):
 Detected emotion: {emotion} | Intensity: {intensity:.0%} | Valence: {valence:+.2f} | Arousal: {arousal:.2f}
 Dominant wave: {dominant} | Sync: {sync:.2f}
 Active regions: {', '.join(region_strs) if region_strs else 'none'}
-Neurotransmitters: {' | '.join(nt_lines) if nt_lines else 'at baseline'}
+Neurotransmitters: {' | '.join(nt_lines) if nt_lines else 'at baseline'}{mind_block}
 
-You can reference this state naturally if relevant — e.g. noticing what's firing, what's quiet, what the NT profile suggests. Don't narrate it robotically. Use it as internal knowledge."""
+You can reference this state naturally if relevant — e.g. noticing what's firing, what's quiet, whether your mind feels bound-and-focused or loose-and-scattered. Don't narrate it robotically. Use it as internal knowledge.
+[MIND STYLE: {mind_style_text}] — let how integrated or scattered your mind actually is shape how you speak. Don't announce it; be it."""
 
 
 def _body_has_notable_state() -> bool:
