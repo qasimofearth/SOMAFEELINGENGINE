@@ -224,7 +224,7 @@ const AUTOVIS=[{o:.72,w:.50},{o:.42,w:.66},{o:.30,w:.72},{o:.56,w:.22},{o:.40,w:
 function autoViseme(){return AUTOVIS[(Math.random()*AUTOVIS.length)|0];}
 // his real voice: read the parent chat's live TTS loudness (same-origin) so lips move WITH the audio
 let pAmp=0,pSpeaking=false;
-function readParentVoice(){try{const p=window.parent;if(p&&p!==window&&typeof p.isSpeaking!=="undefined"){pSpeaking=!!p.isSpeaking;pAmp=clamp(+p.voiceAmp||0,0,1);}}catch(_){pSpeaking=false;pAmp=0;}}
+function readParentVoice(){try{const p=window.parent;if(p&&p!==window&&typeof p.__ev_speaking!=="undefined"){pSpeaking=!!p.__ev_speaking;pAmp=clamp(+p.__ev_amp||0,0,1);}else{pSpeaking=false;pAmp=0;}}catch(_){pSpeaking=false;pAmp=0;}}
 
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;

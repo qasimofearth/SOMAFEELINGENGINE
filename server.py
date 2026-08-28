@@ -10593,6 +10593,9 @@ let netState={{}};
 let history=[];
 let auraRgb=[80,80,200], auraPhase=0, eegPhase=0;
 let voiceAmp=0, isSpeaking=false;
+// Expose voice state to the face iframe (same-origin). Top-level `let` vars are NOT on
+// window, so the iframe can't read them directly — mirror them every frame instead.
+(function _evMirror(){{try{{window.__ev_speaking=isSpeaking;window.__ev_amp=voiceAmp;}}catch(e){{}}requestAnimationFrame(_evMirror);}})();
 let streamTmo=null;
 const ntHist={{}};
 Object.keys(NT_INFO).forEach(k=>ntHist[k]=[]);
