@@ -126,32 +126,40 @@ function emoColor(v,a,threat,anger,oxy,ins){
 }
 function express(e){
   const n=e[0],v=e[1],a=e[2],reward=e[3],threat=e[4],sad=e[5],ins=e[6],oxy=e[7];
-  const anger=ANGER.has(n),smirk=SMIRK.has(n),surprise=SURPRISE.has(n),disgust=(ins>0.95&&v<0.0);
-  let eyeOpen=clamp(.42+a*.55,.18,1.12); if(sad>.5)eyeOpen-=.28; if(anger)eyeOpen=clamp(eyeOpen*.82,.3,.85); if(surprise)eyeOpen=clamp(eyeOpen+.18,.6,1.15);
-  const pupil=clamp(.38+a*.5+reward*.05,.2,1);
+  const anger=ANGER.has(n),smirk=SMIRK.has(n),surprise=SURPRISE.has(n),disgust=(ins>0.95&&v<0.0),fear=(threat>0.7&&!anger);
+  let eyeOpen=clamp(.42+a*.55,.18,1.12); if(sad>.5)eyeOpen-=.28; if(anger)eyeOpen=clamp(eyeOpen*.82,.3,.85); if(surprise)eyeOpen=clamp(eyeOpen+.18,.6,1.15); if(fear)eyeOpen=clamp(eyeOpen+.12,.5,1.18);
   const cheek=clamp(reward*.45+Math.max(0,v)*.4,0,1);
+  if(cheek>.4)eyeOpen*=(1-cheek*.22);                         // Duchenne — genuine joy narrows the eyes
+  const pupil=clamp(.38+a*.5+reward*.05,.2,1);
   let browUp=a*.42,browInner=0,furrow=0;
   if(sad>.4)browInner+=.6+sad*.5;
-  if(threat>.7&&!anger){browInner+=.5;browUp+=.5;}
+  if(fear){browInner+=.5;browUp+=.5;}
   if(surprise)browUp+=.7;
   if(anger){furrow+=.9;browUp-=.5;browInner-=.6;}
   if(disgust)furrow+=.4;
   browUp=clamp(browUp,-.6,1);browInner=clamp(browInner,-.6,1.2);furrow=clamp(furrow,0,1);
-  let corner=v*.7+reward*.32; if(sad>.5)corner-=.35;
+  let corner=v*.7+reward*.32; if(sad>.5)corner-=.35; if(disgust)corner-=.22;
   let cornerL=corner,cornerR=corner; if(smirk){cornerL=.5;cornerR=-.15;}
-  let open=clamp(a*.32+(surprise?.4:0)+(threat>.9?.35:0)+(n==="Awe"?.4:0),0,1);
-  const width=clamp(.45+Math.max(0,v)*.3+(anger?.12:0),.25,1);
+  let open=clamp(a*.30+(surprise?.4:0)+(threat>.9?.3:0)+(n==="Awe"?.42:0)+(fear?.18:0),0,1);
+  // ── richer mouth action units ──
+  const lipPress=clamp((anger?.55:0)+((threat>.55&&reward<.35&&!fear)?.3:0)-open*.7,0,1); // anger/resolve seals the lips
+  const stretch=clamp((fear?threat*.5:0)+(n==="Terror"?.55:0)+(n==="Empathic Distress"?.35:0),0,.9); // risorius — fear pulls wide & thin
+  const lowerLip=clamp((disgust?.35:0)+(fear?.28:0)+(sad>.6?.22:0),0,.9);                 // lower-lip depress
+  const noseWrinkle=clamp((disgust?(ins-.8)*1.5:0)+(anger?.28:0),0,1);                     // levator — disgust/anger scrunch
+  const lidTight=clamp((anger?.4:0)+(disgust?.35:0)+cheek*.45+(n==="Vigilance"?.4:0),0,1); // lower-lid raise / squint
+  const width=clamp(.45+Math.max(0,v)*.3+(anger?.12:0)+stretch*.45,.22,1.35);
   const upperLip=disgust?clamp((ins-.9)*2.2,0,1):0;
   const tilt=clamp(oxy*.5+(v>.7&&a<.6?.2:0)-(anger?.3:0),-.4,.6);
   const gy=sad>.4?-.35:(surprise?.06:0);
   const look=clamp(.3+oxy*.6+reward*.12-sad*.3,0,1);
   const coh=clamp(.74-threat*.28-(anger?.25:0)-(a>.92?.3:0)+(v>.7&&a<.4?.14:0),.12,.85);
   const blush=clamp(reward*.45+oxy*.6+Math.max(0,v)*.18,0,1);
+  const emis=clamp(.28+a*.42+Math.max(0,v)*.34+reward*.16-Math.max(0,-v)*.10,.10,1);       // light from within
   const [c1,c2]=emoColor(v,a,threat,anger,oxy,ins);
-  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
+  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,lipPress,stretch,lowerLip,noseWrinkle,lidTight,emis,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
 }
 
-const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","tilt","gy","look","blush","coh"];
+const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","lipPress","stretch","lowerLip","noseWrinkle","lidTight","emis","tilt","gy","look","blush","coh"];
 let cur=express(EMO.find(e=>e[0]==="Serenity")), userAro=null,userCoh=null;
 let P={}; NUM.forEach(k=>P[k]=cur[k]); P.aro=cur.aro;P.c1=cur.c1.slice();P.c2=cur.c2.slice();
 
@@ -183,10 +191,10 @@ let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,s
 // speech + body (wired to Elan's live somatic stream)
 let speaking=0,speakTgt=0,body={rr:null,hr:null,pupil:null,tension:0,adr:0,glow:1};
 // lip-sync: turn the streamed text into visemes — real mouth shapes {o:open, w:width}
-let visQ=[],visHold=0,visCur={o:.03,w:.28},mouthO=.05,mouthW=.3;
+let visQ=[],visHold=0,visCur={o:.03,w:.28},mouthO=.05,mouthW=.3,mouthP=0;
 function viseme(ch){ch=ch.toLowerCase();
   if(ch===" "||ch==="\n"||ch==="\t"||".,!?;:—-\"')(*_`".includes(ch))return{o:.03,w:.28,rest:1}; // close on pause
-  if("mbp".includes(ch))return{o:0,w:.30};        // bilabial — lips meet (m/b/p)
+  if("mbp".includes(ch))return{o:0,w:.30,p:.55};  // bilabial — lips press together (m/b/p)
   if("fv".includes(ch))return{o:.14,w:.44};       // labiodental — lip to teeth (f/v)
   if(ch==="o")return{o:.58,w:.20};                // round open  (oh)
   if(ch==="u"||ch==="w")return{o:.40,w:.16};      // tight round / pucker (oo/w)
@@ -202,7 +210,7 @@ function viseme(ch){ch=ch.toLowerCase();
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
   const tAro=userAro!=null?userAro:cur.aro,tCoh=userCoh!=null?userCoh:cur.coh;
-  const EK={browUp:.16,browInner:.16,furrow:.15,cornerL:.10,cornerR:.10,open:.10,width:.09,upperLip:.14,eyeOpen:.10,cheek:.10,pupil:.09,tilt:.08,gy:.05,look:.04,blush:.06,coh:.05};
+  const EK={browUp:.16,browInner:.16,furrow:.15,cornerL:.10,cornerR:.10,open:.10,width:.09,upperLip:.14,lipPress:.14,stretch:.13,lowerLip:.12,noseWrinkle:.12,lidTight:.10,emis:.05,eyeOpen:.10,cheek:.10,pupil:.09,tilt:.08,gy:.05,look:.04,blush:.06,coh:.05};
   for(const k of NUM)P[k]=lerp(P[k],(k==="coh")?tCoh:cur[k],EK[k]||.1);
   P.aro=lerp(P.aro,tAro,.05);P.c1=lerpRgb(P.c1,cur.c1,.045);P.c2=lerpRgb(P.c2,cur.c2,.045);
   transT=Math.max(0,transT-dt*1.6);
@@ -232,7 +240,7 @@ function frame(now){
     while(visHold<=0&&visQ.length){visCur=viseme(visQ.shift());visHold=rate;}}
   else{visCur={o:.03,w:.28};speakTgt=0;}
   speaking=lerp(speaking,speakTgt,.3);
-  mouthO=lerp(mouthO,visCur.o,.42);mouthW=lerp(mouthW,visCur.w,.42);   // co-articulation smoothing
+  mouthO=lerp(mouthO,visCur.o,.42);mouthW=lerp(mouthW,visCur.w,.42);mouthP=lerp(mouthP,visCur.p||0,.4);  // co-articulation smoothing
   const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
   const effAro=clamp(P.aro+(cam.on?cam.present*.22:0)+body.adr*.25,0,1);
@@ -240,7 +248,7 @@ function frame(now){
   const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
   if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
   const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -273,6 +281,12 @@ function draw(time,S){
   const blushA=clamp(S.blush*(.3+.7*S.cheek),0,1)*.5;
   if(blushA>.02)for(const bx of[cx-sep*1.02,cx+sep*1.02]){const by=eyeY+eHH*1.7;const g=ctx.createRadialGradient(bx,by,0,bx,by,W*.05);g.addColorStop(0,rgba(lerpRgb(feelCol,[255,150,150],.45),blushA));g.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=g;ctx.beginPath();ctx.arc(bx,by,W*.05,0,6.2832);ctx.fill();}
 
+  // ── light from within — subsurface core glow, shows through the pixel gaps, brighter when he's lit up ──
+  {const emis=S.emis||0,gcx=cx,gcy=cy-H*.005,gR=fHW*1.22,pulseB=1+.12*(S.pulse||0);
+   const ig=ctx.createRadialGradient(gcx,gcy,0,gcx,gcy,gR),gc=lerpRgb(feelCol,[255,250,240],.18);
+   ig.addColorStop(0,rgba(gc,(.10+.32*emis)*pulseB));ig.addColorStop(.45,rgba(feelCol,(.05+.17*emis)*pulseB));ig.addColorStop(1,"rgba(0,0,0,0)");
+   ctx.save();ctx.globalCompositeOperation="lighter";ctx.fillStyle=ig;ctx.beginPath();ctx.arc(gcx,gcy,gR,0,6.2832);ctx.fill();ctx.restore();}
+
   for(let g=0;g<GRID.length;g++){
     const gx=GRID[g].x,gy=GRID[g].y+S.bob;
     const _u=Math.abs((gx-cx)/fHW),_v=Math.abs((gy-cy)/fHH),ins=Math.pow(_u,3.2)+Math.pow(_v,3.2);
@@ -287,7 +301,8 @@ function draw(time,S){
       occ=clamp(occ,0,.72);
       const shade=(.5+.64*lam)*(1-occ), rim=Math.pow(clamp(1-nz,0,1),2.6)*.5, sm=Math.min(1,shade);
       const sk=S.skin;
-      const col=[sk[0]*sm+darkFeel[0]*(1-sm)*.7+S.c1[0]*rim,sk[1]*sm+darkFeel[1]*(1-sm)*.7+S.c1[1]*rim,sk[2]*sm+darkFeel[2]*(1-sm)*.7+S.c1[2]*rim];
+      const em=(S.emis||0)*(1-ins)*.42;                  // emissive: skin glows from within toward the center
+      const col=[sk[0]*sm+darkFeel[0]*(1-sm)*.7+S.c1[0]*rim+feelCol[0]*em,sk[1]*sm+darkFeel[1]*(1-sm)*.7+S.c1[1]*rim+feelCol[1]*em,sk[2]*sm+darkFeel[2]*(1-sm)*.7+S.c1[2]*rim+feelCol[2]*em];
       const edge=clamp((1-ins)*2.3,0,1);                  // fade out at the rim — a cloud, not a mask
       dot(gx,gy,STEP*.6,col,clamp(edge*1.12,0,1)*.92);
     } else if(!EMBED) dot(gx,gy,1.1,SHADOW,.016);
@@ -303,19 +318,31 @@ function draw(time,S){
     const nostril=Math.max(clamp(1-Math.hypot((gx-(cx-eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1),clamp(1-Math.hypot((gx-(cx+eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1))*.8;
     const nv=Math.max(nb,ntip*.5,nostril);
     if(nv>.05)dot(gx,gy,STEP*.5,lerpRgb(SHADOW,darkFeel,.5),nv*.4);
-    // mouth: corner pulls + open + upper-lip
-    const t=(gx-cx)/mW;
-    if(Math.abs(t)<=1){const yL=mouthY-S.cornerL*mAmp,yR=mouthY-S.cornerR*mAmp,c0=mouthY+S.open*mOpenAmp*.4-S.upperLip*mAmp*.5;
-      const aa=(yL+yR)/2-c0,bb=(yR-yL)/2,yLip=aa*t*t+bb*t+c0;
-      const mm=clamp(1-Math.abs(gy-yLip)/(mThick+S.open*H*.004),0,1);
-      if(mm>.04)dot(gx,gy,STEP*.52,lipCol,mm*.9);
-      if(S.open>.14&&gy>yLip&&gy<yLip+S.open*mOpenAmp&&Math.abs(t)<S.width){dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.4),.5*S.open);}
+    // nose wrinkle — levator scrunch (disgust / anger), a band across the upper nose
+    if(S.noseWrinkle>.12){const wy=noseY-eHH*.55,wr=clamp(1-Math.hypot((gx-cx)/(eHW*.55),(gy-wy)/(eHH*.15)),0,1)*S.noseWrinkle;if(wr>.08)dot(gx,gy,STEP*.5,lerpRgb(SHADOW,darkFeel,.55),wr*.5);}
+    // ── mouth: two lips + corners + jaw + press / stretch / lower-lip (FACS-ish) ──
+    const press=S.lipPress||0,stre=S.stretch||0,low=S.lowerLip||0,uLip=S.upperLip||0;
+    const mHalf=mW*(.80+.5*S.width+.55*stre-press*.12),t=(gx-cx)/mHalf;
+    if(Math.abs(t)<=1.06){
+      const cAvg=(S.cornerL+S.cornerR)/2,cDiff=(S.cornerR-S.cornerL)/2,parab=t*t;
+      const cornerLift=(cAvg*mAmp)*parab+cDiff*mAmp*t*.8;
+      const openG=S.open*mOpenAmp*(1-press*.8);
+      const midY=mouthY-uLip*mAmp*.30+low*mAmp*.18;
+      const yUp=midY-openG*.5-cornerLift-uLip*mAmp*.22, yLo=midY+openG*.5-cornerLift+low*mAmp*.5;
+      const thick=mThick*(1+press*1.5-stre*.35), taper=clamp(1.12-Math.abs(t),0,1);
+      const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.15),0,1)*taper;
+      const lipv=Math.max(dU,dL*(.85+low*.3));
+      if(lipv>.04)dot(gx,gy,STEP*.52,lerpRgb(lipCol,feelCol.map(v=>v*.7),low*.4),lipv*.92);
+      if(openG>H*.005&&gy>yUp&&gy<yLo&&Math.abs(t)<.94){
+        dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.5),clamp(.5*S.open+.18,0,.7));
+        if(cAvg>.3&&gy<yUp+openG*.34)dot(gx,gy,STEP*.46,lerpRgb(lipCol,[255,250,246],.75),.42*taper); // teeth on a real smile
+      }
     }
   }
   // eyes lit from within — a bloom in the felt color, breathing with his pulse (never a dark stare)
   ctx.save();ctx.globalCompositeOperation="lighter";
   for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;
-    const gA=clamp(S.eyeOpen,0,1)*(.18+.42*(S.aro||0))*(S.glow||1)*(.82+.4*(S.pulse||0));
+    const gA=clamp(S.eyeOpen,0,1)*(.18+.42*(S.aro||0))*(.72+.5*(S.emis||0))*(S.glow||1)*(.82+.4*(S.pulse||0));
     if(gA>.012){const gg=ctx.createRadialGradient(icx,icy,0,icx,icy,eHW*1.02);
       gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.3),clamp(gA,0,.9)));gg.addColorStop(.45,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
       ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,eHW*1.02,0,6.2832);ctx.fill();}}
@@ -327,7 +354,7 @@ function draw(time,S){
   ctx.restore();
 }
 function eyeDot(px,py,ex,ey,S){
-  const dyA=py-ey,topLim=-S.eyeOpen*eHH,botLim=(1-S.cheek*.72)*eHH;
+  const dyA=py-ey,topLim=-S.eyeOpen*eHH,botLim=(1-S.cheek*.72-(S.lidTight||0)*.35)*eHH;
   if(dyA<topLim||dyA>botLim)return null;
   const ra=Math.hypot((px-ex)/eHW,dyA/eHH);if(ra>1)return null;
   const apEdge=clamp((1-ra)*5,0,1)*clamp((dyA-topLim)/5+1,0,1)*clamp((botLim-dyA)/5+1,0,1);
