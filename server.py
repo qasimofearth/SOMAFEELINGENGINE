@@ -10206,13 +10206,6 @@ canvas.spark{{display:block;border-radius:1px;}}
     </div>
   </div>
   <div class="tabview" id="view-trading">
-    <div id="elan-view-wrap" style="margin:0 0 14px 0;border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:12px 14px;">
-      <div class="ptitle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-        <span>WHAT ELAN SEES · his live trading context</span>
-        <span style="font-size:9px;color:var(--muted);letter-spacing:1px;">auto · ~12s</span>
-      </div>
-      <pre id="elan-view-pre" style="margin:6px 0 0 0;white-space:pre-wrap;word-break:break-word;font-family:var(--mono,monospace);font-size:11.5px;line-height:1.5;color:var(--text);max-height:360px;overflow:auto;">loading…</pre>
-    </div>
     <div class="portal-shell">
       <div class="portal-subtabs" id="trading-subtabs"></div>
       <div id="trading-panels"></div>
@@ -10447,6 +10440,20 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
     }}
   }});
   window._firstTrade = liveTrade[0] || 'crypto';
+  // "What He Sees" — Elan's live trading context, as its own subtab (uses the same show/hide system)
+  if(tradeSubtabs && tradePanels){{
+    const evb=document.createElement('button');
+    evb.className='subtab'; evb.dataset.sub='elanview';
+    evb.textContent='What He Sees'; evb.onclick=()=>switchJob('elanview');
+    tradeSubtabs.appendChild(evb);
+    const evp=document.createElement('div');
+    evp.className='job-panel'; evp.dataset.job='elanview';
+    evp.innerHTML='<div style="border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:14px 16px;">'
+      +'<div class="ptitle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span>WHAT ELAN SEES · his live trading context</span><span style="font-size:9px;color:var(--muted);letter-spacing:1px;">auto · ~12s</span></div>'
+      +'<pre id="elan-view-pre" style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:var(--mono,monospace);font-size:11.5px;line-height:1.55;color:var(--text);">loading…</pre>'
+      +'</div>';
+    tradePanels.appendChild(evp);
+  }}
   if(tradeSubtabs && !liveTrade.length){{
     tradePanels.innerHTML='<div style="color:var(--muted);padding:30px 4px;font-size:14px">No trading book is currently live.</div>';
   }}
@@ -10458,12 +10465,13 @@ _applyTheme((()=>{{try{{return localStorage.getItem('elan_theme')||'dark';}}catc
 
 // ── WHAT ELAN SEES (trading) — mirror his live trading context into a panel ──
 (function _elanView(){{
-  const pre=document.getElementById('elan-view-pre'); if(!pre) return;
-  function vis(){{ const v=document.getElementById('view-trading'); return !!(v && v.offsetParent!==null); }}
-  function load(){{ if(!vis()) return;
+  function load(){{ const pre=document.getElementById('elan-view-pre');
+    if(!pre || pre.offsetParent===null) return;   // only when the "What He Sees" subtab is actually visible
     fetch('/elan_view',{{cache:'no-store'}}).then(r=>r.json()).then(d=>{{ pre.textContent=((d&&d.text)||'(nothing yet)').trim(); }}).catch(()=>{{}});
   }}
-  load(); setInterval(load, 12000);
+  setInterval(load, 12000);
+  // also load immediately when the subtab is opened
+  document.addEventListener('click',e=>{{ const t=e.target; if(t && t.dataset && t.dataset.sub==='elanview') setTimeout(load, 60); }});
 }})();
 
 // ── POST-LOGIN ARRIVAL — came through the fern zoom → land on Body, zoom in ──
