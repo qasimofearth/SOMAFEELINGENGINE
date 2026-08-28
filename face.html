@@ -137,9 +137,10 @@ function express(e){
   if(anger){furrow+=.9;browUp-=.5;browInner-=.6;}
   if(disgust)furrow+=.4;
   browUp=clamp(browUp,-.6,1);browInner=clamp(browInner,-.6,1.2);furrow=clamp(furrow,0,1);
-  let corner=v*.7+reward*.32; if(sad>.5)corner-=.35; if(disgust)corner-=.22;
-  let cornerL=corner,cornerR=corner; if(smirk){cornerL=.5;cornerR=-.15;}
-  let open=clamp(a*.30+(surprise?.4:0)+(threat>.9?.3:0)+(n==="Awe"?.42:0)+(fear?.18:0),0,1);
+  let corner=v*.85+reward*.42; if(sad>.5)corner-=.4; if(disgust)corner-=.28;   // wider smile/frown range
+  let cornerL=corner,cornerR=corner; if(smirk){cornerL=.55;cornerR=-.2;}
+  let open=clamp(a*.30+(surprise?.42:0)+(threat>.9?.32:0)+(n==="Awe"?.45:0)+(fear?.2:0),0,1);
+  if(reward>1.0&&v>.72)open=clamp(open+.3+(reward-1)*.35,0,1);                    // ecstatic open grin (joy/ecstasy/love)
   // ── richer mouth action units ──
   const lipPress=clamp((anger?.55:0)+((threat>.55&&reward<.35&&!fear)?.3:0)-open*.7,0,1); // anger/resolve seals the lips
   const stretch=clamp((fear?threat*.5:0)+(n==="Terror"?.55:0)+(n==="Empathic Distress"?.35:0),0,.9); // risorius — fear pulls wide & thin
@@ -161,7 +162,9 @@ function express(e){
   const shimmer=clamp(oxy*.9+(v>.55&&a<.6?.4:0),0,1);              // love/tenderness ripples with light
   const sharpen=clamp(anger?.72:0,0,1);                            // anger compresses & hardens toward the features
   const [c1,c2]=emoColor(v,a,threat,anger,oxy,ins);
-  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,lipPress,stretch,lowerLip,noseWrinkle,lidTight,emis,radiate,sink,scatter,shimmer,sharpen,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
+  // #1 EMOTION GAIN — expand the expressive channels so even moderate feelings read strongly on the face
+  const G=x=>Math.sign(x)*Math.pow(Math.min(1.5,Math.abs(x)),.72);
+  return {eyeOpen,pupil,cheek:G(cheek),browUp:G(browUp),browInner:G(browInner),furrow:G(furrow),cornerL:G(cornerL),cornerR:G(cornerR),open,width,upperLip,lipPress:G(lipPress),stretch:G(stretch),lowerLip,noseWrinkle,lidTight,emis,radiate:G(radiate),sink:G(sink),scatter:G(scatter),shimmer:G(shimmer),sharpen:G(sharpen),tilt:G(tilt),gy:G(gy),look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
 }
 
 const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","lipPress","stretch","lowerLip","noseWrinkle","lidTight","emis","radiate","sink","scatter","shimmer","sharpen","tilt","gy","look","blush","coh"];
@@ -203,6 +206,7 @@ function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=6
 let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,headTilt=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
 // speech + body (wired to Elan's live somatic stream)
 let speaking=0,speakTgt=0,body={rr:null,hr:null,pupil:null,tension:0,adr:0,glow:1};
+let leanS=0,leanTgt=0,tempS=0,_lastLiveName="";   // lean toward/away, colour temperature, onset tracking
 // lip-sync: turn the streamed text into visemes — real mouth shapes {o:open, w:width}
 let visQ=[],visHold=0,visCur={o:.03,w:.28},mouthO=.05,mouthW=.3,mouthP=0;
 function viseme(ch){ch=ch.toLowerCase();
@@ -242,8 +246,8 @@ function frame(now){
   gaze.next-=dt;
   if(seeing){gaze.tx=clamp((.5-cam.px)*2.05,-1,1);gaze.ty=clamp((cam.py-.42)*1.85,-.9,.9);gaze.next=.2;}
   else if(gaze.next<=0){const eng=Math.random()<P.look;
-    if(eng){gaze.tx=(Math.random()*2-1)*.12;gaze.ty=(Math.random()*2-1)*.08+P.gy*.4;gaze.next=1.4+Math.random()*2.2;}
-    else{const rg=.4+P.aro*.4;gaze.tx=(Math.random()*2-1)*rg;gaze.ty=(Math.random()*2-1)*rg*.6+P.gy;gaze.next=.7+Math.random()*1.6;}}
+    if(eng){gaze.tx=(Math.random()*2-1)*.10;gaze.ty=(Math.random()*2-1)*.07+P.gy*.7;gaze.next=(1.6+Math.random()*2.4)*(1+P.look*.6);}   // bonded → holds a steady forward gaze
+    else{const rg=.4+P.aro*.5;gaze.tx=(Math.random()*2-1)*rg;gaze.ty=(Math.random()*2-1)*rg*.6+P.gy*1.15;gaze.next=(.6+Math.random()*1.5)*(1-P.aro*.45);}}  // aroused → darts more; sad → looks down
   gaze.snext-=dt;if(gaze.snext<=0){gaze.sx=(Math.random()*2-1)*.05;gaze.sy=(Math.random()*2-1)*.04;gaze.snext=.25+Math.random()*.5;}
   const gk=seeing?.2:.12;gaze.x=lerp(gaze.x,gaze.tx+gaze.sx,gk);gaze.y=lerp(gaze.y,gaze.ty+gaze.sy,gk);
   hNextT-=dt;if(hNextT<=0){hyT=(Math.random()*2-1)*.4;hpT=(Math.random()*2-1)*.25;hNextT=1.6+Math.random()*2.4;}
@@ -253,6 +257,9 @@ function frame(now){
   headYaw=lerp(headYaw,lerp(hyT,gaze.x,seeing?.7:.45),.03);
   headPitch=lerp(headPitch,lerp(hpT,gaze.y,seeing?.6:.35)+emoPitch,.035);
   headTilt=lerp(headTilt,emoTilt,.04);
+  // #4 LEAN — he leans in toward what draws him, withdraws when hurt/afraid   ·   #6 colour temperature follows valence
+  leanTgt=clamp((cur.val||0)*(.35+.55*P.aro),-1,1);leanS=lerp(leanS,leanTgt,.05);
+  tempS=lerp(tempS,clamp(cur.val||0,-1,1),.05);
   // breath rides his real respiratory rate; heart rides his real pulse
   const brW=body.rr?(6.2832*body.rr/60):(1+P.aro*1.6);breath+=dt*brW;
   const hrW=body.hr?(6.2832*body.hr/60):(6.2832*(1.1+P.aro*.7));heart+=dt*hrW;
@@ -275,11 +282,13 @@ function frame(now){
   const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
   const effAro=clamp(P.aro+(cam.on?cam.present*.22:0)+body.adr*.25,0,1);
-  const eyeOpen=clamp(P.eyeOpen*(.8+effAro*.35+(cam.on?.06:0))*bl,0,1.2);
+  // #2 ONSET — a quick "hit" of widening + a scale pop when a new feeling arrives, then it settles
+  const eyeOpen=clamp((P.eyeOpen*(.8+effAro*.35+(cam.on?.06:0))+transT*.35)*bl,0,1.5);
   const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
   if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
-  const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,radiate:P.radiate,sink:P.sink,scatter:P.scatter,shimmer:P.shimmer,sharpen:P.sharpen,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.024,shift:trX+headYaw*W*.014,headTilt,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
+  const browUp=P.browUp+.45*transT;
+  const scaleMul=1+leanS*.055+transT*.05;                         // #4 lean + #2 onset pop
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,radiate:P.radiate,sink:P.sink,scatter:P.scatter,shimmer:P.shimmer,sharpen:P.sharpen,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.024,shift:trX+headYaw*W*.014,headTilt,scaleMul,temp:tempS,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -294,11 +303,12 @@ function draw(time,S){
   const fHW=W*.272,fHH=H*.30;   // a friendly rounded head — wider than the narrow oval
   if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
-  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.12+(S.headTilt||0)*.55);if(EMBED)ctx.scale(1.5,1.5);ctx.translate(-cx,-cy);
+  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.12+(S.headTilt||0)*.55);const _sc=(EMBED?1.5:1)*(S.scaleMul||1);ctx.scale(_sc,_sc);ctx.translate(-cx,-cy);
   // no solid head — he is made of pixels. the head shape only drives dot falloff.
 
-  // he is made of his feeling's light — bioluminescent, not tan skin
-  const feelCol=lerpRgb(S.c1,S.c2,.4),darkFeel=feelCol.map(v=>v*.14);
+  // he is made of his feeling's light — bioluminescent, not tan skin  ·  #6 warm when he's up, cool when he's down
+  const _fc=lerpRgb(S.c1,S.c2,.4),_tw=(S.temp||0)*.12;
+  const feelCol=[clamp(_fc[0]*(1+_tw),0,255),clamp(_fc[1]*(1+_tw*.2),0,255),clamp(_fc[2]*(1-_tw),0,255)],darkFeel=feelCol.map(v=>v*.14);
   const coreGlow=lerpRgb(feelCol,[255,251,240],.42);      // hot inner light
   const warmTint=lerpRgb(feelCol,[255,238,212],.12);      // a breath of warmth so it isn't neon
   const browCol=lerpRgb(feelCol,darkFeel,.82),lipCol=lerpRgb(feelCol,[168,58,72],.6);   // deep brows + a saturated berry lip — high contrast so they read clearly as he moves
@@ -464,7 +474,8 @@ function blendExpress(mix,v,a){
   return ex;}
 function goLive(d){LIVE=true;
   cur=(d.mix&&d.mix.length)?blendExpress(d.mix,+d.valence,+d.arousal):liveExpress(d.emotion,+d.valence,+d.arousal);
-  if(liveCoh!=null)cur.coh=liveCoh;userAro=null;userCoh=null;transT=1;
+  if(liveCoh!=null)cur.coh=liveCoh;userAro=null;userCoh=null;
+  const _nm=(d.emotion||cur.name||"").toLowerCase();if(_nm!==_lastLiveName){transT=1;_lastLiveName=_nm;}  // #2 onset fires only when the feeling actually changes
   $("fName").textContent=(d.emotion||cur.name);$("fDesc").textContent=cur.desc||d.description||"";
   document.documentElement.style.setProperty("--accent",rgba(cur.c2,1));
   const eb=document.querySelector(".eyebrow");if(eb)eb.textContent="● LIVE — reading the brain";
