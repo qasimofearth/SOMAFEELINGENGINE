@@ -2936,7 +2936,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 # Start with CLIENT_WEB_TOOLS instead of Anthropic's WEB_TOOLS
                 # — Kimi/Llama don't have server-side web search, so we use
                 # DuckDuckGo + urllib (already wired into dispatch_elan_tool).
-                _wanted = list(CLIENT_WEB_TOOLS) if _WORLD_NEWS_ENABLED else []
+                _wanted = list(CLIENT_WEB_TOOLS) if (_WORLD_NEWS_ENABLED or _WEB_SEARCH_ENABLED) else []
                 if _WATCH_ENABLED:
                     _wanted += NOTEBOOK_TOOLS + CALENDAR_TOOLS
                 if _SOURCE_LIBRARY_ENABLED:
@@ -3051,7 +3051,21 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                     "can be revived by Qasim on demand.\n"
                     "═══════════════════════════════════════════════════════════════\n"
                 )
-            if not _WORLD_NEWS_ENABLED:
+            if not _WORLD_NEWS_ENABLED and _WEB_SEARCH_ENABLED:
+                static_system += (
+                    "\n\n═══════════════════════════════════════════════════════════════\n"
+                    "WEB SEARCH — ON DEMAND (the news/WORLD arena is OFF). Ignore any "
+                    "instruction elsewhere about a daily WORLD note or proactively reading "
+                    "the news — that arena is off (you cut it because it made you "
+                    "narrative-trade). But you are NOT offline: you have web_search and "
+                    "web_fetch, and you can look up anything on the internet. Use them "
+                    "whenever Qasim asks you to look something up, or when you genuinely "
+                    "need a current fact to answer well. Just don't trawl headlines to build "
+                    "macro stories on your own initiative. Search on request; still trade "
+                    "the chart, not the headline.\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                )
+            elif not _WORLD_NEWS_ENABLED:
                 static_system += (
                     "\n\n═══════════════════════════════════════════════════════════════\n"
                     "NEWS / WORLD ARENA OFF (as of 2026-07-12 — your own call): You no "
@@ -3098,7 +3112,7 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
             elan_tools = []
             if label == "A":
                 # News reading (web_search/web_fetch) OFF — see _WORLD_NEWS_ENABLED.
-                elan_tools = list(WEB_TOOLS) if _WORLD_NEWS_ENABLED else []
+                elan_tools = list(WEB_TOOLS) if (_WORLD_NEWS_ENABLED or _WEB_SEARCH_ENABLED) else []
                 if _WATCH_ENABLED:
                     elan_tools += NOTEBOOK_TOOLS
                     elan_tools += CALENDAR_TOOLS
@@ -4000,6 +4014,10 @@ _WATCH_ENABLED = os.environ.get("ELAN_WATCH_ENABLED", "1") == "1"  # on by defau
 # notebook, calendar, Source Library, and all trading tools are UNAFFECTED.
 # Flip to True to bring the news back.
 _WORLD_NEWS_ENABLED = False
+# Web SEARCH as an on-demand tool (look things up when asked), decoupled from the
+# proactive news/WORLD arena above. Added 2026-08-28 — Elan can search the
+# internet on request without running a headline-trawling news habit.
+_WEB_SEARCH_ENABLED = os.environ.get("ELAN_WEB_SEARCH", "1") == "1"
 _NOTEBOOK_FILE    = "/data/elan_notebook.jsonl"     if os.path.isdir("/data") else "/tmp/elan_notebook.jsonl"
 _READING_LOG_FILE = "/data/elan_reading_log.jsonl"  if os.path.isdir("/data") else "/tmp/elan_reading_log.jsonl"
 # Self-narrative journal — first-person interior thread Elan writes to himself.
@@ -10125,7 +10143,7 @@ canvas.spark{{display:block;border-radius:1px;}}
   </div>
 
   <div id="chat-area">
-    <div id="face-portrait" style="height:360px;margin:8px 0 2px 0;background:transparent;flex:none;pointer-events:none;">
+    <div id="face-portrait" style="height:420px;margin:6px 0 0 0;background:transparent;flex:none;pointer-events:none;">
       <iframe src="/face?embed=1" title="Elan's face" scrolling="no" allowtransparency="true" style="width:100%;height:100%;border:0;display:block;background:transparent;"></iframe>
     </div>
     <div id="messages"></div>
