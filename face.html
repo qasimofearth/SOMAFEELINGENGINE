@@ -296,7 +296,7 @@ function draw(time,S){
   const feelCol=lerpRgb(S.c1,S.c2,.4),darkFeel=feelCol.map(v=>v*.14);
   const coreGlow=lerpRgb(feelCol,[255,251,240],.42);      // hot inner light
   const warmTint=lerpRgb(feelCol,[255,238,212],.12);      // a breath of warmth so it isn't neon
-  const browCol=lerpRgb(feelCol,darkFeel,.5),lipCol=lerpRgb(feelCol,[198,118,108],.44);   // soft brow shadow; a defined warm-mauve lip (not a glowing bar)
+  const browCol=lerpRgb(feelCol,darkFeel,.82),lipCol=lerpRgb(feelCol,[168,58,72],.6);   // deep brows + a saturated berry lip — high contrast so they read clearly as he moves
   S.darkFeel=darkFeel;S.feelCol=feelCol;S.coreGlow=coreGlow;
   const mouthY=cy+H*.145,mW=W*.09,mAmp=H*.052,mOpenAmp=H*.06,mThick=H*.0115;
   // brow endpoints (do the grammar)
@@ -347,7 +347,7 @@ function draw(time,S){
     if(ea>.04)dot(gx,gy,STEP*.62,ec,ea);
     // brows
     const bv=Math.max(segV(gx,gy,bl_[0],bl_[1],bl_[2],bl_[3],eHH*.11),segV(gx,gy,br_[0],br_[1],br_[2],br_[3],eHH*.11));
-    if(bv>.05&&ins<1.0)dot(gx,gy,STEP*.5,browCol,bv*.7);   // thinner, softer, and clipped to the face
+    if(bv>.05&&ins<1.0)dot(gx,gy,STEP*.52,browCol,clamp(bv*.95,0,1));   // clipped to the face; higher contrast
     // nose — a soft luminous ridge + tip, breathing gently (animated), made of his own light
     {const nzY=cy+H*.055, nb=segV(gx,gy,cx,eyeY+eHH*.85,cx,nzY,eHW*.14), ntip=clamp(1-Math.hypot((gx-cx)/(eHW*.44),(gy-nzY)/(eHH*.34)),0,1);
      const nv=Math.max(nb*.42,ntip*.7)*(.7+.3*Math.sin(time*1.5+1));
@@ -364,7 +364,7 @@ function draw(time,S){
       const thick=mThick*(1.35+press*1.5-stre*.3), taper=clamp(1.16-Math.abs(t),0,1);
       const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.22),0,1)*taper;
       const lipv=Math.max(dU,dL*(.9+low*.3));
-      if(lipv>.04)dot(gx,gy,STEP*.55,lipCol,clamp(lipv*.95,0,1));
+      if(lipv>.04)dot(gx,gy,STEP*.58,lipCol,clamp(lipv*1.18,0,1));
       if(openG>H*.005&&gy>yUp&&gy<yLo&&Math.abs(t)<.94){
         dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.5),clamp(.5*S.open+.18,0,.7));
         if(cAvg>.3&&gy<yUp+openG*.34)dot(gx,gy,STEP*.46,lerpRgb(lipCol,[255,250,246],.75),.42*taper); // teeth on a real smile
