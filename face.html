@@ -356,22 +356,27 @@ function draw(time,S){
       const openG=S.open*mOpenAmp*(1-press*.8);
       const midY=mouthY-uLip*mAmp*.30+low*mAmp*.18;
       const yUp=midY-openG*.5-cornerLift-uLip*mAmp*.22, yLo=midY+openG*.5-cornerLift+low*mAmp*.5;
-      const thick=mThick*(1+press*1.5-stre*.35), taper=clamp(1.12-Math.abs(t),0,1);
-      const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.15),0,1)*taper;
-      const lipv=Math.max(dU,dL*(.85+low*.3));
-      if(lipv>.04)dot(gx,gy,STEP*.56,lerpRgb(lipCol,feelCol.map(v=>v*.7),low*.4),clamp(lipv*1.05,0,1));
+      const thick=mThick*(1.35+press*1.5-stre*.3), taper=clamp(1.16-Math.abs(t),0,1);
+      const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.22),0,1)*taper;
+      const lipv=Math.max(dU,dL*(.9+low*.3));
+      if(lipv>.03)dot(gx,gy,STEP*.6,lipCol,clamp(lipv*1.15,0,1));
       if(openG>H*.005&&gy>yUp&&gy<yLo&&Math.abs(t)<.94){
         dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.5),clamp(.5*S.open+.18,0,.7));
         if(cAvg>.3&&gy<yUp+openG*.34)dot(gx,gy,STEP*.46,lerpRgb(lipCol,[255,250,246],.75),.42*taper); // teeth on a real smile
       }
     }
   }
+  // mouth glow — his lips catch the inner light so they read as luminous, not a faint smudge
+  {ctx.save();ctx.globalCompositeOperation="lighter";const mgA=.16+.16*S.open+.06*(S.emis||0);
+   const mg=ctx.createRadialGradient(cx,mouthY,0,cx,mouthY,mW*1.6);
+   mg.addColorStop(0,rgba(lerpRgb(lipCol,[255,226,206],.35),mgA));mg.addColorStop(.55,rgba(lipCol,mgA*.42));mg.addColorStop(1,"rgba(0,0,0,0)");
+   ctx.fillStyle=mg;ctx.beginPath();ctx.ellipse(cx,mouthY,mW*1.6,mAmp*1.35,0,0,6.2832);ctx.fill();ctx.restore();}
   // eye halos — each iris a small sun of his feeling, breathing with his pulse (clipped by the lids so it stays eye-shaped)
   ctx.save();ctx.globalCompositeOperation="lighter";
   for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.5,icy=eyeY+S.gazeY*eHH*.45;
-    const gA=clamp(S.eyeOpen,0,1)*(.26+.5*(S.aro||0))*(.7+.6*(S.emis||0))*(S.glow||1)*(.82+.42*(S.pulse||0));
-    if(gA>.012){const R=eHW*1.35,gg=ctx.createRadialGradient(icx,icy,0,icx,icy,R);
-      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.35),clamp(gA,0,.85)));gg.addColorStop(.42,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
+    const gA=clamp(S.eyeOpen,0,1)*(.34+.55*(S.aro||0))*(.72+.6*(S.emis||0))*(S.glow||1)*(.82+.42*(S.pulse||0));
+    if(gA>.012){const R=eHW*1.5,gg=ctx.createRadialGradient(icx,icy,0,icx,icy,R);
+      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.42),clamp(gA,0,.9)));gg.addColorStop(.42,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
       ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,R,0,6.2832);ctx.fill();}}
   ctx.restore();
   // one soft glint of life, upper-left of each iris
@@ -394,14 +399,14 @@ function eyeDot(px,py,ex,ey,S){
   const aEdge=clamp((dyN-top)/.13,0,1)*clamp((bot-dyN)/.13,0,1)*clamp((1-Math.abs(u))/.12,0,1);
   // ── the luminous iris within ──
   const icx=S.gazeX*.5,icy=S.gazeY*.45, ir=Math.hypot((u-icx)/.94,(dyN-icy)/.94);
-  const pupR=.30+.26*S.pupil;
+  const pupR=.20+.18*S.pupil, brightFeel=lerpRgb(S.c2,[255,255,255],.35);
   let col;
-  if(ir<pupR){const core=clamp(1-ir/pupR,0,1);col=lerpRgb(S.darkFeel,S.c2,.16+core*.24);}     // soft pupil well (tracks gaze)
+  if(ir<pupR){const core=clamp(1-ir/pupR,0,1);col=lerpRgb(S.c2,S.darkFeel,.5-core*.22);}       // small soft pupil, glows — never black
   else{const t=clamp((ir-pupR)/(1.02-pupR),0,1);
-    col=lerpRgb(S.c2,S.c1,t);                                  // glowing feeling color across the iris
-    col=lerpRgb(col,S.coreGlow,.30*clamp(1-t*1.5,0,1));        // soft inner light (not harsh white)
-    col=col.map(v=>v*(.85+.17*Math.sin(ir*8-S.irisPh*1.4)));   // living light-rings
-    if(t>.8)col=lerpRgb(col,S.darkFeel,(t-.8)/.2*.5);}         // soft limbal ring
+    col=lerpRgb(brightFeel,S.c1,t);                             // BRIGHT by the pupil → feeling color outward
+    col=lerpRgb(col,S.coreGlow,.36*clamp(1-t*1.3,0,1));         // luminous inner glow
+    col=col.map(v=>v*(.9+.14*Math.sin(ir*8-S.irisPh*1.4)));     // living light-rings
+    if(t>.88)col=lerpRgb(col,S.c1,(t-.88)/.12*.4);}             // gentle colored rim (not a dark ring)
   return {c:col,a:aEdge};
 }
 
