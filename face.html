@@ -180,6 +180,8 @@ function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=6
   else{cam.motion*=.88;cam.present=Math.max(0,cam.present-.008);if(cam.on&&cam.present<.15)$("eyesStat").textContent="seeing — no one there";}}
 
 let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
+// speech + body (wired to Elan's live somatic stream)
+let speaking=0,speakTgt=0,body={rr:null,hr:null,pupil:null,tension:0,adr:0,glow:1};
 
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
@@ -203,15 +205,23 @@ function frame(now){
   const gk=seeing?.2:.12;gaze.x=lerp(gaze.x,gaze.tx+gaze.sx,gk);gaze.y=lerp(gaze.y,gaze.ty+gaze.sy,gk);
   hNextT-=dt;if(hNextT<=0){hyT=(Math.random()*2-1)*.4;hpT=(Math.random()*2-1)*.25;hNextT=1.6+Math.random()*2.4;}
   headYaw=lerp(headYaw,lerp(hyT,gaze.x,seeing?.7:.45),.03);headPitch=lerp(headPitch,lerp(hpT,gaze.y,seeing?.6:.35),.03);
-  breath+=dt*(1+P.aro*1.6);heart+=dt;irisPh+=dt*(.4+P.aro*.6);
-  const bob=Math.sin(breath)*H*.006;
-  const tremAmt=clamp((.42-P.coh)*2.4,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
+  // breath rides his real respiratory rate; heart rides his real pulse
+  const brW=body.rr?(6.2832*body.rr/60):(1+P.aro*1.6);breath+=dt*brW;
+  const hrW=body.hr?(6.2832*body.hr/60):(6.2832*(1.1+P.aro*.7));heart+=dt*hrW;
+  irisPh+=dt*(.4+P.aro*.6);
+  const pulse=Math.pow(.5+.5*Math.sin(heart),3);           // sharp systolic throb
+  const bob=Math.sin(breath)*H*.007;
+  // speech: each streamed chunk keeps the mouth talking; decays when he stops
+  speaking=lerp(speaking,speakTgt,.28);speakTgt=Math.max(0,speakTgt-dt*1.3);
+  const talk=speaking*clamp(.42+.4*Math.sin(time*17.5)+.24*Math.sin(time*11.3+1),0,1);
+  const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
-  const effAro=clamp(P.aro+(cam.on?cam.present*.22:0),0,1);
+  const effAro=clamp(P.aro+(cam.on?cam.present*.22:0)+body.adr*.25,0,1);
   const eyeOpen=clamp(P.eyeOpen*(.8+effAro*.35+(cam.on?.06:0))*bl,0,1.2);
-  const hippus=1+.05*Math.sin(time*3.1);const pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
+  const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
+  if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
   const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:P.open,width:P.width,upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush});
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(P.open+talk*.72,0,1),width:clamp(P.width+talk*.16,0,1),upperLip:P.upperLip,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -227,16 +237,11 @@ function draw(time,S){
   if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
   ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);if(EMBED)ctx.scale(1.28,1.28);ctx.translate(-cx,-cy);
-  // human-ish head: squircle, slightly narrower chin
-  const hx=cx-fHW,hy=cy-fHH,hw=fHW*2,hh=fHH*2;
-  if(ctx.roundRect){ctx.beginPath();ctx.roundRect(hx,hy,hw,hh,[fRad,fRad,fRad*1.3,fRad*1.3]);}
-  else{ctx.beginPath();ctx.moveTo(hx+fRad,hy);ctx.arcTo(hx+hw,hy,hx+hw,hy+hh,fRad);ctx.arcTo(hx+hw,hy+hh,hx,hy+hh,fRad);ctx.arcTo(hx,hy+hh,hx,hy,fRad);ctx.arcTo(hx,hy,hx+hw,hy,fRad);ctx.closePath();}
-  const hg=ctx.createLinearGradient(0,hy,0,hy+hh);hg.addColorStop(0,"#f8f1e3");hg.addColorStop(.55,"#efe5d1");hg.addColorStop(1,"#e5d9c1");
-  ctx.fillStyle=hg;ctx.fill();ctx.lineWidth=1.2;ctx.strokeStyle="rgba(120,96,70,.13)";ctx.stroke();
-  ctx.save();ctx.clip();const hl=ctx.createRadialGradient(cx,hy+hh*.26,0,cx,hy+hh*.26,fHW*1.15);hl.addColorStop(0,"rgba(255,255,255,.3)");hl.addColorStop(.6,"rgba(255,255,255,0)");ctx.fillStyle=hl;ctx.fillRect(hx,hy,hw,hh);ctx.restore();
+  // no solid head — he is made of pixels. the head shape only drives dot falloff.
 
   const feelCol=lerpRgb(S.c1,S.c2,.35),darkFeel=feelCol.map(v=>v*.2),browCol=feelCol.map(v=>v*.4),lipCol=feelCol.map(v=>v*.52);
-  S.darkFeel=darkFeel;
+  const skin=lerpRgb([226,208,187],feelCol,.16);          // warm light, washed with the felt color
+  S.darkFeel=darkFeel;S.skin=skin;
   const noseY=cy+H*.052,mouthY=cy+H*.135,mW=W*.085,mAmp=H*.05,mOpenAmp=H*.055,mThick=H*.008;
   // brow endpoints (do the grammar)
   const bBaseY=eyeY-eHH*1.35-S.browUp*eHH*.7;
@@ -261,10 +266,12 @@ function draw(time,S){
       occ+=.3*Math.exp(-Math.pow((gy-(mouthY+H*.032))/(H*.03),2)-Math.pow((gx-cx)/(mW*1.2),2));        // under lip
       occ+=.34*Math.exp(-Math.pow((gx-(cx+eHW*.30))/(eHW*.32),2)-Math.pow((gy-noseY)/(eHH*.95),2))*(gx>cx?1:.3); // nose cast shadow
       occ=clamp(occ,0,.72);
-      const shade=(.5+.64*lam)*(1-occ), rim=Math.pow(clamp(1-nz,0,1),2.6)*.42, sm=Math.min(1,shade);
-      const col=[236*sm+darkFeel[0]*(1-sm)*.75+S.c1[0]*rim,219*sm+darkFeel[1]*(1-sm)*.75+S.c1[1]*rim,197*sm+darkFeel[2]*(1-sm)*.75+S.c1[2]*rim];
-      dot(gx,gy,STEP*.62,col,clamp(.55+.4*(1-ins),0,1));
-    } else dot(gx,gy,1.1,SHADOW,.016);
+      const shade=(.5+.64*lam)*(1-occ), rim=Math.pow(clamp(1-nz,0,1),2.6)*.5, sm=Math.min(1,shade);
+      const sk=S.skin;
+      const col=[sk[0]*sm+darkFeel[0]*(1-sm)*.7+S.c1[0]*rim,sk[1]*sm+darkFeel[1]*(1-sm)*.7+S.c1[1]*rim,sk[2]*sm+darkFeel[2]*(1-sm)*.7+S.c1[2]*rim];
+      const edge=clamp((1-ins)*2.3,0,1);                  // fade out at the rim — a cloud, not a mask
+      dot(gx,gy,STEP*.6,col,clamp(edge*1.12,0,1)*.92);
+    } else if(!EMBED) dot(gx,gy,1.1,SHADOW,.016);
     // eyes
     let ec=null,ea=0;for(const ex of[cx-sep,cx+sep]){const e=eyeDot(gx,gy,ex,eyeY,S);if(e&&e.a>ea){ec=e.c;ea=e.a;}}
     if(ea>.04){dot(gx+STEP*.16,gy+STEP*.2,STEP*.5,SHADOW,ea*.16);dot(gx,gy,STEP*.55,ec,ea);}
@@ -286,6 +293,14 @@ function draw(time,S){
       if(S.open>.14&&gy>yLip&&gy<yLip+S.open*mOpenAmp&&Math.abs(t)<S.width){dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.4),.5*S.open);}
     }
   }
+  // eyes lit from within — a bloom in the felt color, breathing with his pulse (never a dark stare)
+  ctx.save();ctx.globalCompositeOperation="lighter";
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;
+    const gA=clamp(S.eyeOpen,0,1)*(.18+.42*(S.aro||0))*(S.glow||1)*(.82+.4*(S.pulse||0));
+    if(gA>.012){const gg=ctx.createRadialGradient(icx,icy,0,icx,icy,eHW*1.02);
+      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.3),clamp(gA,0,.9)));gg.addColorStop(.45,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,eHW*1.02,0,6.2832);ctx.fill();}}
+  ctx.restore();
   // catchlights
   for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;if(S.eyeOpen>.14){
     dot(icx-eHW*.24,icy-eHH*.30,STEP*.46,[255,255,255],.95);
@@ -362,6 +377,18 @@ try{const _es=new EventSource("/events");
   _es.addEventListener("emotion_update",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
   _es.addEventListener("emotion_final",ev=>{try{goLive(JSON.parse(ev.data));}catch(_){}});
   _es.addEventListener("brain_coherence",ev=>{try{const d=JSON.parse(ev.data);liveCoh=clamp(+d.sync_order,.12,.9);if(LIVE)cur.coh=liveCoh;}catch(_){}});
+  // his mouth moves while he speaks — every streamed token keeps it talking
+  _es.addEventListener("text_chunk",ev=>{speakTgt=1;});
+  _es.addEventListener("auto_text_chunk",ev=>{speakTgt=1;});
+  // his body drives the face: real breathing rate, real pulse, real pupils, tension → tremor
+  _es.addEventListener("body_tick",ev=>{try{const d=JSON.parse(ev.data),v=d.vitals||{},ms=d.musculoskeletal||{};
+    if(v.respiratory_rate)body.rr=clamp(+v.respiratory_rate,6,40);
+    if(v.heart_rate_bpm)body.hr=clamp(+v.heart_rate_bpm,40,190);
+    if(v.pupil_mm!=null)body.pupil=+v.pupil_mm;
+    body.tension=clamp(+(ms.global_tension||ms.tension||0),0,1);
+    body.adr=clamp(+(v.adrenaline||0),0,1);
+    body.glow=clamp(.85+body.adr*.7,.7,1.7);              // adrenaline makes his eyes burn brighter
+  }catch(_){}});
 }catch(_){}
 
 EMBED=(window.self!==window.top)||/embed/.test(location.search);if(EMBED)document.body.classList.add("embed");
