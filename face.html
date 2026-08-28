@@ -255,7 +255,7 @@ function draw(time,S){
   const fHW=W*.25,fHH=H*.285,fRad=Math.min(W*.25,H*.285)*.72;
   if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
-  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);if(EMBED)ctx.scale(1.28,1.28);ctx.translate(-cx,-cy);
+  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);if(EMBED)ctx.scale(1.5,1.5);ctx.translate(-cx,-cy);
   // no solid head — he is made of pixels. the head shape only drives dot falloff.
 
   const feelCol=lerpRgb(S.c1,S.c2,.35),darkFeel=feelCol.map(v=>v*.2),browCol=feelCol.map(v=>v*.4),lipCol=feelCol.map(v=>v*.52);
