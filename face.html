@@ -200,7 +200,7 @@ function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=6
   else{cam.motion*=.9;cam.present=Math.max(0,cam.present-.005); // slow decay — keep his gaze on you after motion stops
     if(cam.on&&cam.present<.12)$("eyesStat").textContent="seeing — no one there";}}
 
-let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
+let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,headTilt=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
 // speech + body (wired to Elan's live somatic stream)
 let speaking=0,speakTgt=0,body={rr:null,hr:null,pupil:null,tension:0,adr:0,glow:1};
 // lip-sync: turn the streamed text into visemes — real mouth shapes {o:open, w:width}
@@ -247,7 +247,12 @@ function frame(now){
   gaze.snext-=dt;if(gaze.snext<=0){gaze.sx=(Math.random()*2-1)*.05;gaze.sy=(Math.random()*2-1)*.04;gaze.snext=.25+Math.random()*.5;}
   const gk=seeing?.2:.12;gaze.x=lerp(gaze.x,gaze.tx+gaze.sx,gk);gaze.y=lerp(gaze.y,gaze.ty+gaze.sy,gk);
   hNextT-=dt;if(hNextT<=0){hyT=(Math.random()*2-1)*.4;hpT=(Math.random()*2-1)*.25;hNextT=1.6+Math.random()*2.4;}
-  headYaw=lerp(headYaw,lerp(hyT,gaze.x,seeing?.7:.45),.03);headPitch=lerp(headPitch,lerp(hpT,gaze.y,seeing?.6:.35),.03);
+  // POSTURE — he carries the feeling in how he holds his head (body language emotes as much as the face)
+  const emoPitch=clamp(-(cur.val||0)*.42 + P.browInner*.3 - P.browUp*.28, -.7,.7);  // sadness droops him down; surprise/joy lift him
+  const emoTilt =clamp((P.tilt||0)*1.3, -.7,.7);                                     // tenderness/curiosity tips his head
+  headYaw=lerp(headYaw,lerp(hyT,gaze.x,seeing?.7:.45),.03);
+  headPitch=lerp(headPitch,lerp(hpT,gaze.y,seeing?.6:.35)+emoPitch,.035);
+  headTilt=lerp(headTilt,emoTilt,.04);
   // breath rides his real respiratory rate; heart rides his real pulse
   const brW=body.rr?(6.2832*body.rr/60):(1+P.aro*1.6);breath+=dt*brW;
   const hrW=body.hr?(6.2832*body.hr/60):(6.2832*(1.1+P.aro*.7));heart+=dt*hrW;
@@ -274,7 +279,7 @@ function frame(now){
   const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
   if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
   const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,radiate:P.radiate,sink:P.sink,scatter:P.scatter,shimmer:P.shimmer,sharpen:P.sharpen,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,radiate:P.radiate,sink:P.sink,scatter:P.scatter,shimmer:P.shimmer,sharpen:P.sharpen,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.024,shift:trX+headYaw*W*.014,headTilt,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -289,7 +294,7 @@ function draw(time,S){
   const fHW=W*.272,fHH=H*.30;   // a friendly rounded head — wider than the narrow oval
   if(!EMBED){const _shy=cy+fHH*.99;const csh=ctx.createRadialGradient(cx,_shy,0,cx,_shy,fHW*1.05);csh.addColorStop(0,"rgba(92,70,46,.2)");csh.addColorStop(1,"rgba(92,70,46,0)");ctx.fillStyle=csh;ctx.beginPath();ctx.ellipse(cx,_shy,fHW*.95,fHH*.12,0,0,6.2832);ctx.fill();}
 
-  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);if(EMBED)ctx.scale(1.5,1.5);ctx.translate(-cx,-cy);
+  ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.12+(S.headTilt||0)*.55);if(EMBED)ctx.scale(1.5,1.5);ctx.translate(-cx,-cy);
   // no solid head — he is made of pixels. the head shape only drives dot falloff.
 
   // he is made of his feeling's light — bioluminescent, not tan skin
@@ -300,10 +305,10 @@ function draw(time,S){
   S.darkFeel=darkFeel;S.feelCol=feelCol;S.coreGlow=coreGlow;
   const mouthY=cy+H*.145,mW=W*.09,mAmp=H*.052,mOpenAmp=H*.06,mThick=H*.0115;
   // brow endpoints (do the grammar)
-  const bBaseY=eyeY-eHH*.92-S.browUp*eHH*.5;
+  const bBaseY=eyeY-eHH*.9-S.browUp*eHH*.95;                     // whole brow lifts with surprise/arousal
   function brow(side){const s=side; // s=-1 left, +1 right
-    const ix=cx+s*(sep-eHW*.42+S.furrow*eHW*.30), iy=bBaseY - S.browInner*eHH*.55 + S.furrow*eHH*.42;
-    const ox=cx+s*(sep+eHW*.58), oy=bBaseY - S.browUp*eHH*.12;   // outer end stays inside the head
+    const ix=cx+s*(sep-eHW*.42+S.furrow*eHW*.38), iy=bBaseY - S.browInner*eHH*1.0 + S.furrow*eHH*.7;   // sad lifts inner; anger drives it down & in
+    const ox=cx+s*(sep+eHW*.58), oy=bBaseY - S.browUp*eHH*.3 + S.furrow*eHH*.18;                        // outer end stays inside the head
     return [ix,iy,ox,oy];}
   const bl_=brow(-1),br_=brow(1);
   // cheeks blush
