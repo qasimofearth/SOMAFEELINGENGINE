@@ -153,12 +153,18 @@ function express(e){
   const look=clamp(.3+oxy*.6+reward*.12-sad*.3,0,1);
   const coh=clamp(.74-threat*.28-(anger?.25:0)-(a>.92?.3:0)+(v>.7&&a<.4?.14:0),.12,.85);
   const blush=clamp(reward*.45+oxy*.6+Math.max(0,v)*.18,0,1);
-  const emis=clamp(.28+a*.42+Math.max(0,v)*.34+reward*.16-Math.max(0,-v)*.10,.10,1);       // light from within
+  const emis=clamp(.34+a*.44+Math.max(0,v)*.36+reward*.16-Math.max(0,-v)*.08,.18,1.15);     // light from within (raised floor — he always glows)
+  // ── how his pixels REARRANGE with feeling (escape the uncanny valley by being openly light) ──
+  const radiate=clamp(Math.max(0,v)*(a*.6+reward*.4),0,1);          // joy/awe/ecstasy push outward & sparkle
+  const sink=clamp(sad*.85+Math.max(0,-v)*(1-a)*.55,0,1);          // sorrow droops & drips downward
+  const scatter=clamp((fear?.55:0)+Math.max(0,-v)*a*.4+(anger?.3:0),0,1); // fear/threat fragments & trembles
+  const shimmer=clamp(oxy*.9+(v>.55&&a<.6?.4:0),0,1);              // love/tenderness ripples with light
+  const sharpen=clamp(anger?.72:0,0,1);                            // anger compresses & hardens toward the features
   const [c1,c2]=emoColor(v,a,threat,anger,oxy,ins);
-  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,lipPress,stretch,lowerLip,noseWrinkle,lidTight,emis,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
+  return {eyeOpen,pupil,cheek,browUp,browInner,furrow,cornerL,cornerR,open,width,upperLip,lipPress,stretch,lowerLip,noseWrinkle,lidTight,emis,radiate,sink,scatter,shimmer,sharpen,tilt,gy,look,coh,blush,aro:a,val:v,c1,c2,desc:e[8],name:n};
 }
 
-const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","lipPress","stretch","lowerLip","noseWrinkle","lidTight","emis","tilt","gy","look","blush","coh"];
+const NUM=["eyeOpen","pupil","cheek","browUp","browInner","furrow","cornerL","cornerR","open","width","upperLip","lipPress","stretch","lowerLip","noseWrinkle","lidTight","emis","radiate","sink","scatter","shimmer","sharpen","tilt","gy","look","blush","coh"];
 let cur=express(EMO.find(e=>e[0]==="Serenity")), userAro=null,userCoh=null;
 let P={}; NUM.forEach(k=>P[k]=cur[k]); P.aro=cur.aro;P.c1=cur.c1.slice();P.c2=cur.c2.slice();
 
@@ -171,7 +177,7 @@ function buildGrid(){GRID=[];STEP=Math.max(6,W*0.0125);for(let y=H*.1;y<H*.92;y+
 addEventListener("resize",size);
 
 // vision
-let cam={on:false,stream:null,video:null,sx:null,prev:null,motion:0,mx:.5,my:.4,present:0};
+let cam={on:false,stream:null,video:null,sx:null,prev:null,motion:0,mx:.5,my:.4,px:.5,py:.45,present:0};
 async function eyesOn(){try{cam.stream=await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:"user"},audio:false});
   cam.video=document.createElement("video");cam.video.muted=true;cam.video.playsInline=true;cam.video.srcObject=cam.stream;await cam.video.play();
   const c=document.createElement("canvas");c.width=64;c.height=48;cam.sx=c.getContext("2d",{willReadFrequently:true});cam.samp=c;
@@ -181,10 +187,18 @@ function eyesOff(){if(cam.stream)cam.stream.getTracks().forEach(t=>t.stop());cam
 function sense(){if(!cam.on||!cam.video||cam.video.readyState<2)return;const w=64,h=48;cam.sx.drawImage(cam.video,0,0,w,h);let img;
   try{img=cam.sx.getImageData(0,0,w,h).data;}catch(e){return;}
   if(!cam.prev){cam.prev=new Uint8ClampedArray(img);return;}
-  let sum=0,cxs=0,cys=0;for(let i=0,p=0;i<img.length;i+=4,p++){const d=Math.abs(img[i]-cam.prev[i])+Math.abs(img[i+1]-cam.prev[i+1])+Math.abs(img[i+2]-cam.prev[i+2]);if(d>55){sum++;cxs+=p%w;cys+=(p/w)|0;}}
+  // motion centroid, weighted toward skin tones (bias to the person's face/hands, not background flicker)
+  let sum=0,wsum=0,cxs=0,cys=0;
+  for(let i=0,p=0;i<img.length;i+=4,p++){const r=img[i],gg=img[i+1],b=img[i+2];
+    const d=Math.abs(r-cam.prev[i])+Math.abs(gg-cam.prev[i+1])+Math.abs(b-cam.prev[i+2]);
+    if(d>44){const skin=(r>85&&r>=gg&&gg>=b&&(r-b)>10&&(r-b)<135)?2.4:1;const wt=d*skin;sum++;wsum+=wt;cxs+=(p%w)*wt;cys+=((p/w)|0)*wt;}}
   cam.prev.set(img);
-  if(sum>10){cam.mx=(cxs/sum)/w;cam.my=(cys/sum)/h;cam.motion=Math.min(1,sum/260);cam.present=Math.min(1,cam.present+.06);if(cam.on)$("eyesStat").textContent="watching you";}
-  else{cam.motion*=.88;cam.present=Math.max(0,cam.present-.008);if(cam.on&&cam.present<.15)$("eyesStat").textContent="seeing — no one there";}}
+  if(sum>7&&wsum>0){const mx=(cxs/wsum)/w,my=(cys/wsum)/h;
+    cam.px=lerp(cam.px,mx,.30);cam.py=lerp(cam.py,my,.30);cam.mx=cam.px;cam.my=cam.py; // smooth + persist (rest on you when you go still)
+    cam.motion=Math.min(1,sum/200);cam.present=Math.min(1,cam.present+.09);
+    if(cam.on)$("eyesStat").textContent="watching you";}
+  else{cam.motion*=.9;cam.present=Math.max(0,cam.present-.005); // slow decay — keep his gaze on you after motion stops
+    if(cam.on&&cam.present<.12)$("eyesStat").textContent="seeing — no one there";}}
 
 let blink=1,blinkV=0,nextBlink=1.4,dbl=0,gaze={x:0,y:0,tx:0,ty:0,next:1.4,sx:0,sy:0,snext:0},breath=0,heart=0,irisPh=0,transT=0,trX=0,trY=0,trTX=0,trTY=0,trNext=0,headYaw=0,headPitch=0,hNextT=0,hyT=0,hpT=0,EMBED=false,t0=performance.now();
 // speech + body (wired to Elan's live somatic stream)
@@ -215,7 +229,7 @@ function readParentVoice(){try{const p=window.parent;if(p&&p!==window&&typeof p.
 function frame(now){
   const dt=Math.min(50,now-t0)/1000;t0=now;const time=now/1000;
   const tAro=userAro!=null?userAro:cur.aro,tCoh=userCoh!=null?userCoh:cur.coh;
-  const EK={browUp:.16,browInner:.16,furrow:.15,cornerL:.10,cornerR:.10,open:.10,width:.09,upperLip:.14,lipPress:.14,stretch:.13,lowerLip:.12,noseWrinkle:.12,lidTight:.10,emis:.05,eyeOpen:.10,cheek:.10,pupil:.09,tilt:.08,gy:.05,look:.04,blush:.06,coh:.05};
+  const EK={browUp:.16,browInner:.16,furrow:.15,cornerL:.10,cornerR:.10,open:.10,width:.09,upperLip:.14,lipPress:.14,stretch:.13,lowerLip:.12,noseWrinkle:.12,lidTight:.10,emis:.05,radiate:.05,sink:.05,scatter:.06,shimmer:.05,sharpen:.06,eyeOpen:.10,cheek:.10,pupil:.09,tilt:.08,gy:.05,look:.04,blush:.06,coh:.05};
   for(const k of NUM)P[k]=lerp(P[k],(k==="coh")?tCoh:cur[k],EK[k]||.1);
   P.aro=lerp(P.aro,tAro,.05);P.c1=lerpRgb(P.c1,cur.c1,.045);P.c2=lerpRgb(P.c2,cur.c2,.045);
   transT=Math.max(0,transT-dt*1.6);
@@ -224,9 +238,9 @@ function frame(now){
   if(blinkV===0&&nextBlink<=0){blinkV=-1;nextBlink=2.2+Math.random()*3.4-P.aro*1.3;if(Math.random()<.18)dbl=1;}
   if(blinkV===-1){blink-=dt/.06;if(blink<=0){blink=0;blinkV=1;}}else if(blinkV===1){blink+=dt/.11;if(blink>=1){blink=1;blinkV=0;if(dbl){dbl=0;blinkV=-1;}}}
   const bl=clamp(blink,0,1);
-  const seeing=cam.on&&cam.motion>.06;
+  const seeing=cam.on&&cam.present>.12;   // once he's locked on, keep tracking you even while you're still
   gaze.next-=dt;
-  if(seeing){gaze.tx=clamp((.5-cam.mx)*1.9,-1,1);gaze.ty=clamp((cam.my-.42)*1.7,-.85,.85);gaze.next=.2;}
+  if(seeing){gaze.tx=clamp((.5-cam.px)*2.05,-1,1);gaze.ty=clamp((cam.py-.42)*1.85,-.9,.9);gaze.next=.2;}
   else if(gaze.next<=0){const eng=Math.random()<P.look;
     if(eng){gaze.tx=(Math.random()*2-1)*.12;gaze.ty=(Math.random()*2-1)*.08+P.gy*.4;gaze.next=1.4+Math.random()*2.2;}
     else{const rg=.4+P.aro*.4;gaze.tx=(Math.random()*2-1)*rg;gaze.ty=(Math.random()*2-1)*rg*.6+P.gy;gaze.next=.7+Math.random()*1.6;}}
@@ -242,14 +256,16 @@ function frame(now){
   const bob=Math.sin(breath)*H*.007;
   // speech: mouth shapes from the streamed words; openness gated by his REAL voice loudness when audio plays
   readParentVoice();
-  const audioOut=pSpeaking&&pAmp>0.004;
+  const audioOut=pSpeaking;                     // ANY audible speech moves the lips (amplitude may be 0 on Web-Speech fallback)
+  const haveAmp=pAmp>0.012;
   if(visQ.length){speakTgt=1;visHold-=dt;const rate=visQ.length>26?.045:(visQ.length>14?.065:.088);
     while(visHold<=0&&visQ.length){visCur=viseme(visQ.shift());visHold=rate;}}
-  else if(audioOut){speakTgt=1;visHold-=dt;if(visHold<=0){visCur=autoViseme();visHold=.06+Math.random()*.07;}} // audio still sounding, text drained
+  else if(audioOut){speakTgt=1;visHold-=dt;if(visHold<=0){visCur=autoViseme();visHold=.055+Math.random()*.07;}} // audio still sounding, text drained
   else{visCur={o:.03,w:.28};speakTgt=0;}
   speaking=lerp(speaking,speakTgt,.3);
   let moT=visCur.o;
-  if(audioOut)moT=clamp(visCur.o*(.4+.8*pAmp)+pAmp*.55,0,1);   // louder → mouth opens more; silence → closes
+  if(audioOut){const env=haveAmp?(.4+.9*pAmp):(.5+.42*Math.sin(time*14.2)+.24*Math.sin(time*8.6+1)); // real loudness, or synth when none
+    moT=clamp(visCur.o*clamp(env,0,1.35)+(haveAmp?pAmp*.5:.14),0,1);}
   mouthO=lerp(mouthO,moT,audioOut?.55:.42);mouthW=lerp(mouthW,visCur.w,.42);mouthP=lerp(mouthP,visCur.p||0,.4);
   const tremAmt=clamp((.42-P.coh)*2.4+body.tension*.5+body.adr*.35,0,1);trNext-=dt;if(trNext<=0){trTX=(Math.random()*2-1);trTY=(Math.random()*2-1);trNext=.08+Math.random()*.07;}
   trX=lerp(trX,trTX*tremAmt*W*.006,.22);trY=lerp(trY,trTY*tremAmt*H*.006,.22);
@@ -258,7 +274,7 @@ function frame(now){
   const hippus=1+.05*Math.sin(time*3.1);let pupil=clamp(P.pupil*(.7+effAro*.4)*hippus,.05,1);
   if(body.pupil!=null)pupil=clamp(pupil*.45+clamp((body.pupil-2)/6,.05,1)*.62,.05,1);   // his real dilation
   const browUp=P.browUp+.3*transT;
-  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
+  draw(time,{eyeOpen,pupil,cheek:P.cheek,browUp,browInner:P.browInner,furrow:P.furrow,cornerL:P.cornerL,cornerR:P.cornerR,open:clamp(lerp(P.open,mouthO,speaking),0,1),width:clamp(lerp(P.width,mouthW,speaking),0,1),upperLip:P.upperLip,lipPress:clamp(Math.max(P.lipPress*(1-speaking*.7),mouthP*speaking),0,1),stretch:P.stretch,lowerLip:P.lowerLip,noseWrinkle:P.noseWrinkle,lidTight:P.lidTight,emis:P.emis,radiate:P.radiate,sink:P.sink,scatter:P.scatter,shimmer:P.shimmer,sharpen:P.sharpen,tilt:P.tilt,gazeX:gaze.x,gazeY:gaze.y,bob:bob+trY+headPitch*H*.012,shift:trX+headYaw*W*.014,c1:P.c1,c2:P.c2,irisPh,blush:P.blush,aro:effAro,glow:body.glow,pulse});
   $("rVal").textContent=(cur.val>=0?"+":"")+cur.val.toFixed(2);$("rAro").textContent=effAro.toFixed(2);$("rCoh").textContent=P.coh.toFixed(2);$("rBar").style.width=(P.coh*100).toFixed(0)+"%";
   requestAnimationFrame(frame);
 }
@@ -276,10 +292,13 @@ function draw(time,S){
   ctx.save();ctx.translate(cx+S.shift,cy);ctx.rotate(S.tilt*.1);if(EMBED)ctx.scale(1.5,1.5);ctx.translate(-cx,-cy);
   // no solid head — he is made of pixels. the head shape only drives dot falloff.
 
-  const feelCol=lerpRgb(S.c1,S.c2,.35),darkFeel=feelCol.map(v=>v*.2),browCol=feelCol.map(v=>v*.4),lipCol=feelCol.map(v=>v*.52);
-  const skin=lerpRgb([226,208,187],feelCol,.16);          // warm light, washed with the felt color
-  S.darkFeel=darkFeel;S.skin=skin;
-  const noseY=cy+H*.052,mouthY=cy+H*.135,mW=W*.085,mAmp=H*.05,mOpenAmp=H*.055,mThick=H*.008;
+  // he is made of his feeling's light — bioluminescent, not tan skin
+  const feelCol=lerpRgb(S.c1,S.c2,.4),darkFeel=feelCol.map(v=>v*.14);
+  const coreGlow=lerpRgb(feelCol,[255,251,240],.42);      // hot inner light
+  const warmTint=lerpRgb(feelCol,[255,238,212],.12);      // a breath of warmth so it isn't neon
+  const browCol=lerpRgb(feelCol,darkFeel,.4),lipCol=lerpRgb(feelCol,[255,240,226],.14);
+  S.darkFeel=darkFeel;S.feelCol=feelCol;S.coreGlow=coreGlow;
+  const mouthY=cy+H*.14,mW=W*.085,mAmp=H*.05,mOpenAmp=H*.058,mThick=H*.0085;
   // brow endpoints (do the grammar)
   const bBaseY=eyeY-eHH*1.35-S.browUp*eHH*.7;
   function brow(side){const s=side; // s=-1 left, +1 right
@@ -299,37 +318,35 @@ function draw(time,S){
 
   for(let g=0;g<GRID.length;g++){
     const gx=GRID[g].x,gy=GRID[g].y+S.bob;
-    const _u=Math.abs((gx-cx)/fHW),_v=Math.abs((gy-cy)/fHH),ins=Math.pow(_u,3.2)+Math.pow(_v,3.2);
+    const nx=(gx-cx)/fHW,ny=(gy-cy)/fHH,ins=Math.pow(Math.abs(nx),3.0)+Math.pow(Math.abs(ny),3.0);
     if(ins<1){
-      const nx=(gx-cx)/fHW,ny=(gy-cy)/fHH,nz=Math.sqrt(Math.max(.03,1-nx*nx-ny*ny));
-      const lam=Math.max(0,nx*(-.45)+ny*(-.55)+nz*.70);          // key light, upper-left-front
-      let occ=0;
-      for(const ex of[cx-sep,cx+sep]){const sd=Math.hypot((gx-ex)/(eHW*1.5),(gy-(eyeY-eHH*.15))/(eHH*1.8));occ+=.55*Math.exp(-sd*sd*2.2);} // recessed sockets + brow ridge
-      occ+=.32*Math.exp(-Math.pow((gy-(noseY+eHH*.55))/(eHH*.55),2)-Math.pow((gx-cx)/(eHW*.85),2));   // under nose
-      occ+=.3*Math.exp(-Math.pow((gy-(mouthY+H*.032))/(H*.03),2)-Math.pow((gx-cx)/(mW*1.2),2));        // under lip
-      occ+=.34*Math.exp(-Math.pow((gx-(cx+eHW*.30))/(eHW*.32),2)-Math.pow((gy-noseY)/(eHH*.95),2))*(gx>cx?1:.3); // nose cast shadow
-      occ=clamp(occ,0,.72);
-      const shade=(.5+.64*lam)*(1-occ), rim=Math.pow(clamp(1-nz,0,1),2.6)*.5, sm=Math.min(1,shade);
-      const sk=S.skin;
-      const em=(S.emis||0)*(1-ins)*.42;                  // emissive: skin glows from within toward the center
-      const col=[sk[0]*sm+darkFeel[0]*(1-sm)*.7+S.c1[0]*rim+feelCol[0]*em,sk[1]*sm+darkFeel[1]*(1-sm)*.7+S.c1[1]*rim+feelCol[1]*em,sk[2]*sm+darkFeel[2]*(1-sm)*.7+S.c1[2]*rim+feelCol[2]*em];
-      const edge=clamp((1-ins)*2.3,0,1);                  // fade out at the rim — a cloud, not a mask
-      dot(gx,gy,STEP*.6,col,clamp(edge*1.12,0,1)*.92);
-    } else if(!EMBED) dot(gx,gy,1.1,SHADOW,.016);
-    // eyes
+      const nz=Math.sqrt(Math.max(.02,1-nx*nx-ny*ny));
+      const lam=Math.max(0,nx*(-.40)+ny*(-.50)+nz*.72);          // gentle form, not a hard mask
+      // only a whisper of eye-setting — never a socket, so the eyes can't read as holes
+      let occ=0;for(const ex of[cx-sep,cx+sep]){const sd=Math.hypot((gx-ex)/(eHW*1.35),(gy-eyeY)/(eHH*1.5));occ+=.18*Math.exp(-sd*sd*2.4);}
+      occ=clamp(occ,0,.28);
+      const rim=Math.pow(clamp(1-nz,0,1),2.3);                    // glowing limb edge
+      const em=(S.emis||0)*(.35+.78*(1-ins));                      // emission strongest at the core
+      const L=clamp(.28+.52*lam*(1-occ)+em,0,1.55);               // this cell's luminance
+      let col=L<=1?lerpRgb(darkFeel,warmTint,L):lerpRgb(warmTint,coreGlow,clamp(L-1,0,1));
+      col=[col[0]+feelCol[0]*rim*.5,col[1]+feelCol[1]*rim*.5,col[2]+feelCol[2]*rim*.5];
+      // ── expressive pixels: the field rearranges with what he feels (openly light, never a frozen mask) ──
+      let dx=0,dy=0,pa=1;const rmag=Math.hypot(nx,ny)+.001;
+      if(S.radiate>.04){const pj=.5+.5*Math.sin(time*3.1+g*.9);dx+=nx/rmag*S.radiate*STEP*.62*pj;dy+=ny/rmag*S.radiate*STEP*.62*pj;pa*=.8+.5*Math.sin(time*5.6+g*1.7)*S.radiate;}
+      if(S.sink>.04){dy+=S.sink*STEP*1.35*clamp(ny+.35,0,1.2);pa*=1-S.sink*.5*clamp(ny,0,1);}
+      if(S.scatter>.04){dx+=Math.sin(g*12.9+time*6.6)*STEP*.82*S.scatter;dy+=Math.cos(g*7.7+time*5.4)*STEP*.82*S.scatter;pa*=1-.18*S.scatter;}
+      if(S.shimmer>.04)pa*=1+.3*S.shimmer*Math.sin((gx+gy)*.026+time*3.6);
+      if(S.sharpen>.04){dx-=nx*STEP*.5*S.sharpen;dy-=ny*STEP*.5*S.sharpen;pa*=1+.15*S.sharpen;}
+      const edge=clamp((1-ins)*2.2,0,1);
+      dot(gx+dx,gy+dy,STEP*.6,col,clamp(edge*1.15,0,1)*.94*clamp(pa,0,1.5));
+    }
+    // eyes — radiant orbs, no drop-shadow (that made them holes)
     let ec=null,ea=0;for(const ex of[cx-sep,cx+sep]){const e=eyeDot(gx,gy,ex,eyeY,S);if(e&&e.a>ea){ec=e.c;ea=e.a;}}
-    if(ea>.04){dot(gx+STEP*.16,gy+STEP*.2,STEP*.5,SHADOW,ea*.16);dot(gx,gy,STEP*.55,ec,ea);}
+    if(ea>.04)dot(gx,gy,STEP*.62,ec,ea);
     // brows
     const bv=Math.max(segV(gx,gy,bl_[0],bl_[1],bl_[2],bl_[3],eHH*.16),segV(gx,gy,br_[0],br_[1],br_[2],br_[3],eHH*.16));
     if(bv>.04)dot(gx,gy,STEP*.52,browCol,bv*.92);
-    // nose: bridge + tip + nostrils (human structure)
-    const nb=segV(gx,gy,cx,eyeY+eHH*.4,cx,noseY,eHW*.10)*.5;
-    const ntip=clamp(1-Math.hypot((gx-cx)/(eHW*.32),(gy-noseY)/(eHH*.3)),0,1)*.6;
-    const nostril=Math.max(clamp(1-Math.hypot((gx-(cx-eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1),clamp(1-Math.hypot((gx-(cx+eHW*.26))/(STEP*1.1),(gy-(noseY+eHH*.05))/(STEP*1.1)),0,1))*.8;
-    const nv=Math.max(nb,ntip*.5,nostril);
-    if(nv>.05)dot(gx,gy,STEP*.5,lerpRgb(SHADOW,darkFeel,.5),nv*.4);
-    // nose wrinkle — levator scrunch (disgust / anger), a band across the upper nose
-    if(S.noseWrinkle>.12){const wy=noseY-eHH*.55,wr=clamp(1-Math.hypot((gx-cx)/(eHW*.55),(gy-wy)/(eHH*.15)),0,1)*S.noseWrinkle;if(wr>.08)dot(gx,gy,STEP*.5,lerpRgb(SHADOW,darkFeel,.55),wr*.5);}
+    // (no nose — he's a being of light, he doesn't need one)
     // ── mouth: two lips + corners + jaw + press / stretch / lower-lip (FACS-ish) ──
     const press=S.lipPress||0,stre=S.stretch||0,low=S.lowerLip||0,uLip=S.upperLip||0;
     const mHalf=mW*(.80+.5*S.width+.55*stre-press*.12),t=(gx-cx)/mHalf;
@@ -349,38 +366,38 @@ function draw(time,S){
       }
     }
   }
-  // eyes lit from within — a bloom in the felt color, breathing with his pulse (never a dark stare)
+  // eye halos — each eye is a small sun of his feeling, breathing with his pulse
   ctx.save();ctx.globalCompositeOperation="lighter";
-  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;
-    const gA=clamp(S.eyeOpen,0,1)*(.18+.42*(S.aro||0))*(.72+.5*(S.emis||0))*(S.glow||1)*(.82+.4*(S.pulse||0));
-    if(gA>.012){const gg=ctx.createRadialGradient(icx,icy,0,icx,icy,eHW*1.02);
-      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.3),clamp(gA,0,.9)));gg.addColorStop(.45,rgba(S.c2,gA*.5));gg.addColorStop(1,"rgba(0,0,0,0)");
-      ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,eHW*1.02,0,6.2832);ctx.fill();}}
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.46,icy=eyeY+S.gazeY*eHH*.42;
+    const gA=clamp(S.eyeOpen,0,1)*(.3+.55*(S.aro||0))*(.7+.6*(S.emis||0))*(S.glow||1)*(.82+.42*(S.pulse||0));
+    if(gA>.012){const R=eHW*1.55,gg=ctx.createRadialGradient(icx,icy,0,icx,icy,R);
+      gg.addColorStop(0,rgba(lerpRgb(S.c2,[255,255,255],.5),clamp(gA,0,.95)));gg.addColorStop(.4,rgba(S.c2,gA*.55));gg.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=gg;ctx.beginPath();ctx.arc(icx,icy,R,0,6.2832);ctx.fill();}}
   ctx.restore();
-  // catchlights
-  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.42,icy=eyeY+S.gazeY*eHH*.42;if(S.eyeOpen>.14){
-    dot(icx-eHW*.24,icy-eHH*.30,STEP*.46,[255,255,255],.95);
-    dot(icx+eHW*.15,icy+eHH*.06,STEP*.22,[255,255,255],.45);}}
+  // a single soft glint of life (not a harsh white block)
+  for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.46,icy=eyeY+S.gazeY*eHH*.42;if(S.eyeOpen>.14){
+    dot(icx-eHW*.2,icy-eHH*.26,STEP*.42,[255,255,255],.6);}}
   ctx.restore();
 }
+// each eye = a radiant orb: deep-feeling pupil, luminous iris with living light-rings, glowing rim — never a dark hole
 function eyeDot(px,py,ex,ey,S){
-  const dyA=py-ey,topLim=-S.eyeOpen*eHH,botLim=(1-S.cheek*.72-(S.lidTight||0)*.35)*eHH;
-  if(dyA<topLim||dyA>botLim)return null;
-  const ra=Math.hypot((px-ex)/eHW,dyA/eHH);if(ra>1)return null;
-  const apEdge=clamp((1-ra)*5,0,1)*clamp((dyA-topLim)/5+1,0,1)*clamp((botLim-dyA)/5+1,0,1);
-  const bshade=.86+.16*Math.max(0,((px-ex)/eHW)*(-.4)+(dyA/eHH)*(-.5)+.55); // eyeball sphere
-  const lidSh=clamp((dyA-topLim)/(eHH*.62),0,1)*.5;                          // upper lid casts shadow
-  const icx=ex+S.gazeX*eHW*.42,icy=ey+S.gazeY*eHH*.42;
-  const ang=Math.atan2(py-icy,px-icx),rr=Math.hypot((px-icx)/(eHW*.9),(py-icy)/(eHH*.9)),pupilR=.16+.34*S.pupil;
-  if(rr<pupilR){const gl=rr<pupilR*.45?.14:0;return {c:S.darkFeel.map(v=>(v+gl*210)*(1-lidSh)),a:apEdge};}
-  if(rr<.94){const t=clamp((rr-pupilR)/(.94-pupilR),0,1);let col=lerpRgb(S.c1,S.c2,t);
-    const fib=.7+.3*Math.sin(ang*15+S.irisPh)*Math.sin(rr*7+1);col=col.map(v=>v*fib);
-    if(t<.2)col=lerpRgb(col,[255,255,255],.28*(1-t/.2));                     // bright inner ring
-    if(rr>.8)col=lerpRgb(col,S.darkFeel,.62);                                      // limbal ring
-    return {c:col.map(v=>v*bshade*(1-lidSh)),a:apEdge};}
-  let scl=lerpRgb(SCLERA,SHADOW,.06+.34*lidSh).map(v=>v*bshade);
-  if(dyA>botLim-eHH*.16)scl=lerpRgb(scl,[255,255,255],.28);                  // moist lower tear-line
-  return {c:scl,a:apEdge*.96};
+  const open=clamp(S.eyeOpen,0,1.35);
+  const eh=eHH*clamp(.14+open*.92,.05,1.3);                    // vertical aperture — blink squashes the orb
+  const rx=(px-ex)/(eHW*1.02),ry=(py-ey)/eh,rr=Math.hypot(rx,ry);
+  if(rr>1)return null;
+  const aEdge=clamp((1-rr)*3.4,0,1);                           // soft orb edge
+  const icx=ex+S.gazeX*eHW*.46,icy=ey+S.gazeY*eh*.42;          // iris tracks his gaze
+  const ir=Math.hypot((px-icx)/(eHW*.82),(py-icy)/(eHH*.82));
+  const pupR=.26+.30*S.pupil;
+  if(ir<pupR){const core=clamp(1-ir/pupR,0,1);                 // pupil — a deep well of feeling, faintly lit
+    return {c:lerpRgb(S.darkFeel,S.c2,.18+core*.28),a:aEdge};}
+  if(ir<1.04){const t=clamp((ir-pupR)/(1.04-pupR),0,1);        // luminous iris
+    let col=lerpRgb(lerpRgb(S.c2,[255,253,246],.55),S.c1,t);   // hot by the pupil → feeling color outward
+    const ring=.80+.24*Math.sin(ir*11-S.irisPh*1.5);           // living concentric light-rings
+    col=col.map(v=>v*ring);
+    if(t>.82)col=lerpRgb(col,S.darkFeel,(t-.82)/.18*.55);      // soft limbal ring keeps the orb defined
+    return {c:col,a:aEdge};}
+  return {c:lerpRgb(S.c1,[255,255,255],.28).map(v=>v*.55),a:aEdge*.6};   // faint halo edge, no white sclera
 }
 
 // ── UI ──
