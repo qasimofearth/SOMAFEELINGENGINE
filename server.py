@@ -261,11 +261,17 @@ def _start_brain_thread():
                 try:
                     coherence = brain.sim.get_phase_coherence()
                     snap = brain.sim.get_snapshot()
+                    coupling = brain.sim.get_coupling()
                     broadcast("brain_coherence", {
                         "sync_order": round(brain.sim.sync_order, 4),
                         "phase_coherence": coherence["order"],
                         "emergent_freq_hz": coherence["freq_hz"],
                         "emergent_solfeggio_hz": coherence["solfeggio_hz"],
+                        "binding": coupling["binding"],              # criticality — integrated AND flexible (edge of chaos)
+                        "integration": coupling["integration"],      # total engaged-synchrony across circuits
+                        "metastability": coupling["metastability"],  # dynamic flexibility (order-parameter fluctuation)
+                        "coupling": coupling["coupling"],            # per-circuit functional coupling (which circuit is bound)
+                        "pac": coupling["pac"],
                         "t_ms": round(brain.sim.t_ms, 0),
                         "region_activities": {ab: round(v["activity"], 4) for ab, v in snap.items()},
                         "nt_levels": {nt: round(sys.current_level, 4) for nt, sys in NT_SYSTEMS.items()} if NT_SYSTEMS else {},

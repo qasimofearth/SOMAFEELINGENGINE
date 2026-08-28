@@ -23,9 +23,11 @@ Runs continuously in a background thread (10ms steps).
 """
 
 import math
+import cmath
 import time
 import random
 import threading
+from collections import deque
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 
@@ -67,6 +69,33 @@ def eeg_to_solfeggio(eeg_hz: float) -> float:
     elif eeg_hz < 20:  return 639.0
     elif eeg_hz < 30:  return 741.0
     else:              return 852.0
+
+
+# ── CROSS-FREQUENCY COUPLING ──────────────────────────────────────────────────
+# The single `sync_order` scalar collapses all inter-regional relationship into
+# one number. The real neural code for binding / conscious integration is richer:
+#   · Phase-amplitude coupling (PAC): slow-band phase modulates fast-band amplitude
+#     (theta-gamma nesting is the canonical binding / working-memory signature).
+#   · Phase-locking value (PLV): sustained phase synchrony between two circuits.
+# We compute both over a rolling window of the live Kuramoto phases.
+
+_BAND_ORDER = {"delta": 0, "theta": 1, "alpha": 2, "beta": 3, "gamma": 4}
+
+# PAC band-pairs (low phase → high amplitude). theta-gamma is the headline.
+PAC_PAIRS: List[Tuple[str, str]] = [("theta", "gamma"), ("theta", "beta"), ("alpha", "gamma")]
+
+# PLV circuits — anatomically meaningful pairs whose synchrony varies by emotion.
+PLV_PAIRS: List[Tuple[str, str]] = [
+    ("amygdala", "vmPFC"),      # top-down fear regulation
+    ("dACC", "aI"),             # salience-network integration
+    ("PCC", "mPFC"),            # default-mode (self / rumination)
+    ("VTA", "NAcc"),            # reward drive
+    ("hippocampus", "mPFC"),    # memory ↔ emotion
+    ("amygdala", "PAG"),        # threat → defense
+]
+# Ordered, de-duplicated region list we snapshot each sample for PLV.
+_PLV_REGIONS: List[str] = list(dict.fromkeys([r for pair in PLV_PAIRS for r in pair]))
+_PLV_IDX = {r: i for i, r in enumerate(_PLV_REGIONS)}
 
 
 # ── SIGMOID ───────────────────────────────────────────────────────────────────
@@ -243,6 +272,11 @@ class BrainSimulator:
         # Strong Kuramoto coupling — produces genuine phase locking
         # K=2.5: regions with similar omega will synchronize within ~500ms
         self.K_kuramoto = 2.5
+        # Phase noise (rad/ms). Real cortex is noisy — deterministic coupling locks
+        # perfectly (PLV≡1), which erases all relational structure. A small stochastic
+        # term makes locking GRADED: strongly-coupled circuits lock more than weak ones,
+        # so phase-locking becomes an informative, state-dependent signal.
+        self.phase_noise = 0.06
 
         # Drive decay time constant (ms) — emotion drives fade over ~3 seconds
         self.drive_tau_ms = 3000.0
@@ -260,6 +294,13 @@ class BrainSimulator:
                 phase=random.uniform(0, 2 * math.pi),
                 omega=omega,
             )
+
+        # ── coupling analyzer ──
+        # omega is fixed at init, so each region's band membership is static — cache it.
+        self._region_band = {ab: st.dominant_band() for ab, st in self.states.items()}
+        self._coup_stride = 4          # sample every 4ms (~250Hz) — resolves gamma-band PAC
+        self._coup_i = 0
+        self._coup_buf = deque(maxlen=160)   # ~640ms window (≈4 theta cycles)
 
     def _band_to_omega(self, band: str) -> float:
         """
@@ -357,15 +398,16 @@ class BrainSimulator:
             # Weights scale individual coupling strength; normalize by degree so
             # high-connectivity hubs don't dominate more than their degree warrants.
             neighbors = _KURAMOTO_GRAPH.get(abbrev, [])
+            noise = random.gauss(0.0, self.phase_noise)
             if neighbors:
                 sync_sum = sum(
                     w * math.sin(self.states[nb].phase - state.phase)
                     for nb, w in neighbors if nb in self.states
                 )
-                dphi = state.omega + (self.K_kuramoto / len(neighbors)) * sync_sum
+                dphi = state.omega + (self.K_kuramoto / len(neighbors)) * sync_sum + noise
             else:
-                # Isolated region: free-runs at natural frequency
-                dphi = state.omega
+                # Isolated region: free-runs at natural frequency (still noisy)
+                dphi = state.omega + noise
             new_phase[abbrev] = (state.phase + dphi * self.dt_ms) % (2 * math.pi)
 
         for abbrev in self.states:
@@ -376,6 +418,18 @@ class BrainSimulator:
         real = sum(math.cos(s.phase) for s in self.states.values()) / N
         imag = sum(math.sin(s.phase) for s in self.states.values()) / N
         self.sync_order = math.sqrt(real**2 + imag**2)
+
+        # ── sample band-summed signals + PLV phases for the coupling analyzer ──
+        self._coup_i += 1
+        if self._coup_i % self._coup_stride == 0:
+            bands = [0j, 0j, 0j, 0j, 0j]   # delta, theta, alpha, beta, gamma
+            for abbrev, st in self.states.items():
+                a = st.get_activity()
+                if a > 0.02:               # skip near-silent regions (also avoids the exp cost)
+                    bands[_BAND_ORDER[self._region_band[abbrev]]] += a * cmath.exp(1j * st.phase)
+            phases = tuple(self.states[r].phase if r in self.states else 0.0 for r in _PLV_REGIONS)
+            acts = tuple(self.states[r].get_activity() if r in self.states else 0.0 for r in _PLV_REGIONS)
+            self._coup_buf.append((tuple(bands), phases, self.sync_order, acts))
 
     def decay_drives(self, dt_ms: float):
         """
@@ -477,6 +531,90 @@ class BrainSimulator:
             "freq_hz": round(freq_hz, 2),
             "solfeggio_hz": eeg_to_solfeggio(freq_hz),
         }
+
+    # ── CROSS-FREQUENCY COUPLING ──────────────────────────────────────────────
+
+    @staticmethod
+    def _modulation_index(phases: List[float], amps: List[float], nbins: int = 18) -> float:
+        """
+        Tort et al. (2010) modulation index — how strongly a low-band PHASE
+        modulates a high-band AMPLITUDE. 0 = no coupling, 1 = maximal.
+        KL-divergence of the mean-amplitude-per-phase-bin distribution from uniform.
+        """
+        if len(phases) < nbins * 2:
+            return 0.0
+        sums = [0.0] * nbins
+        cnts = [0] * nbins
+        twopi = 2 * math.pi
+        for ph, a in zip(phases, amps):
+            b = int((ph % twopi) / twopi * nbins) % nbins
+            sums[b] += a
+            cnts[b] += 1
+        means = [sums[i] / cnts[i] if cnts[i] else 0.0 for i in range(nbins)]
+        tot = sum(means)
+        if tot <= 1e-9:
+            return 0.0
+        p = [m / tot for m in means]
+        H = -sum(x * math.log(x) for x in p if x > 0)
+        mi = (math.log(nbins) - H) / math.log(nbins)
+        return max(0.0, min(1.0, mi))
+
+    def get_coupling(self) -> dict:
+        """
+        Relational fingerprint of the current state — the structure the single
+        `sync_order` scalar throws away:
+
+          plv:           graded phase-locking per anatomical circuit (0..1)
+          pac:           theta/alpha-phase → gamma-amplitude coupling (Tort MI)
+          integration:   mean order over the window — how bound the network is
+          metastability: std of the order parameter — dynamic flexibility
+          binding:       criticality index — integrated AND flexible at once
+                         (peaks at intermediate sync with high metastability; the
+                          "edge of chaos" regime associated with conscious binding)
+        """
+        with self._lock:
+            buf = list(self._coup_buf)
+        n = len(buf)
+        if n < 40:
+            return {"pac": {}, "plv": {}, "binding": 0.0, "integration": 0.0,
+                    "metastability": 0.0, "n": n}
+
+        # PAC — low-band phase modulating high-band amplitude
+        pac = {}
+        for lo, hi in PAC_PAIRS:
+            li, hii = _BAND_ORDER[lo], _BAND_ORDER[hi]
+            ph = [math.atan2(s[0][li].imag, s[0][li].real) for s in buf]
+            am = [abs(s[0][hii]) for s in buf]
+            pac[f"{lo}-{hi}"] = round(self._modulation_index(ph, am), 4)
+
+        # Functional coupling per circuit = phase-locking GATED by co-activation.
+        # (Raw PLV saturates — wired regions lock whether engaged or not. Weighting by
+        #  how active both regions are is what makes fear vs reward look different.)
+        coupling = {}
+        for a, b in PLV_PAIRS:
+            ia, ib = _PLV_IDX[a], _PLV_IDX[b]
+            acc = 0j
+            coact = 0.0
+            for s in buf:
+                acc += cmath.exp(1j * (s[1][ia] - s[1][ib]))
+                coact += math.sqrt(max(0.0, s[3][ia]) * max(0.0, s[3][ib]))
+            plv = abs(acc) / n
+            coupling[f"{a}-{b}"] = round(plv * (coact / n), 4)   # engaged AND synchronized
+
+        # order-parameter statistics over the window
+        orders = [s[2] for s in buf]
+        mean_ord = sum(orders) / n
+        meta = math.sqrt(sum((o - mean_ord) ** 2 for o in orders) / n)
+        integration = round(sum(coupling.values()), 4)   # total engaged-synchrony across circuits
+        metastability = round(meta, 4)
+
+        # binding: integrated AND flexible — criticality 4R(1-R) rewards the intermediate
+        # ("edge of chaos") regime, amplified by metastability (live, not locked or dead).
+        crit = 4.0 * mean_ord * (1.0 - mean_ord)
+        binding = round(max(0.0, min(1.0, crit * (0.5 + 6.0 * meta))), 4)
+
+        return {"pac": pac, "coupling": coupling, "binding": binding,
+                "integration": integration, "metastability": metastability, "n": n}
 
     # ── SNAPSHOT / ANALYSIS ───────────────────────────────────────────────────
 
