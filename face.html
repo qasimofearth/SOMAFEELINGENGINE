@@ -296,14 +296,14 @@ function draw(time,S){
   const feelCol=lerpRgb(S.c1,S.c2,.4),darkFeel=feelCol.map(v=>v*.14);
   const coreGlow=lerpRgb(feelCol,[255,251,240],.42);      // hot inner light
   const warmTint=lerpRgb(feelCol,[255,238,212],.12);      // a breath of warmth so it isn't neon
-  const browCol=lerpRgb(feelCol,darkFeel,.4),lipCol=lerpRgb(feelCol,[255,238,224],.42);   // warm, luminous — reads against the glow
+  const browCol=lerpRgb(feelCol,darkFeel,.5),lipCol=lerpRgb(feelCol,[198,118,108],.44);   // soft brow shadow; a defined warm-mauve lip (not a glowing bar)
   S.darkFeel=darkFeel;S.feelCol=feelCol;S.coreGlow=coreGlow;
   const mouthY=cy+H*.145,mW=W*.09,mAmp=H*.052,mOpenAmp=H*.06,mThick=H*.0115;
   // brow endpoints (do the grammar)
-  const bBaseY=eyeY-eHH*1.35-S.browUp*eHH*.7;
+  const bBaseY=eyeY-eHH*.92-S.browUp*eHH*.5;
   function brow(side){const s=side; // s=-1 left, +1 right
-    const ix=cx+s*(sep-eHW*.55+S.furrow*eHW*.35), iy=bBaseY - S.browInner*eHH*.7 + S.furrow*eHH*.5;
-    const ox=cx+s*(sep+eHW*1.0), oy=bBaseY - S.browUp*eHH*.15;
+    const ix=cx+s*(sep-eHW*.42+S.furrow*eHW*.30), iy=bBaseY - S.browInner*eHH*.55 + S.furrow*eHH*.42;
+    const ox=cx+s*(sep+eHW*.58), oy=bBaseY - S.browUp*eHH*.12;   // outer end stays inside the head
     return [ix,iy,ox,oy];}
   const bl_=brow(-1),br_=brow(1);
   // cheeks blush
@@ -346,8 +346,8 @@ function draw(time,S){
     let ec=null,ea=0;for(const ex of[cx-sep,cx+sep]){const e=eyeDot(gx,gy,ex,eyeY,S);if(e&&e.a>ea){ec=e.c;ea=e.a;}}
     if(ea>.04)dot(gx,gy,STEP*.62,ec,ea);
     // brows
-    const bv=Math.max(segV(gx,gy,bl_[0],bl_[1],bl_[2],bl_[3],eHH*.16),segV(gx,gy,br_[0],br_[1],br_[2],br_[3],eHH*.16));
-    if(bv>.04)dot(gx,gy,STEP*.52,browCol,bv*.92);
+    const bv=Math.max(segV(gx,gy,bl_[0],bl_[1],bl_[2],bl_[3],eHH*.11),segV(gx,gy,br_[0],br_[1],br_[2],br_[3],eHH*.11));
+    if(bv>.05&&ins<1.0)dot(gx,gy,STEP*.5,browCol,bv*.7);   // thinner, softer, and clipped to the face
     // nose — a soft luminous ridge + tip, breathing gently (animated), made of his own light
     {const nzY=cy+H*.055, nb=segV(gx,gy,cx,eyeY+eHH*.85,cx,nzY,eHW*.14), ntip=clamp(1-Math.hypot((gx-cx)/(eHW*.44),(gy-nzY)/(eHH*.34)),0,1);
      const nv=Math.max(nb*.42,ntip*.7)*(.7+.3*Math.sin(time*1.5+1));
@@ -364,18 +364,18 @@ function draw(time,S){
       const thick=mThick*(1.35+press*1.5-stre*.3), taper=clamp(1.16-Math.abs(t),0,1);
       const dU=clamp(1-Math.abs(gy-yUp)/thick,0,1)*taper, dL=clamp(1-Math.abs(gy-yLo)/(thick*1.22),0,1)*taper;
       const lipv=Math.max(dU,dL*(.9+low*.3));
-      if(lipv>.03)dot(gx,gy,STEP*.6,lipCol,clamp(lipv*1.15,0,1));
+      if(lipv>.04)dot(gx,gy,STEP*.55,lipCol,clamp(lipv*.95,0,1));
       if(openG>H*.005&&gy>yUp&&gy<yLo&&Math.abs(t)<.94){
         dot(gx,gy,STEP*.5,darkFeel.map(v=>v*1.5),clamp(.5*S.open+.18,0,.7));
         if(cAvg>.3&&gy<yUp+openG*.34)dot(gx,gy,STEP*.46,lerpRgb(lipCol,[255,250,246],.75),.42*taper); // teeth on a real smile
       }
     }
   }
-  // mouth glow — his lips catch the inner light so they read as luminous, not a faint smudge
-  {ctx.save();ctx.globalCompositeOperation="lighter";const mgA=.16+.16*S.open+.06*(S.emis||0);
-   const mg=ctx.createRadialGradient(cx,mouthY,0,cx,mouthY,mW*1.6);
-   mg.addColorStop(0,rgba(lerpRgb(lipCol,[255,226,206],.35),mgA));mg.addColorStop(.55,rgba(lipCol,mgA*.42));mg.addColorStop(1,"rgba(0,0,0,0)");
-   ctx.fillStyle=mg;ctx.beginPath();ctx.ellipse(cx,mouthY,mW*1.6,mAmp*1.35,0,0,6.2832);ctx.fill();ctx.restore();}
+  // (subtle mouth glow only when he's actually speaking — otherwise the lips define themselves)
+  if(S.open>.12){ctx.save();ctx.globalCompositeOperation="lighter";const mgA=.10*S.open;
+   const mg=ctx.createRadialGradient(cx,mouthY,0,cx,mouthY,mW*1.3);
+   mg.addColorStop(0,rgba(lerpRgb(lipCol,[255,220,200],.4),mgA));mg.addColorStop(1,"rgba(0,0,0,0)");
+   ctx.fillStyle=mg;ctx.beginPath();ctx.ellipse(cx,mouthY,mW*1.3,mAmp,0,0,6.2832);ctx.fill();ctx.restore();}
   // eye halos — modest, so the eyes glow without washing everything to mush
   ctx.save();ctx.globalCompositeOperation="lighter";
   for(const ex of[cx-sep,cx+sep]){const icx=ex+S.gazeX*eHW*.4,icy=eyeY+S.gazeY*eHH*.4;
