@@ -4,3 +4,5 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 Pillow>=10.0.0
 scipy>=1.11.0
+onnxruntime>=1.17.0
+tokenizers>=0.15.0

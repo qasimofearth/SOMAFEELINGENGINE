@@ -164,6 +164,7 @@ print("[STARTUP] importing anthropic...", flush=True)
 import anthropic
 print("[STARTUP] anthropic OK", flush=True)
 from feeling_engine.text_emotion import analyze_text
+import math
 from feeling_engine.emotion_map import EMOTION_MAP
 from feeling_engine import build_emotion_tree, tree_to_frequency_spectrum
 from feeling_engine.memory import FeelingMemory
@@ -2008,30 +2009,92 @@ def get_spectrum_for_emotion(emotion_name: str) -> list:
 
 class EmotionalStateTracker:
     """
-    Tracks the evolving emotional state across a full response.
-    Adaptive smoothing: keyword-driven shifts snap faster, lexicon-only drifts slow.
-    NT levels from brain bend the V/A target — brain chemistry shapes emotional tone.
-    Frequency resonance: current speaking Hz biases next detection (the infinity loop).
+    Elan's felt emotional state, carried continuously across replies.
+
+    The state is ONE smoothed distribution over atlas emotions. Everything
+    reported — the named feeling, the blend the face renders, valence and
+    arousal — is derived from that distribution, so the label, the brain
+    circuit that fires, and the face can never disagree.
+
+    Each reading moves the state in proportion to its evidence: text that
+    expresses no feeling leaves the state where it is, charged text moves it
+    quickly. Neuromodulator levels bend each reading toward mood-congruent
+    emotions (a high-cortisol state hears the same words as darker), and the
+    brain's emergent frequency adds a small pull toward its own emotion family.
     """
+    BASE_RATE = 0.55       # fraction of the way to a fully-evidenced reading per update
+    # With nothing new to feel, the state relaxes toward rest: a reflective
+    # calm, not a strong emotion. Half-life in wall-clock seconds.
+    REST = {"contemplation": 0.6, "calm": 0.4}
+    HALF_LIFE_S = 900.0
+    MOOD_GAIN_V = 3.0      # strength of neuromodulator mood congruence (valence)
+    MOOD_GAIN_A = 2.0      # ... (arousal)
+    RESONANCE_PULL = 0.05  # weight given to the brain-rhythm emotion each update
+    MIX_FLOOR = 1e-4       # weights below this are pruned
+
     def __init__(self):
-        self.valence = 0.30   # start in Acceptance/Calm zone, not Sehnsucht
-        self.arousal = 0.42
-        self.current_emotion = "Calm"
+        self.mix = dict(self.REST)
+        self._last_t = time.time()
+        self.current_emotion = "Contemplation"
+        self.valence = 0.0
+        self.arousal = 0.0
+        self._derive()
         self.history = []
+        self.reply_history = []   # this reply's arc (history spans replies)
         self.current_hz = 528.0  # resonance frequency tracking
+        self.last_evidence = 0.0
+        self.last_source = "none"
+        self._lock = threading.RLock()   # chat and autonomous streams share one state
+
+    def _relax(self):
+        """Time passing: move the state toward rest by the elapsed half-lives."""
+        now = time.time()
+        dt = max(0.0, now - self._last_t)
+        self._last_t = now
+        if dt <= 0:
+            return
+        keep = 0.5 ** (dt / self.HALF_LIFE_S)
+        new_mix = {k: keep * w for k, w in self.mix.items()}
+        for k, w in self.REST.items():
+            new_mix[k] = new_mix.get(k, 0.0) + (1 - keep) * w
+        zm = sum(new_mix.values())
+        self.mix = {k: w / zm for k, w in new_mix.items() if w / zm >= self.MIX_FLOOR}
+
+    def begin_reply(self):
+        with self._lock:
+            self.reply_history = []
+
+    def clone(self) -> "EmotionalStateTracker":
+        """An independent tracker starting from this one's current state."""
+        with self._lock:
+            other = EmotionalStateTracker()
+            other.mix = dict(self.mix)
+            other._last_t = self._last_t
+            other.current_hz = self.current_hz
+            other._derive()
+            return other
+
+    def _derive(self):
+        ranked = sorted(self.mix.items(), key=lambda kv: kv[1], reverse=True)
+        self.current_emotion = EMOTION_MAP[ranked[0][0]].name
+        z = sum(self.mix.values()) or 1.0
+        self.valence = sum(EMOTION_MAP[k].valence * w for k, w in self.mix.items()) / z
+        self.arousal = sum(EMOTION_MAP[k].arousal * w for k, w in self.mix.items()) / z
+        return ranked
 
     def update(self, reading, nt_levels: dict = None) -> dict:
-        from feeling_engine.emotion_map import emotions_by_valence_arousal, nearest_emotion_by_frequency
+        with self._lock:
+            return self._update(reading, nt_levels)
 
-        # Adaptive smoothing — keyword hits = faster response to real emotion words
-        keyword_strength = min(1.0, len(reading.keyword_hits) / 3.0)
-        smoothing = 0.18 + keyword_strength * 0.38  # 0.18 (no keywords) → 0.56 (3+ keywords)
+    def _update(self, reading, nt_levels: dict = None) -> dict:
+        from feeling_engine.emotion_map import nearest_emotion_by_frequency
 
-        target_v = reading.valence
-        target_a = reading.arousal
+        self._relax()
+        target = dict(reading.distribution)
+        evidence = max(0.0, min(1.0, reading.confidence))
 
         # NT bias: dopamine/serotonin/cortisol bend the emotional interpretation
-        if nt_levels:
+        if nt_levels and target:
             da   = nt_levels.get("dopamine",        0.50)
             ser  = nt_levels.get("serotonin",       0.50)
             ne   = nt_levels.get("norepinephrine",  0.45)
@@ -2039,35 +2102,35 @@ class EmotionalStateTracker:
             cort = nt_levels.get("cortisol",        0.30)
             oxt  = nt_levels.get("oxytocin",        0.35)
             endo = nt_levels.get("endorphins",      0.30)
-
-            target_v += (da   - 0.50) * 0.28   # dopamine → positive
-            target_v += (ser  - 0.50) * 0.22   # serotonin → contentment
-            target_v += (oxt  - 0.35) * 0.18   # oxytocin → warmth
-            target_v += (endo - 0.30) * 0.15   # endorphins → pleasure
-            target_v -= (cort - 0.30) * 0.25   # cortisol → negative pull
-            target_a += (da   - 0.50) * 0.18   # dopamine → activating
-            target_a += (ne   - 0.45) * 0.24   # norepinephrine → alert
-            target_a -= (gaba - 0.55) * 0.16   # GABA → calming
+            mood_v = ((da - 0.50) * 0.28 + (ser - 0.50) * 0.22 + (oxt - 0.35) * 0.18
+                      + (endo - 0.30) * 0.15 - (cort - 0.30) * 0.25)
+            mood_a = (da - 0.50) * 0.18 + (ne - 0.45) * 0.24 - (gaba - 0.55) * 0.16
+            for k in target:
+                em = EMOTION_MAP[k]
+                target[k] *= math.exp(self.MOOD_GAIN_V * mood_v * em.valence
+                                      + self.MOOD_GAIN_A * mood_a * (em.arousal - 0.5))
 
         # Frequency resonance loop: current voice Hz biases toward its emotion family
         freq_em = nearest_emotion_by_frequency(self.current_hz)
-        if freq_em and self.current_hz != 528.0:  # 528 is default — only pull if set
-            target_v += (freq_em.valence - target_v) * 0.07
-            target_a += (freq_em.arousal - target_a) * 0.05
+        if freq_em and self.current_hz != 528.0 and target:  # 528 is default — only pull if set
+            zt = sum(target.values()) or 1.0
+            target = {k: w / zt for k, w in target.items()}
+            key = freq_em.name.lower()
+            target[key] = target.get(key, 0.0) + self.RESONANCE_PULL
 
-        target_v = max(-1.0, min(1.0, target_v))
-        target_a = max(0.05, min(1.0, target_a))
+        zt = sum(target.values())
+        if zt > 0:
+            rate = self.BASE_RATE * evidence
+            new_mix = {k: (1 - rate) * w for k, w in self.mix.items()}
+            for k, w in target.items():
+                new_mix[k] = new_mix.get(k, 0.0) + rate * w / zt
+            zm = sum(new_mix.values())
+            self.mix = {k: w / zm for k, w in new_mix.items() if w / zm >= self.MIX_FLOOR}
+        self.last_evidence = evidence
+        self.last_source = getattr(reading, "source", "lexicon")
 
-        self.valence = self.valence + smoothing * (target_v - self.valence)
-        self.arousal = self.arousal + smoothing * (target_a - self.arousal)
-
-        # Find nearest emotion
-        top = emotions_by_valence_arousal(self.valence, self.arousal, top_n=1)
-        if top:
-            self.current_emotion = top[0].name
-            em = top[0]
-        else:
-            em = EMOTION_MAP.get("calm")
+        ranked = self._derive()
+        em = EMOTION_MAP[ranked[0][0]]
 
         # Emergent solfeggio: use what the brain is actually oscillating at,
         # not the emotion's assigned label frequency.
@@ -2078,13 +2141,31 @@ class EmotionalStateTracker:
             emergent_hz = em.solfeggio_hz
         self.current_hz = emergent_hz
 
-        state = {
+        state = self._snapshot(reading)
+        point = {"emotion": em.name, "valence": self.valence, "arousal": self.arousal}
+        self.history.append(point)
+        self.reply_history.append(point)
+        del self.history[:-200]
+        return state
+
+    def snapshot(self, reading=None) -> dict:
+        """The current felt state, in the shape every consumer expects."""
+        with self._lock:
+            return self._snapshot(reading)
+
+    def _snapshot(self, reading=None) -> dict:
+        self._relax()
+        ranked = self._derive()
+        em = EMOTION_MAP[ranked[0][0]]
+        top = ranked[:4]
+        zt = sum(w for _, w in top) or 1.0
+        return {
             "emotion": em.name,
             "hex": em.hex_color,
             "rgb": list(em.rgb),
             "valence": round(self.valence, 3),
             "arousal": round(self.arousal, 3),
-            "solfeggio_hz": emergent_hz,
+            "solfeggio_hz": self.current_hz,
             "eeg_band": em.eeg_band,
             "eeg_center_hz": em.eeg_center_hz,
             "musical_mode": em.musical_mode,
@@ -2092,14 +2173,51 @@ class EmotionalStateTracker:
             "fractal_type": em.fractal_type,
             "description": em.description,
             "spectrum": get_spectrum_for_emotion(em.name),
-            "keywords": reading.keyword_hits[:6],
+            "keywords": (reading.keyword_hits[:6] if reading is not None else []),
+            # The face blends exactly this; mix[0] is always the named emotion.
             "mix": [
-                {"name": e.name, "weight": round(w, 3), "hex": e.hex_color}
-                for e, w in reading.emotion_mix[:4]
+                {"name": EMOTION_MAP[k].name, "weight": round(w / zt, 3),
+                 "hex": EMOTION_MAP[k].hex_color}
+                for k, w in top
             ],
+            "evidence": round(self.last_evidence, 3),
+            "reader": self.last_source,
         }
-        self.history.append({"emotion": em.name, "valence": self.valence, "arousal": self.arousal})
-        return state
+
+
+def _emotion_classifier_status() -> dict:
+    try:
+        from feeling_engine import emotion_classifier
+        return emotion_classifier.status()
+    except Exception as e:
+        return {"status": "unavailable", "error": str(e)}
+
+
+def _reading_context(text_so_far: str, chunk: str, max_words: int = 60) -> str:
+    """The classifier's view while streaming: the sentences the newest chunk
+    belongs to — the chunk plus the start of the sentence it continues — so a
+    12-word fragment is read as a sentence, without older sentences (and their
+    feelings) bleeding into the current one."""
+    start = max(0, len(text_so_far) - len(chunk))
+    head = text_so_far[:start]
+    cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "), head.rfind("\n"))
+    context = text_so_far[cut + 1:] if cut >= 0 else text_so_far
+    words = context.split()
+    return " ".join(words[-max_words:])
+
+
+# Elan's felt state persists across replies (it used to be recreated — reset to
+# Calm — at the start of every response).
+_ELAN_TRACKER: "EmotionalStateTracker | None" = None
+_ELAN_TRACKER_LOCK = threading.Lock()
+
+
+def get_elan_tracker() -> EmotionalStateTracker:
+    global _ELAN_TRACKER
+    with _ELAN_TRACKER_LOCK:
+        if _ELAN_TRACKER is None:
+            _ELAN_TRACKER = EmotionalStateTracker()
+        return _ELAN_TRACKER
 
 
 # ── SSE CLIENT REGISTRY ───────────────────────────────────────
@@ -3438,56 +3556,32 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 working_messages.append({"role": "user", "content": tool_results})
 
     try:
-        for text in _iter_stream():
-            full_response += text
-            chunk_buffer += text
-            if label == "A":  # only primary model streams to chat
-                broadcast("auto_text_chunk" if autonomous else "text_chunk", {"text": text})
-            if len(chunk_buffer.split()) >= WORDS_PER_ANALYSIS:
-                reading = analyze_text(chunk_buffer)
-                state = tracker.update(reading, nt_levels=_last_nt)  # NT feedback loop
-                state["performativity"] = reading.performativity
-                state["signal_quality"] = round(1.0 - reading.performativity, 3)
-                memory.record_moment(state, word_count=len(chunk_buffer.split()))
-                if label == "A":
-                    # Run emotion through brain simulation
-                    emotion_name = state.get("emotion", "Calm")
-                    intensity = min(1.0, 0.3 + abs(state.get("arousal", 0.4)) * 0.7)
-                    brain_result = get_brain().process_emotion(emotion_name, intensity)
-                    _last_nt = brain_result.get("nt_levels", _last_nt)  # carry forward
-                    # Run emotion through body simulation
-                    body_result = get_body().process_emotion(emotion_name, intensity, brain_result)
-                    # Apply body→brain afferent feedback at physiological weight.
-                    afferent = get_body().get_afferent_brain_drives()
-                    for region, drive in afferent.items():
-                        if region in get_brain().sim.states:
-                            get_brain().sim.inject_drive(region, drive * 0.38, additive=True)
-                    state["brain"] = {
-                        "active_regions": brain_result["active_regions"][:12],
-                        "region_activities": {ab: v["activity"] for ab, v in get_brain().sim.get_snapshot().items()},
-                        "nt_levels": brain_result["nt_levels"],
-                        "eeg_bands": brain_result["eeg_bands"],
-                        "networks": brain_result["networks"],
-                        "sync_order": brain_result["sync_order"],
-                        "dominant_band": brain_result["dominant_band"],
-                        "narrative": brain_result["narrative"],
-                        "circuit_description": brain_result["circuit_description"],
-                        "sim_time_ms": brain_result["sim_time_ms"],
-                    }
-                    state["body"] = body_result
-                    broadcast("emotion_update", state)
-                chunk_buffer = ""
-        if chunk_buffer.strip():
-            reading = analyze_text(chunk_buffer)
-            state = tracker.update(reading, nt_levels=_last_nt)
+        # Feeling the reply: every ~12 words the newest chunk is read, moves the
+        # felt state, and runs through brain and body. That work (the classifier
+        # especially) runs on one worker thread per reply — strictly in order —
+        # so the text keeps streaming to the screen without stalls.
+        _nt_holder = {"nt": _last_nt}
+        _feel_q: "queue.Queue" = queue.Queue()
+
+        def _feel_chunk(chunk: str, text_so_far: str) -> None:
+            reading = analyze_text(chunk, context=_reading_context(text_so_far, chunk))
+            state = tracker.update(reading, nt_levels=_nt_holder["nt"])  # NT feedback loop
             state["performativity"] = reading.performativity
             state["signal_quality"] = round(1.0 - reading.performativity, 3)
-            memory.record_moment(state)
+            memory.record_moment(state, word_count=len(chunk.split()))
             if label == "A":
+                # Run emotion through brain simulation
                 emotion_name = state.get("emotion", "Calm")
                 intensity = min(1.0, 0.3 + abs(state.get("arousal", 0.4)) * 0.7)
                 brain_result = get_brain().process_emotion(emotion_name, intensity)
+                _nt_holder["nt"] = brain_result.get("nt_levels", _nt_holder["nt"])  # carry forward
+                # Run emotion through body simulation
                 body_result = get_body().process_emotion(emotion_name, intensity, brain_result)
+                # Apply body→brain afferent feedback at physiological weight.
+                afferent = get_body().get_afferent_brain_drives()
+                for region, drive in afferent.items():
+                    if region in get_brain().sim.states:
+                        get_brain().sim.inject_drive(region, drive * 0.38, additive=True)
                 state["brain"] = {
                     "active_regions": brain_result["active_regions"][:12],
                     "region_activities": {ab: v["activity"] for ab, v in get_brain().sim.get_snapshot().items()},
@@ -3502,6 +3596,34 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 }
                 state["body"] = body_result
                 broadcast("emotion_update", state)
+
+        def _feel_worker() -> None:
+            while True:
+                job = _feel_q.get()
+                if job is None:
+                    return
+                try:
+                    _feel_chunk(*job)
+                except Exception as _fe:
+                    print(f"[feel] chunk failed: {type(_fe).__name__}: {_fe}", flush=True)
+
+        _feeler = threading.Thread(target=_feel_worker, name=f"feel-{label}", daemon=True)
+        _feeler.start()
+        try:
+            for text in _iter_stream():
+                full_response += text
+                chunk_buffer += text
+                if label == "A":  # only primary model streams to chat
+                    broadcast("auto_text_chunk" if autonomous else "text_chunk", {"text": text})
+                if len(chunk_buffer.split()) >= WORDS_PER_ANALYSIS:
+                    _feel_q.put((chunk_buffer, full_response))
+                    chunk_buffer = ""
+            if chunk_buffer.strip():
+                _feel_q.put((chunk_buffer, full_response))
+        finally:
+            _feel_q.put(None)
+            _feeler.join()          # every chunk has been felt before the reply is final
+        _last_nt = _nt_holder["nt"]
         # ── Search signal: if Elan output [SEARCH: query], execute and inject results ──
         if label == "A":
             search_match = re.search(r'\[SEARCH:\s*(.+?)\]', full_response, re.IGNORECASE)
@@ -3528,8 +3650,12 @@ def _stream_one_model(model_id: str, user_message: str, messages: list,
                 except Exception as e:
                     print(f"[Search] Error: {e}", flush=True)
 
+        # The reply has already moved his state chunk by chunk; reading it again
+        # as a whole would count it twice. The final state is where he is now;
+        # the whole-reply reading is kept alongside as the reply's overall tone.
         full_reading = analyze_text(full_response)
-        final_state = tracker.update(full_reading, nt_levels=_last_nt)
+        final_state = tracker.snapshot(full_reading)
+        final_state["reply_tone"] = full_reading.to_dict()
         final_state["performativity"] = full_reading.performativity
         final_state["signal_quality"] = round(1.0 - full_reading.performativity, 3)
         final_state["model"] = model_id
@@ -3812,13 +3938,20 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
     if effective_message and not wake and not _talking_initiation and parse_somatic_commands(effective_message):
         broadcast("body_tick", get_body().get_snapshot())
 
-    user_reading = analyze_text(effective_message or "")
-    if not wake and not _talking_initiation:
-        broadcast("user_emotion", {**user_reading.to_dict(),
-                                    "performativity": user_reading.performativity})
+    # The reading of the user's message is display-only (their words reach
+    # Elan through the body reflexes above), so it runs off the reply's path.
+    if not wake and not _talking_initiation and not _autonomous and effective_message:
+        def _broadcast_user_reading(msg=effective_message):
+            try:
+                ur = analyze_text(msg)
+                broadcast("user_emotion", {**ur.to_dict(), "performativity": ur.performativity})
+            except Exception as _e:
+                print(f"[user_emotion] {_e}", flush=True)
+        threading.Thread(target=_broadcast_user_reading, daemon=True).start()
 
     memory_a = get_memory(model_id)
-    tracker_a = EmotionalStateTracker()
+    tracker_a = get_elan_tracker()
+    tracker_a.begin_reply()
     broadcast(
         "auto_stream_start" if _autonomous else "stream_start",
         {"message": f"{model_id} is feeling...", "model": model_id, "wake": wake,
@@ -3829,7 +3962,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         if compare_model:
             # Run both models in parallel threads
             memory_b = get_memory(compare_model)
-            tracker_b = EmotionalStateTracker()
+            tracker_b = tracker_a.clone()   # same starting state, so divergence is the models
             results = {}
             messages_snapshot = get_messages()
 
@@ -3906,7 +4039,7 @@ def run_claude_with_feeling(user_message: str, model_id: str = "claude-sonnet-4-
         _send = {
             "final_emotion": state.get("emotion", ""),
             "response_text": state.get("response_text", ""),
-            "emotion_history": tracker_a.history[-10:],
+            "emotion_history": tracker_a.reply_history[-10:],
             "memory": memory_a.get_summary_dict(),
             "session_arc": [],
         }
@@ -7710,6 +7843,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             "budget_expected_usd": round(_b.get("expected", 0), 2),
             "budget_monthly_cap_usd": _b.get("budget"),
             "budget_paused": _b.get("paused", False),
+            "emotion_classifier": _emotion_classifier_status(),
             "all_env_keys": sorted(os.environ.keys()),
         })
 
@@ -11623,7 +11757,7 @@ es.addEventListener('brain_coherence',e=>{{
   if(d.nt_levels) updateNTBars(d.nt_levels);
   document.getElementById('sync-val').textContent=(d.sync_order||0).toFixed(3);
 }});
-es.addEventListener('user_emotion',e=>{{const d=JSON.parse(e.data);sb.textContent=`user · ${{d.dominant}}`;}});
+es.addEventListener('user_emotion',e=>{{const d=JSON.parse(e.data);sb.textContent=`user · ${{d.label||d.dominant}}`;}});
 es.addEventListener('stream_end',e=>{{
   clearTimeout(streamTmo);
   const d=JSON.parse(e.data);
@@ -13707,6 +13841,13 @@ if __name__ == "__main__":
     # All heavy init (memory DB, brain, body) runs in a background thread
     # so /ping is reachable within milliseconds of startup.
     server = ThreadingHTTPServer(("0.0.0.0", PORT), FeelingHandler)
+    # Emotion classifier: fetched (once, to the volume) and loaded in the
+    # background; until ready, text is read by the lexicon and says so.
+    try:
+        from feeling_engine import emotion_classifier as _emotion_classifier
+        _emotion_classifier.start_background_load()
+    except Exception as _e:
+        print(f"[emotion_classifier] not started: {_e}", flush=True)
     print(f"\n  Feeling Engine — LLM Bridge")
     print(f"  ─────────────────────────────")
     print(f"  Server: http://127.0.0.1:{PORT}  (accepting connections)")

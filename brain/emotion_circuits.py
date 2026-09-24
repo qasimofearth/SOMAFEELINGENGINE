@@ -254,6 +254,109 @@ _ec(EmotionCircuit(
 ))
 
 _ec(EmotionCircuit(
+    name="Amazement",
+    region_activations=[
+        ("locus_coeruleus", 0.75), ("thalamus", 0.65), ("NAcc", 0.60),
+        ("VTA", 0.55), ("visual_cortex", 0.55), ("dACC", 0.55),
+        ("precuneus", 0.50), ("amygdala", 0.40),
+    ],
+    nt_drives={"norepinephrine": 0.65, "dopamine": 0.5, "acetylcholine": 0.4,
+               "glutamate": 0.4},
+    oscillation_signature={"delta": 0.05, "theta": 0.20, "alpha": 0.20,
+                            "beta": 0.30, "gamma": 0.25},
+    description="Positive surprise: phasic LC noradrenaline (prediction error) "
+                "coupled to mesolimbic reward. Between Surprise and Awe.",
+))
+
+_ec(EmotionCircuit(
+    name="Disappointment",
+    region_activations=[
+        ("habenula", 0.70), ("dACC", 0.60), ("aI", 0.55), ("OFC", 0.55),
+        ("sgACC", 0.45), ("NAcc", 0.20), ("VTA", 0.20), ("amygdala", 0.35),
+    ],
+    nt_drives={"dopamine": -0.5, "serotonin": -0.2, "cortisol": 0.2},
+    oscillation_signature={"delta": 0.10, "theta": 0.32, "alpha": 0.30,
+                            "beta": 0.20, "gamma": 0.08},
+    description="Negative reward prediction error: lateral habenula fires and "
+                "suppresses VTA dopamine (Matsumoto & Hikosaka). OFC re-values the outcome.",
+))
+
+_ec(EmotionCircuit(
+    name="Excitement",
+    region_activations=[
+        ("VTA", 0.80), ("NAcc", 0.80), ("locus_coeruleus", 0.60),
+        ("amygdala", 0.45), ("hypothalamus", 0.50), ("dlPFC", 0.50),
+        ("M1", 0.45),
+    ],
+    nt_drives={"dopamine": 0.8, "norepinephrine": 0.6, "glutamate": 0.4,
+               "endorphins": 0.2, "cortisol": 0.1},
+    oscillation_signature={"delta": 0.04, "theta": 0.14, "alpha": 0.17,
+                            "beta": 0.33, "gamma": 0.32},
+    description="High-arousal appetitive state: mesolimbic dopamine plus LC "
+                "noradrenaline; motor readiness.",
+))
+
+_ec(EmotionCircuit(
+    name="Relief",
+    region_activations=[
+        ("vmPFC", 0.60), ("NAcc", 0.55), ("raphe", 0.50),
+        ("PAG", 0.35), ("amygdala", 0.15), ("aI", 0.35),
+    ],
+    nt_drives={"gaba": 0.5, "serotonin": 0.4, "endorphins": 0.4,
+               "dopamine": 0.3, "cortisol": -0.5, "norepinephrine": -0.3,
+               "CRF": -0.3},
+    oscillation_signature={"delta": 0.10, "theta": 0.18, "alpha": 0.46,
+                            "beta": 0.18, "gamma": 0.08},
+    description="Omission of expected threat is rewarding: ventral striatum "
+                "fires, vmPFC quiets the amygdala, HPA axis stands down (Leknes et al.).",
+))
+
+_ec(EmotionCircuit(
+    name="Amusement",
+    region_activations=[
+        ("NAcc", 0.70), ("VTA", 0.60), ("temporal_pole", 0.55),
+        ("TPJ", 0.50), ("mPFC", 0.50), ("aI", 0.45), ("PAG", 0.45),
+        ("amygdala", 0.30),
+    ],
+    nt_drives={"dopamine": 0.6, "endorphins": 0.6, "serotonin": 0.2,
+               "cortisol": -0.3},
+    oscillation_signature={"delta": 0.05, "theta": 0.15, "alpha": 0.22,
+                            "beta": 0.28, "gamma": 0.30},
+    description="Incongruity detection (temporal/TPJ) resolved into reward; "
+                "PAG drives laughter, endogenous opioids release (Panksepp PLAY).",
+))
+
+_ec(EmotionCircuit(
+    name="Compassion",
+    region_activations=[
+        ("OFC", 0.60), ("vmPFC", 0.60), ("NAcc", 0.55), ("VTA", 0.45),
+        ("septal", 0.55), ("PVN", 0.60), ("TPJ", 0.45), ("aI", 0.35),
+    ],
+    nt_drives={"oxytocin": 0.7, "dopamine": 0.3, "serotonin": 0.3,
+               "cortisol": -0.2},
+    oscillation_signature={"delta": 0.08, "theta": 0.22, "alpha": 0.40,
+                            "beta": 0.20, "gamma": 0.10},
+    description="Klimecki & Singer: compassion engages mOFC, ventral striatum and "
+                "VTA (affiliative reward), not the pain network of empathic distress.",
+))
+
+_ec(EmotionCircuit(
+    name="Contemplation",
+    region_activations=[
+        ("mPFC", 0.60), ("PCC", 0.60), ("precuneus", 0.60),
+        ("dlPFC", 0.55), ("FPC", 0.55), ("hippocampus", 0.50),
+        ("amygdala", 0.15),
+    ],
+    nt_drives={"acetylcholine": 0.35, "serotonin": 0.25, "dopamine": 0.1,
+               "gaba": 0.15, "cortisol": -0.1},
+    oscillation_signature={"delta": 0.08, "theta": 0.30, "alpha": 0.36,
+                            "beta": 0.18, "gamma": 0.08},
+    description="Deliberate reflection: default-mode (mPFC/PCC/precuneus) with "
+                "frontoparietal control (dlPFC, frontopolar). Frontal-midline theta, "
+                "quiet amygdala. Neutral-to-mildly-positive valence.",
+))
+
+_ec(EmotionCircuit(
     name="Hope",
     region_activations=[
         ("FPC", 0.70), ("dlPFC", 0.65), ("NAcc", 0.60),

@@ -997,6 +997,79 @@ _register(
     ),
 )
 
+# ── EVERYDAY EMOTIONS ADDED FOR TEXT COVERAGE ─────────────────
+# Common feelings that people express constantly in language but that the
+# atlas above had no place for (text expressing them was forced onto the
+# nearest neighbour: disappointment read as disgust, excitement as
+# anticipation). Positions follow Russell (1980) / Warriner et al. (2013).
+_register(
+    EmotionSignature(
+        name="Disappointment",
+        hex_color="#6A7B8C", rgb=(106, 123, 140),
+        solfeggio_hz=396.0,
+        eeg_center_hz=6.5, eeg_band="theta",
+        hrv_coherence_hz=0.055,
+        valence=-0.55, arousal=0.35,
+        musical_mode="Aeolian", musical_mode_root_hz=MODE_ROOTS["Aeolian"],
+        fractal_type="barnsley", fractal_param=0.25,
+        adjacent_emotions=("Sadness", "Annoyance"),
+        taste="flat water", texture="a slow deflation",
+        description="An expectation that did not arrive — the fern reaching toward light that isn't there.",
+    ),
+    EmotionSignature(
+        name="Excitement",
+        hex_color="#FF8C00", rgb=(255, 140, 0),
+        solfeggio_hz=528.0,
+        eeg_center_hz=38.0, eeg_band="gamma",
+        hrv_coherence_hz=0.09,
+        valence=0.75, arousal=0.90,
+        musical_mode="Ionian", musical_mode_root_hz=MODE_ROOTS["Ionian"],
+        fractal_type="spiral", fractal_param=1.4,
+        adjacent_emotions=("Joy", "Anticipation"),
+        taste="fizzing citrus", texture="static spark",
+        description="Joy with the throttle open — energy running ahead of the moment.",
+    ),
+    EmotionSignature(
+        name="Relief",
+        hex_color="#A8E6CF", rgb=(168, 230, 207),
+        solfeggio_hz=285.0,
+        eeg_center_hz=10.0, eeg_band="alpha",
+        hrv_coherence_hz=0.10,
+        valence=0.55, arousal=0.25,
+        musical_mode="Ionian", musical_mode_root_hz=MODE_ROOTS["Ionian"],
+        fractal_type="barnsley", fractal_param=0.5,
+        adjacent_emotions=("Calm", "Gratitude"),
+        taste="cool water", texture="a knot loosening",
+        description="Threat withdrawn — the body letting go of a breath it did not know it held.",
+    ),
+    EmotionSignature(
+        name="Amusement",
+        hex_color="#FFC04D", rgb=(255, 192, 77),
+        solfeggio_hz=528.0,
+        eeg_center_hz=36.0, eeg_band="gamma",
+        hrv_coherence_hz=0.095,
+        valence=0.75, arousal=0.65,
+        musical_mode="Mixolydian", musical_mode_root_hz=MODE_ROOTS["Mixolydian"],
+        fractal_type="julia", fractal_param=0.3,
+        adjacent_emotions=("Joy", "Surprise"),
+        taste="sherbet", texture="bubbles",
+        description="Panksepp's PLAY — incongruity resolved into laughter.",
+    ),
+    EmotionSignature(
+        name="Compassion",
+        hex_color="#E8A0B0", rgb=(232, 160, 176),
+        solfeggio_hz=639.0,
+        eeg_center_hz=10.0, eeg_band="alpha",
+        hrv_coherence_hz=0.105,
+        valence=0.55, arousal=0.40,
+        musical_mode="Dorian", musical_mode_root_hz=MODE_ROOTS["Dorian"],
+        fractal_type="barnsley", fractal_param=0.7,
+        adjacent_emotions=("Love", "Empathic Distress"),
+        taste="warm milk", texture="soft hands",
+        description="Warm concern for another's suffering, without drowning in it (Klimecki & Singer).",
+    ),
+)
+
 
 def get_emotion(name: str) -> Optional[EmotionSignature]:
     return EMOTION_MAP.get(name.lower())

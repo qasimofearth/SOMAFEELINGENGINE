@@ -18,7 +18,7 @@ import math
 
 from .emotion_map import (
     EmotionSignature, EMOTION_MAP, emotions_by_valence_arousal,
-    nearest_emotion_by_frequency, get_emotion,
+    nearest_emotion_by_frequency, get_emotion, _RARE_EMOTION_NAMES,
 )
 
 
@@ -125,8 +125,8 @@ EMOTION_KEYWORDS: Dict[str, str] = {
     "terror": "Terror", "terrified": "Terror",
     "disgust": "Disgust", "disgusted": "Disgust",
     "surprise": "Surprise", "surprised": "Surprise", "amazed": "Amazement",
-    "awe": "Awe", "awesome": "Awe",
-    "trust": "Trust", "trusting": "Trust",
+    "awe": "Awe",
+    "trusting": "Trust",
     "anticipation": "Anticipation", "anticipate": "Anticipation",
     "calm": "Calm", "peaceful": "Serenity", "serene": "Serenity",
     "pride": "Pride", "proud": "Pride",
@@ -142,8 +142,8 @@ EMOTION_KEYWORDS: Dict[str, str] = {
     "admiration": "Admiration", "admire": "Admiration",
     "apprehension": "Apprehension", "anxious": "Apprehension",
     "vigilance": "Vigilance", "vigilant": "Vigilance",
-    "interest": "Interest", "curious": "Interest",
-    "contemplat": "Contemplation", "contemplative": "Contemplation", "reflecting": "Contemplation",
+    "interested": "Interest", "curious": "Interest",
+    "contemplating": "Contemplation", "contemplative": "Contemplation", "reflecting": "Contemplation",
     "acceptance": "Acceptance", "accepting": "Acceptance",
     "serenity": "Serenity",
     "pensiveness": "Pensiveness", "pensive": "Pensiveness",
@@ -165,7 +165,6 @@ EMOTION_KEYWORDS: Dict[str, str] = {
     "wabi-sabi": "Wabi-sabi", "wabisabi": "Wabi-sabi",
     # Somatic
     "frisson": "Frisson", "chills": "Frisson", "goosebumps": "Frisson",
-    "flow": "Flow", "in the zone": "Flow",
     # Social
     "compersion": "Compersion",
     "sonder": "Sonder",
@@ -174,26 +173,40 @@ EMOTION_KEYWORDS: Dict[str, str] = {
     "eureka": "Eureka",
     "dissonance": "Cognitive Dissonance",
     "anagnorisis": "Anagnorisis",
-    "wonder": "Awe", "awestruck": "Awe",
-    "curiosity": "Epistemic Curiosity", "curious": "Epistemic Curiosity",
+    "awestruck": "Awe",
+    "curiosity": "Epistemic Curiosity",
     # Everyday positive states (previously falling through to exotic V/A zone)
-    "good": "Serenity", "great": "Joy", "nice": "Serenity",
     "wonderful": "Joy", "fantastic": "Joy", "lovely": "Joy",
     "glad": "Joy", "pleased": "Serenity", "thrilled": "Joy",
     "comfortable": "Serenity",
-    "fine": "Calm", "alright": "Calm", "okay": "Calm",
     "interesting": "Interest", "fascinated": "Interest", "intrigued": "Interest",
     "energized": "Anticipation", "enthusiastic": "Anticipation",
-    "inspired": "Admiration", "moved": "Awe",
+    "inspired": "Admiration",
     # Everyday negative states
-    "awful": "Sadness", "terrible": "Sadness", "horrible": "Sadness",
     "depressed": "Grief", "miserable": "Grief",
     "lonely": "Sadness", "heartbroken": "Grief",
     "frustrated": "Annoyance", "irritated": "Annoyance",
     "worried": "Apprehension", "nervous": "Apprehension", "uneasy": "Apprehension",
     "uncomfortable": "Apprehension",
-    "confused": "Distraction", "lost": "Pensiveness",
+    "confused": "Aporia", "confusing": "Aporia", "puzzled": "Aporia",
     "sorry": "Remorse", "apologetic": "Remorse",
+    # Common emotion words that were missing (unambiguous emotional sense only)
+    "mad": "Anger", "pissed": "Anger", "outraged": "Rage", "livid": "Rage",
+    "hate": "Loathing", "hated": "Loathing", "despise": "Loathing",
+    "annoying": "Annoyance", "irritating": "Annoyance",
+    "disgusting": "Disgust", "revolting": "Disgust",
+    "anxiety": "Apprehension", "anxious": "Apprehension", "dread": "Fear",
+    "panic": "Fear", "panicking": "Fear", "frightened": "Fear", "scary": "Fear",
+    "horrified": "Terror",
+    "disappointed": "Sadness", "disappointing": "Sadness", "upset": "Sadness",
+    "crying": "Sadness", "unhappy": "Sadness", "hopeless": "Grief",
+    "ashamed": "Shame", "embarrassed": "Shame", "humiliated": "Shame",
+    "thank": "Gratitude", "thanks": "Gratitude", "appreciate": "Gratitude",
+    "loved": "Love", "adore": "Love",
+    "delighted": "Joy", "hilarious": "Joy", "lol": "Joy", "haha": "Joy", "lmao": "Joy",
+    "relieved": "Calm", "relaxed": "Calm",
+    "wow": "Surprise", "shocked": "Surprise", "stunned": "Amazement", "astonished": "Amazement",
+    "impressed": "Admiration",
 }
 
 # Negation words that flip valence
@@ -303,21 +316,25 @@ _WARRINER_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
 _W_A_MIN, _W_A_MAX = 1.6, 7.79   # observed arousal range in the norms
 
 
-def _load_warriner() -> Dict[str, Tuple[float, float]]:
+def _load_warriner() -> Tuple[Dict[str, Tuple[float, float]], Dict[str, float]]:
+    """(valence, arousal) per word, plus dominance per word, from the Warriner norms."""
     try:
         with open(_WARRINER_PATH, newline="") as f:
-            out = {}
+            lex, dom = {}, {}
             for row in _csv.DictReader(f):
+                w = row["Word"].lower()
                 v = (float(row["V.Mean.Sum"]) - 5.0) / 4.0                    # 1..9 → -1..+1
                 a = (float(row["A.Mean.Sum"]) - _W_A_MIN) / (_W_A_MAX - _W_A_MIN)  # → 0..1
-                out[row["Word"].lower()] = (max(-1.0, min(1.0, v)), max(0.0, min(1.0, a)))
-            return out
+                d = (float(row["D.Mean.Sum"]) - 5.0) / 4.0                    # 1..9 → -1..+1
+                lex[w] = (max(-1.0, min(1.0, v)), max(0.0, min(1.0, a)))
+                dom[w] = max(-1.0, min(1.0, d))
+            return lex, dom
     except Exception as e:
         print(f"[text_emotion] Warriner lexicon unavailable ({e}); using core lexicon only")
-        return {}
+        return {}, {}
 
 
-EXTENDED_LEXICON: Dict[str, Tuple[float, float]] = _load_warriner()
+EXTENDED_LEXICON, WARRINER_DOMINANCE = _load_warriner()
 
 # Everyday words in the norms carry a mild positivity bias ("go" +0.33,
 # "market" +0.30). Words this close to neutral are skipped so they don't
@@ -359,17 +376,210 @@ def _lemma_candidates(tok: str) -> List[str]:
     return c
 
 
-def _word_score(tok: str) -> Optional[Tuple[float, float]]:
-    """(valence, arousal) for a token, or None if it carries no affect."""
-    if tok in AFFECTIVE_LEXICON:
-        return AFFECTIVE_LEXICON[tok]
+def _word_score(tok: str) -> Optional[Tuple[float, float, float]]:
+    """(valence, arousal, dominance) for a token, or None if it carries no affect.
+
+    Dominance (sense of control: afraid −, angry/proud +) comes from the Warriner
+    norms for every word they rate, core-lexicon words included; 0 if unrated.
+    """
     for cand in _lemma_candidates(tok):
         if cand in AFFECTIVE_LEXICON:
-            return AFFECTIVE_LEXICON[cand]
+            v, a = AFFECTIVE_LEXICON[cand]
+            return (v, a, WARRINER_DOMINANCE.get(cand, 0.0))
         if cand in EXTENDED_LEXICON and cand not in _EXTENDED_EXCLUDE and tok not in _EXTENDED_EXCLUDE:
             v, a = EXTENDED_LEXICON[cand]
-            return (v, a) if _salience(v, a) >= _MIN_EXTENDED_SALIENCE else None
+            if _salience(v, a) < _MIN_EXTENDED_SALIENCE:
+                return None
+            return (v, a, WARRINER_DOMINANCE.get(cand, 0.0))
     return None
+
+
+# ──────────────────────────────────────────────────────────────
+# EMOTION RESOLUTION — one function decides which named feeling a
+# (valence, arousal, dominance) reading is, for the dashboard reading of a
+# message AND for Elan's own felt state, so the two can never disagree.
+# ──────────────────────────────────────────────────────────────
+
+# Evidence prior: a reading built from few / mild words is pulled toward
+# neutral (0, 0.35, 0) in proportion to how little evidence it has. One mildly
+# positive word in a factual sentence is not a feeling.
+_EVIDENCE_PRIOR = 0.5
+_NEUTRAL_A = 0.35
+
+# How much named-emotion keywords count against the dimensional reading (0..1).
+_KEYWORD_WEIGHT = 0.7
+# Width of the soft nearest-emotion kernel in reader space.
+_KERNEL_WIDTH = 0.18
+# Weight of dominance relative to valence/arousal in the distance.
+_DOMINANCE_WEIGHT = 1.0
+
+
+def _build_reference() -> Dict[str, Tuple[float, float, float]]:
+    """Where text expressing each atlas emotion lands in the reader's space.
+
+    The reader measures text on the Warriner scale, so each emotion is placed
+    by the same instrument: valence/arousal are the atlas's own (theory-based)
+    coordinates mapped linearly onto the Warriner scale, and dominance is the
+    Warriner rating of the emotion's name, or of an English stand-in word for
+    emotions English has no single word for.
+    """
+    stand_in = {
+        "Flow": "focus", "Vigilance": "alert", "Eureka": "discovery",
+        "Collective Effervescence": "celebration", "Kama Muta": "tenderness",
+        "Compersion": "happiness", "Ubuntu": "kindness", "Moral Elevation": "inspiration",
+        "Meraki": "passion", "Epistemic Curiosity": "curiosity", "Waldeinsamkeit": "solitude",
+        "Mamihlapinatapai": "anticipation", "Wabi-sabi": "acceptance", "Fernweh": "adventure",
+        "Anagnorisis": "realization", "Schadenfreude": "gloat", "Opia": "intimacy",
+        "Contemplation": "reflection", "Gut Feeling": "intuition", "Sonder": "empathy",
+        "Almost Sneeze": "itch", "Mono no Aware": "bittersweet", "Aporia": "confusion",
+        "Saudade": "nostalgia", "Skin Hunger": "loneliness", "Hiraeth": "homesick",
+        "Pensiveness": "melancholy", "Cognitive Dissonance": "conflict",
+        "Torschlusspanik": "panic", "Sehnsucht": "desire", "Weltschmerz": "despair",
+        "Empathic Distress": "distress", "Frisson": "thrill",
+    }
+    ref = {}
+    for em in EMOTION_MAP.values():
+        v = _ATLAS_TO_READER_V[0] * em.valence + _ATLAS_TO_READER_V[1]
+        a = _ATLAS_TO_READER_A[0] * em.arousal + _ATLAS_TO_READER_A[1]
+        d = WARRINER_DOMINANCE.get(stand_in.get(em.name, em.name.lower()), 0.0)
+        ref[em.name.lower()] = (v, a, d)
+    return ref
+
+
+# Linear maps from atlas coordinates to the Warriner scale, fitted (least
+# squares) on the 33 atlas emotions whose English name is rated in the norms.
+_ATLAS_TO_READER_V = (1.0, 0.0)
+_ATLAS_TO_READER_A = (1.0, 0.0)
+_REFERENCE: Dict[str, Tuple[float, float, float]] = {}
+
+
+def _fit_atlas_to_reader():
+    global _ATLAS_TO_READER_V, _ATLAS_TO_READER_A, _REFERENCE
+    skip = {"flow", "vigilance"}   # rated in a non-emotional sense ("flow" of water)
+    pts = [(em.valence, em.arousal, EXTENDED_LEXICON[em.name.lower()])
+           for em in EMOTION_MAP.values()
+           if em.name.lower() in EXTENDED_LEXICON and em.name.lower() not in skip]
+
+    def fit(xs, ys):
+        n = len(xs); mx = sum(xs) / n; my = sum(ys) / n
+        sxx = sum((x - mx) ** 2 for x in xs)
+        b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx if sxx else 1.0
+        return (b, my - b * mx)
+
+    if len(pts) >= 10:
+        _ATLAS_TO_READER_V = fit([p[0] for p in pts], [p[2][0] for p in pts])
+        _ATLAS_TO_READER_A = fit([p[1] for p in pts], [p[2][1] for p in pts])
+    _REFERENCE = _build_reference()
+
+
+_fit_atlas_to_reader()
+
+
+def resolve_emotion_mix(valence: float, arousal: float, dominance: float = 0.0,
+                        keyword_votes: Optional[Dict[str, float]] = None,
+                        top_n: Optional[int] = 5) -> List[Tuple[EmotionSignature, float]]:
+    """Blend of named emotions for a reading, strongest first; weights sum to 1.
+
+    Dimensional evidence: a soft nearest-neighbour over every atlas emotion's
+    reference point (rare, culturally specific emotions sit 3× further away, so
+    they surface only when the reading is squarely theirs). Categorical evidence:
+    named-emotion keywords that were not negated. The two are mixed by
+    _KEYWORD_WEIGHT when keywords are present.
+    """
+    rare = _RARE_EMOTION_NAMES
+    dim = {}
+    for key, (rv, ra, rd) in _REFERENCE.items():
+        dist2 = (rv - valence) ** 2 + (ra - arousal) ** 2 + _DOMINANCE_WEIGHT * (rd - dominance) ** 2
+        dist = dist2 ** 0.5 * (3.0 if key in rare else 1.0)
+        dim[key] = math.exp(-(dist / _KERNEL_WIDTH) ** 2)
+    zd = sum(dim.values()) or 1.0
+    score = {k: w / zd for k, w in dim.items()}
+
+    if keyword_votes:
+        zk = sum(keyword_votes.values())
+        score = {k: (1 - _KEYWORD_WEIGHT) * w for k, w in score.items()}
+        for name, votes in keyword_votes.items():
+            key = name.lower()
+            if key in score:
+                score[key] += _KEYWORD_WEIGHT * votes / zk
+
+    ranked = sorted(score.items(), key=lambda kv: kv[1], reverse=True)
+    if top_n is not None:
+        ranked = ranked[:top_n]
+    z = sum(w for _, w in ranked) or 1.0
+    return [(EMOTION_MAP[k], w / z) for k, w in ranked]
+
+
+def mix_valence_arousal(distribution: Dict[str, float]) -> Tuple[float, float]:
+    """Valence/arousal of a blend of atlas emotions (weighted mean of their coordinates)."""
+    z = sum(distribution.values())
+    if z <= 0:
+        return 0.0, _NEUTRAL_A
+    v = sum(EMOTION_MAP[k].valence * w for k, w in distribution.items()) / z
+    a = sum(EMOTION_MAP[k].arousal * w for k, w in distribution.items()) / z
+    return v, a
+
+
+# Contextual classifier (optional dependency; see emotion_classifier.py).
+try:
+    from . import emotion_classifier as _classifier
+except Exception:  # pragma: no cover - missing onnxruntime etc.
+    _classifier = None
+
+# Settings below were tuned on a 1,500-sentence random sample of the GoEmotions
+# dev split (Demszky et al., 2020) and checked on its held-out test split and
+# on the dair-ai "emotion" test set.
+
+# Weight of explicit, non-negated emotion keywords against the classifier's
+# distribution (0.3 was best; keywords mainly help fear).
+_CLF_KEYWORD_WEIGHT = 0.3
+# Classifier evidence (share of non-neutral probability) is calibrated to a
+# 0..1 confidence: below 0.4 the text moves nothing; 1.0 is fully emotional.
+_CLF_EVIDENCE_LO, _CLF_EVIDENCE_HI = 0.4, 1.0
+# Below these confidences a text is reported as expressing no particular
+# feeling (balanced neutral/emotional detection on dev: classifier 78%/77%,
+# lexicon 56%/68% — the lexicon is only the fallback).
+NEUTRAL_THRESHOLD = {"classifier": 0.5, "lexicon": 0.6}
+
+
+_MAX_SENTENCES = 12
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _calibrate_evidence(raw: float) -> float:
+    return max(0.0, min(1.0, (raw - _CLF_EVIDENCE_LO) / (_CLF_EVIDENCE_HI - _CLF_EVIDENCE_LO)))
+
+
+def _classify_by_sentence(text: str) -> Optional[Tuple[Dict[str, float], float]]:
+    """Classifier reading of a passage, sentence by sentence.
+
+    Each sentence is classified on its own, so a passage holding several
+    feelings ("a little lonely. But you're here now and that is good.") keeps
+    them all instead of collapsing to one. The passage distribution is the
+    evidence-weighted blend of its sentences; its evidence is that of its most
+    emotional sentence. Returns None if the classifier is unavailable.
+    """
+    sentences = [x.strip() for x in _SENTENCE_SPLIT.split(text) if x and re.search(r"[A-Za-z]", x)]
+    if not sentences:
+        return {}, 0.0
+    sentences = sentences[-_MAX_SENTENCES:]   # bounded cost: a long message is read from its end
+    blend: Dict[str, float] = {}
+    total_w = 0.0
+    best = 0.0
+    for sent in sentences:
+        probs = _classifier.classify(sent)
+        if not probs:
+            return None
+        dist, raw = _classifier.to_atlas(probs)
+        ev = _calibrate_evidence(raw)
+        best = max(best, ev)
+        w = max(ev, 1e-3)          # neutral sentences barely count
+        for k, v in dist.items():
+            blend[k] = blend.get(k, 0.0) + w * v
+        total_w += w
+    if total_w <= 0 or not blend:
+        return {}, 0.0
+    return {k: v / total_w for k, v in blend.items()}, best
 
 
 # ──────────────────────────────────────────────────────────────
@@ -387,14 +597,35 @@ class EmotionalReading:
         dominant_emotion: EmotionSignature,
         emotion_mix: List[Tuple[EmotionSignature, float]],
         keyword_hits: List[str],
+        dominance: float = 0.0,
+        confidence: float = 0.0,
+        keyword_votes: Optional[Dict[str, float]] = None,
+        negated_keywords: Optional[List[str]] = None,
+        distribution: Optional[Dict[str, float]] = None,
+        source: str = "lexicon",
+        lexicon: Optional[Dict[str, float]] = None,
     ):
         self.text = text
         self.valence = max(-1.0, min(1.0, valence))
         self.arousal = max(0.0, min(1.0, arousal))
+        self.dominance = max(-1.0, min(1.0, dominance))
+        # 0 = no affective evidence in the text, → 1 = many strongly charged words
+        self.confidence = max(0.0, min(1.0, confidence))
         self.dominant_emotion = dominant_emotion
         self.emotion_mix = emotion_mix
         self.keyword_hits = keyword_hits
+        self.keyword_votes = keyword_votes or {}
+        self.negated_keywords = negated_keywords or []
+        # full distribution over atlas emotions (lower-case names), sums to 1
+        self.distribution = distribution or {dominant_emotion.name.lower(): 1.0}
+        self.source = source            # "classifier" or "lexicon"
+        self.lexicon = lexicon or {}    # the lexicon's own dimensional reading
         self.performativity = performativity_score(text)
+
+    @property
+    def is_neutral(self) -> bool:
+        """True when the text expresses no particular feeling."""
+        return self.confidence < NEUTRAL_THRESHOLD.get(self.source, 0.5)
 
     @property
     def dominant_frequency_hz(self) -> float:
@@ -417,6 +648,10 @@ class EmotionalReading:
             "valence": round(self.valence, 3),
             "arousal": round(self.arousal, 3),
             "dominant": self.dominant_emotion.name,
+            "label": "Neutral" if self.is_neutral else self.dominant_emotion.name,
+            "neutral": self.is_neutral,
+            "evidence": round(self.confidence, 3),
+            "source": self.source,
             "hex": self.dominant_emotion.hex_color,
             "rgb": list(self.dominant_emotion.rgb),
             "frequency_hz": self.dominant_emotion.solfeggio_hz,
@@ -444,38 +679,35 @@ class EmotionalReading:
         return "\n".join(lines)
 
 
-def analyze_text(text: str) -> EmotionalReading:
+def analyze_text(text: str, context: Optional[str] = None) -> EmotionalReading:
     """
     Analyze a text string and return an EmotionalReading.
     Main entry point for the text → emotion pipeline.
+
+    context: optional surrounding text (e.g. the last sentence or two of a
+    streaming reply) for the classifier, which reads emotion better with
+    context than from a 12-word fragment. The lexicon always reads `text`.
     """
     text_lower = text.lower()
     tokens = re.findall(r"[a-z']+", text_lower)
     # Clause index per token, so negation can't reach across punctuation
     # ("means nothing, stop loss" must not flip "loss").
-    clause_of = [c for c, clause in enumerate(re.split(r"[.,;:!?\u2014\n]+", text_lower))
+    clause_of = [c for c, clause in enumerate(re.split(r"[.,;:!?—\n]+", text_lower))
                  for _ in re.findall(r"[a-z']+", clause)]
 
-    # ── Pass 1: direct emotion keyword matching ──
-    keyword_emotions: Dict[str, float] = {}
-    keyword_hits = []
+    def negated_at(i: int) -> bool:
+        """A negator among the three preceding tokens, in the same clause."""
+        return any(tokens[i - j] in NEGATORS and clause_of[i - j] == clause_of[i]
+                   for j in range(1, 4) if i - j >= 0)
 
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token in EMOTION_KEYWORDS:
-            em_name = EMOTION_KEYWORDS[token]
-            keyword_emotions[em_name] = keyword_emotions.get(em_name, 0) + 1.0
-            keyword_hits.append(token)
-        i += 1
-
-    # ── Pass 2: lexicon valence/arousal with negation + intensifiers ──
-    # Intensifiers ("very", "deeply", "a bit") are not scored themselves: they
-    # scale the next affective word within two tokens. Each scored word is
-    # weighted by recency and by salience, so charged words dominate bland ones.
-    valence_scores = []
-    arousal_scores = []
-    saliences = []
+    # One pass: named-emotion keywords (categorical evidence) and lexicon
+    # valence/arousal/dominance (dimensional evidence), under the same
+    # negation and intensifier rules. Intensifiers ("very", "a bit") are not
+    # scored themselves: they scale the next affective word within two tokens.
+    keyword_votes: Dict[str, float] = {}
+    keyword_hits: List[str] = []
+    negated_keywords: List[str] = []
+    scored: List[Tuple[float, float, float]] = []   # (v, a, d) per affective word
 
     pending_mult, pending_ttl = 1.0, 0
     i = 0
@@ -492,6 +724,18 @@ def analyze_text(text: str) -> EmotionalReading:
             i += 1
             continue
 
+        negated = negated_at(i)
+
+        # A negated emotion word does not cast a vote for that emotion:
+        # "not happy" is not evidence of joy (its valence is flipped below).
+        if token in EMOTION_KEYWORDS:
+            if negated:
+                negated_keywords.append(token)
+            else:
+                em_name = EMOTION_KEYWORDS[token]
+                keyword_votes[em_name] = keyword_votes.get(em_name, 0.0) + 1.0
+                keyword_hits.append(token)
+
         score = _word_score(token)
         if score is None:
             pending_ttl -= 1
@@ -503,72 +747,78 @@ def analyze_text(text: str) -> EmotionalReading:
         multiplier = pending_mult
         pending_mult, pending_ttl = 1.0, 0
 
-        # Check window for negation (3 words back, same clause only)
-        negated = any(tokens[i - j] in NEGATORS and clause_of[i - j] == clause_of[i]
-                      for j in range(1, 4) if i - j >= 0)
-
-        v, a = score
+        v, a, d = score
         if negated:
-            v = -v * 0.7  # negation partially flips valence
+            v = -v * 0.7  # negation partially flips valence ...
+            d = -d * 0.7  # ... and sense of control ("not afraid")
         v = max(-1.0, min(1.0, v * multiplier))
         a = min(1.0, a * max(0.5, multiplier * 0.8))  # arousal also amplified
-        valence_scores.append(v)
-        arousal_scores.append(a)
-        saliences.append(_salience(v, a))
+        scored.append((v, a, d))
         i += 1
 
-    # Aggregate
-    if valence_scores:
-        # Weighted mean: later words weigh slightly more (recency), and charged
-        # words weigh more than mild ones (salience).
-        n = len(valence_scores)
-        weights = [(0.7 + 0.3 * (k / n)) * (0.15 + saliences[k]) for k in range(n)]
-        total_w = sum(weights)
-        valence = sum(v * w for v, w in zip(valence_scores, weights)) / total_w
-        arousal = sum(a * w for a, w in zip(arousal_scores, weights)) / total_w
-    else:
-        valence = 0.0
-        arousal = 0.35  # neutral baseline
+    # Aggregate: weighted mean, later words weigh slightly more (recency) and
+    # charged words more than mild ones (salience). The evidence prior then
+    # pulls weakly-evidenced readings toward neutral.
+    n = len(scored)
+    weights = [(0.7 + 0.3 * (k / n)) * (0.15 + _salience(v, a)) for k, (v, a, _) in enumerate(scored)]
+    total_w = sum(weights)
+    denom = total_w + _EVIDENCE_PRIOR
+    valence = sum(v * w for (v, _, _), w in zip(scored, weights)) / denom
+    arousal = (sum(a * w for (_, a, _), w in zip(scored, weights)) + _EVIDENCE_PRIOR * _NEUTRAL_A) / denom
+    dominance = sum(d * w for (_, _, d), w in zip(scored, weights)) / denom
+    confidence = total_w / denom
 
-    # Clamp
     valence = max(-1.0, min(1.0, valence))
     arousal = max(0.05, min(1.0, arousal))
+    dominance = max(-1.0, min(1.0, dominance))
 
-    # ── Resolve dominant emotion ──
-    # Merge keyword hits with V/A coordinate
-    if keyword_emotions:
-        # Keyword emotions take priority — map each to signature
-        weighted_em: Dict[str, float] = {}
-        for em_name, count in keyword_emotions.items():
-            em = get_emotion(em_name)
-            if em:
-                weighted_em[em.name] = weighted_em.get(em.name, 0) + count
+    lexicon = {"valence": valence, "arousal": arousal, "dominance": dominance,
+               "confidence": confidence}
 
-        # Also add V/A nearest emotions at lower weight
-        va_emotions = emotions_by_valence_arousal(valence, arousal, top_n=3)
-        for i, em in enumerate(va_emotions):
-            w = 0.3 / (i + 1)
-            weighted_em[em.name] = weighted_em.get(em.name, 0) + w
-
-        total = sum(weighted_em.values())
-        ranked = sorted(weighted_em.items(), key=lambda x: x[1], reverse=True)
-        emotion_mix = [(EMOTION_MAP[n.lower()], w/total) for n, w in ranked
-                       if n.lower() in EMOTION_MAP]
-        dominant = emotion_mix[0][0] if emotion_mix else va_emotions[0]
+    # Which emotion: the contextual classifier when it is loaded, otherwise the
+    # lexicon's dimensional + keyword evidence. Either way the result is ONE
+    # distribution over atlas emotions, and the reading's label, mix, valence
+    # and arousal are all derived from it — so they cannot disagree.
+    clf = _classify_by_sentence(context or text) if _classifier else None
+    if clf and clf[0]:
+        dist, evidence = clf
+        if keyword_votes and _CLF_KEYWORD_WEIGHT > 0:
+            zk = sum(keyword_votes.values())
+            dist = {k: (1 - _CLF_KEYWORD_WEIGHT) * w for k, w in dist.items()}
+            for name, votes in keyword_votes.items():
+                dist[name] = dist.get(name, 0.0) + _CLF_KEYWORD_WEIGHT * votes / zk
+        source = "classifier"
     else:
-        va_emotions = emotions_by_valence_arousal(valence, arousal, top_n=5)
-        total_dist = len(va_emotions)
-        emotion_mix = [(em, (total_dist - i) / sum(range(1, total_dist+1)))
-                       for i, em in enumerate(va_emotions)]
-        dominant = va_emotions[0]
+        dist = {em.name: w for em, w in resolve_emotion_mix(valence, arousal, dominance,
+                                                             keyword_votes, top_n=None)}
+        # an explicit emotion word is real evidence, but one incidental "thanks"
+        # should not move him at full strength
+        evidence = max(confidence, 0.6 if keyword_votes else 0.0)
+        source = "lexicon"
 
+    distribution = {k.lower(): w for k, w in dist.items() if w > 0}
+    v_mix, a_mix = mix_valence_arousal(distribution)
+    # Evidence scales how far from neutral the reading sits: a text that
+    # expresses little feeling reads close to (0, rest arousal).
+    valence = max(-1.0, min(1.0, evidence * v_mix))
+    arousal = max(0.05, min(1.0, _NEUTRAL_A + evidence * (a_mix - _NEUTRAL_A)))
+
+    ranked = sorted(distribution.items(), key=lambda kv: kv[1], reverse=True)
+    emotion_mix = [(EMOTION_MAP[k], w) for k, w in ranked[:5]]
     return EmotionalReading(
         text=text,
         valence=valence,
         arousal=arousal,
-        dominant_emotion=dominant,
+        dominant_emotion=emotion_mix[0][0],
         emotion_mix=emotion_mix,
         keyword_hits=keyword_hits,
+        dominance=dominance,
+        confidence=evidence,
+        keyword_votes=keyword_votes,
+        negated_keywords=negated_keywords,
+        distribution=distribution,
+        source=source,
+        lexicon=lexicon,
     )
 
 
