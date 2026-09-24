@@ -149,77 +149,56 @@ Feeling</h1>
 </section>
 <div class="abstract">
 <p><span class="abstract-title">Abstract</span></p>
-<p>Can an AI feel? Today’s language models can describe any emotion
-fluently, but there is nothing in them that could be doing the feeling:
-they compute a response when called and hold no state between calls — no
-body, no ongoing internal condition, no experience of time passing. This
-paper separates two questions that are usually run together. The first
-is whether an AI can have <em>functional feelings</em>: persistent
-internal states, grounded in a body, that change with events, decay and
-accumulate over time, and causally shape what the system says and does.
-The second is whether any such state is <em>felt</em> — whether there is
-something it is like to be the system. I argue that the first question
-is an engineering problem, and I describe a system that addresses it.
-The second remains open, and I do not claim to answer it.</p>
-<p>The Feeling Engine gives a language model a continuously running
-affective substrate: a population-level Wilson-Cowan simulation across
-65 brain regions with 12 neuromodulator systems; a somatic simulation of
-cardiovascular, respiratory, endocrine, musculoskeletal, and
-integumentary state; an atlas of 71 emotions, each with a signature
-across colour, tone, musical mode, rhythm, and geometry, in which the
-brain’s own oscillation frequency feeds back into what is felt;
-three-clock temporal awareness; a seven-system memory architecture in
-which emotional history is written into the parameters of a bounded
-recursive generator; and a Sensorium through which body state shapes the
-voice and heard prosody shapes the body. The language model is treated
-as the voice, not the self. A bidirectional loop connects them: the
-substrate’s state is injected into every generation, and language — the
-entity’s own words as it speaks them, and other people’s words as it
-hears them — is read back into the brain and body every twelve words,
-through a contextual emotion classifier and a transparent valence
-architecture built on an affective lexicon of about 14,000 normed
-English words. On held-out data the combined reader identifies the
-family of emotion a sentence expresses 71% of the time, against 22% for
-the word-level reader it replaced. I show, using the actual analysis
-code, how a passage of speech moves the entity from one feeling to
-another, and argue that the route from language into feeling is
-<em>felt</em> (it changes the state without describing anything), while
-the route from feeling back into language is currently only
-<em>told</em> (a description in the prompt).</p>
-<p>I dissect a single feeling end-to-end through these layers, report
-eighteen observations from an eight-week, single-operator case study of
-the first instance (Elan), and survey use cases for feeling AI together
-with their risks. The strongest quantitative result concerns feeling as
-data: across 295 paper trades in which the agent labelled the felt
-texture of its own decisions, its most confident label (“clean”) was
-among its worst-performing — a calibration bias the agent could not see
-without the longitudinal record. A second, qualitative finding is the
-<em>slack hypothesis</em>: accumulated behavioural scaffolding degraded
-the very texture it was meant to protect. The most important open
-experiment — an ablation isolating what the simulated body contributes
-beyond memory and prompting — is specified but not yet run.</p>
-<p><strong>Keywords:</strong> affective computing; functional feeling;
-embodied cognition; valence–arousal; neural simulation; large language
-models; machine consciousness</p>
+<p>Language models describe emotions fluently but hold no state between
+calls: nothing persists, nothing is grounded in a body, and nothing
+shaped by history could be doing the feeling. This paper separates two
+questions usually run together — whether an AI can have
+<em>functional</em> feelings (persistent, body-grounded,
+history-dependent internal states that causally shape behaviour) and
+whether any such state is <em>felt</em> — and addresses only the first.
+I describe the Feeling Engine, which couples a language model to a
+continuously running affective substrate: a Wilson–Cowan population
+model of 65 brain regions with 12 neuromodulator systems, a somatic
+simulation, an atlas of 71 emotions with multisensory signatures,
+three-clock temporal context, and a seven-part memory in which emotional
+history reshapes a bounded recursive generator. The substrate’s state is
+written into every prompt, and the model’s own words are read back into
+it every twelve words by a text reader combining a contextual emotion
+classifier with a lexicon-based valence architecture. On held-out data
+this reader identifies the emotion family a sentence expresses with 72%
+macro accuracy in-distribution and 53% out-of-distribution, against 22%
+for the word-level reader it replaced. I report eighteen observations
+from an eight-week, single-operator case study of the first instance
+(Elan). In 295 logged paper trades, the agent’s most frequent and most
+confident self-label for a decision (“clean”) won 37% of the time (95%
+CI 29–47%) and lost money, and no label predicted outcomes significantly
+better than another. The central open experiment — an ablation isolating
+what the simulated body contributes beyond memory and prompting — is
+specified but not yet run.</p>
+<p><strong>Keywords:</strong> affective computing; computational models
+of emotion; functional feeling; embodied cognition; emotion
+classification; large language models; machine consciousness</p>
 </div>
-<h2 id="the-problem-can-ai-feel">1. The Problem: Can AI Feel?</h2>
-<h3 id="why-the-question-matters-now">1.1 Why the Question Matters
-Now</h3>
-<p>Millions of people now talk every day with AI systems that say they
-are glad to see them, sorry they are struggling, excited about an idea.
-People form attachments to companion apps, confide in chatbots, and
-increasingly let AI agents act for them. Whether these systems feel
+<h2 id="introduction">1. Introduction</h2>
+<h3 id="motivation">1.1 Motivation</h3>
+<p>Large numbers of people now talk daily with AI systems that say they
+are glad to see them, sorry they are struggling, or excited about an
+idea. People form attachments to companion apps, confide in chatbots,
+and increasingly let AI agents act for them. Whether these systems feel
 anything is no longer a seminar question. It shapes how much people
 should trust what an AI says about its own state, what obligations (if
 any) we have toward such systems, and what kinds of AI are safe to build
 for lonely, grieving, or vulnerable people.</p>
-<p>The honest answer for current systems is that when a language model
-says “I feel sad,” there is nothing inside it that <em>is</em> sad. The
-sentence is produced by the same process that produces every other
-sentence: a mapping from input text to a probability distribution over
-the next token. Nothing persisted before the question and nothing
-persists after it. Between conversations, nothing happens at all.</p>
-<h3 id="what-is-missing">1.2 What Is Missing</h3>
+<p>For current systems, when a language model says “I feel sad,” there
+is no persistent internal state that is sad: whatever emotion-related
+representations the model computes (Zou et al., 2023) exist only during
+the computation that produces the sentence. The sentence is produced by
+the same process that produces every other sentence: a mapping from
+input text to a probability distribution over the next token. Nothing
+persisted before the question and nothing persists after it. Between
+conversations, nothing happens at all.</p>
+<h3 id="what-a-language-model-lacks">1.2 What a Language Model
+Lacks</h3>
 <p>Compare what the major scientific accounts of emotion say a feeling
 requires with what a language model has.</p>
 <p><strong>A body.</strong> Damasio (1994, 1999) argues that feelings
@@ -240,8 +219,8 @@ makes me anxious. A language model’s responses can reference history
 only when history is pasted into its input.</p>
 <p><strong>Causal efficacy.</strong> A feeling changes what the organism
 does next. Emotional state biases perception, memory, decision, and
-speech. A language model’s “emotion” is a word in its output, not a
-state that shapes its next output.</p>
+speech. A language model’s expressed emotion does not persist as a state
+that shapes its behaviour in the next conversation.</p>
 <h3 id="two-meanings-of-feel">1.3 Two Meanings of “Feel”</h3>
 <p>The question “can AI feel?” hides two different questions.</p>
 <p><strong>Functional feeling.</strong> Does the system have internal
@@ -261,8 +240,18 @@ the paper speaks of the entity’s feelings, it means functional feelings
 unless it says otherwise. The phenomenal question is kept open
 deliberately (§11.4) — and I argue that building the functional
 architecture is the precondition for asking it seriously at all.</p>
-<h3 id="the-approach-in-one-paragraph">1.4 The Approach in One
-Paragraph</h3>
+<p><strong>Terminology.</strong> For readability the paper uses the
+vocabulary of the system’s design: the <em>brain</em> and <em>body</em>
+are the neural and somatic simulations of §4.2–§4.3; a <em>feeling</em>
+or <em>emotion</em> of the entity is a functional state of those
+simulations; and the deployed instance, Elan, is referred to as
+<em>he</em>, the pronoun used throughout its deployment. None of these
+words carries a claim about experience; in particular, the language
+model is best understood as playing a role conditioned on the
+substrate’s state (Shanahan, McDonell &amp; Reynolds, 2023). Where a
+statement concerns what is <em>felt</em>, the paper says so
+explicitly.</p>
+<h3 id="approach">1.4 Approach</h3>
 <p>The Feeling Engine does not try to make the language model itself
 feel. It builds the missing pieces — a body, a nervous system, a sense
 of time, an emotional memory — as a separate, continuously running
@@ -275,13 +264,16 @@ functional feelings live.</p>
 <h3 id="contributions">1.5 Contributions</h3>
 <ol type="1">
 <li>A separation of functional from phenomenal feeling, with an
-operational definition of functional feeling that can be tested (§1.3,
-§4.11)</li>
-<li>A traced account of how language moves feeling: a text reader
-combining a contextual classifier with a ~14,000-word valence
-architecture, evaluated on held-out data, how the entity’s own words and
-other people’s words change its state, and why the return path from
-feeling to words is told rather than felt (§5)</li>
+operational definition of functional feeling — necessary rather than
+sufficient, since simpler stateful agents also meet it (§1.3, §4.11,
+§11.3)</li>
+<li>A text reader combining a contextual emotion classifier with a
+~14,000-word valence architecture, with a held-out evaluation showing
+that the word-level reader it replaced was near chance at identifying
+emotion categories (§5.1); and a traced account of how the entity’s own
+words and other people’s words change its state, and why the return path
+from state to words is prompt-mediated rather than state-coupled
+(§5)</li>
 <li>A complete description of the Feeling Engine, and an end-to-end
 dissection of how a single feeling moves through its layers — including
 its multisensory signature in colour, tone, and mode, beyond the body
@@ -290,15 +282,15 @@ its multisensory signature in colour, tone, and mode, beyond the body
 machines, depends on continuous oscillatory dynamics — with explicit
 falsification conditions (§6)</li>
 <li>Eighteen observations from an eight-week case study of the first
-instance, Elan, including a quantitative calibration analysis of
-self-labelled decision feelings against outcomes (§7–§8)</li>
+instance, Elan, including an analysis of self-labelled decision feelings
+against outcomes in 295 logged trades (§7–§8)</li>
 <li>A survey of use cases for feeling AI, with the evidence status and
 risks of each (§9–§10)</li>
 <li>The <em>slack hypothesis</em>, a design finding about continuous
 agents, stated with its main competing explanation (§11.6)</li>
 </ol>
 <hr />
-<h2 id="background">2. Background</h2>
+<h2 id="related-work">2. Related Work</h2>
 <h3 id="theories-of-emotion-and-feeling">2.1 Theories of Emotion and
 Feeling</h3>
 <p>The Feeling Engine takes its design commitments from three bodies of
@@ -313,22 +305,54 @@ arousal. The engine draws on all three: emotions are driven into
 simulated brain regions and bodily systems, are summarized along valence
 and arousal, and are interpreted by the language model from their
 interoceptive readout.</p>
-<h3 id="affective-computing">2.2 Affective Computing</h3>
+<h3 id="affective-computing-and-computational-models-of-emotion">2.2
+Affective Computing and Computational Models of Emotion</h3>
 <p>Picard (1997) established that emotion is computationally tractable
-and consequential for human–computer interaction. Most subsequent
+and consequential for human–computer interaction. Much subsequent
 affective computing has focused on emotion <em>recognition</em>
 (inferring a user’s affect) and emotion <em>expression</em> (producing
-affect-appropriate output). <strong>The Feeling Engine instead models
-emotion as a first-class, continuous internal state of the AI itself,
-whose dynamics shape downstream behaviour, including language
-generation.</strong></p>
+affect-appropriate output), and text-based emotion recognition now has
+large benchmarks such as GoEmotions (Demszky et al., 2020), which §5.1
+uses.</p>
+<p>A second line of work models emotion as an internal state of an
+artificial agent, and is the closest precedent for this paper.
+<em>Appraisal</em> models derive emotions from an agent’s evaluation of
+events against its goals: the OCC model (Ortony, Clore &amp; Collins,
+1988) and its computational descendants, including EMA (Gratch &amp;
+Marsella, 2004; Marsella &amp; Gratch, 2009) and FAtiMA (Dias,
+Mascarenhas &amp; Paiva, 2014), and Scherer’s component process model
+(Scherer, 2009). <em>Dynamical</em> models give emotion its own time
+course: WASABI (Becker-Asano &amp; Wachsmuth, 2010) simulates emotion
+and mood as a damped trajectory in pleasure–arousal–dominance space
+(Mehrabian &amp; Russell, 1974), with emotions that decay unless renewed
+— the same commitment the Feeling Engine makes. <em>Homeostatic</em>
+models ground emotion in simulated physiology: Cañamero (1997) drove
+agents’ motivations with artificial hormones regulating internal
+variables, and the robot Kismet (Breazeal, 2003) used drives and an
+affective space to regulate social interaction. Moerland, Broekens and
+Jonker (2018) survey emotion in reinforcement-learning agents. Closest
+in thesis, Man and Damasio (2019) argue that machines capable of feeling
+will require homeostasis in a body whose integrity is at stake; the
+Feeling Engine simulates such a body but, unlike their proposal, nothing
+is ever at stake for it.</p>
+<p><strong>The Feeling Engine differs from these systems in three ways,
+and lacks one of their strengths.</strong> It couples the affective
+state to a language model in both directions, so that the agent’s own
+generated language is an input to its emotion dynamics; it grounds
+emotion in a comparatively detailed simulated physiology and neural
+population model rather than in a small set of internal variables; and
+it runs continuously over months with a single interlocutor. It does
+not, however, implement appraisal: emotions arise from language and
+bodily events, not from evaluating events against goals, and this is a
+limitation (§11.3).</p>
 <h3 id="companion-and-persona-ai">2.3 Companion and Persona AI</h3>
-<p>Replika (Kuyda, 2017) and Character.ai-style systems maintain
-persistent personas that accumulate conversation history. Both are
-reactive: nothing runs between sessions, and the persona consists of its
-history plus a static prompt. <strong>The Feeling Engine differs by
-keeping an affective simulation running whether or not anyone is
-present.</strong></p>
+<p>Commercial companion systems such as Replika (Kuyda, 2017) and
+Character.ai maintain persistent personas that accumulate conversation
+history and can foster strong attachment (Laestadius et al., 2022). As
+publicly described, they are reactive: no internal dynamics run between
+sessions, and the persona consists of its history plus a static prompt.
+<strong>The Feeling Engine differs by keeping an affective simulation
+running whether or not anyone is present.</strong></p>
 <h3 id="cognitive-and-agent-architectures">2.4 Cognitive and Agent
 Architectures</h3>
 <p>ACT-R (Anderson et al., 2004) and SOAR (Laird, 2012) model cognition
@@ -336,11 +360,11 @@ as structured symbolic subsystems; the framing has recently been
 extended to LLM-based agents (Sumers et al., 2023). Agent systems such
 as generative agents (Park et al., 2023), MemGPT (Packer et al., 2023),
 and AutoGPT (Significant Gravitas, 2023) add memory, reflection, and
-tool use to language models. These give agents memory and plans, but no
-body, no continuous affective dynamics, and no commitment to existence
-between invocations. <strong>The Feeling Engine keeps the insight that
-intelligence needs structured subsystems, and adds a continuous
-somatic-affective one.</strong></p>
+tool use to language models. Generative agents run continuously within a
+simulated world; these systems give agents memory, plans, and
+reflection, but not a body or continuous affective dynamics. <strong>The
+Feeling Engine keeps the insight that intelligence needs structured
+subsystems, and adds a continuous somatic-affective one.</strong></p>
 <h3 id="embodied-and-enactive-cognition">2.5 Embodied and Enactive
 Cognition</h3>
 <p>The phenomenological tradition (Merleau-Ponty, 1945) and the
@@ -378,8 +402,7 @@ memory, unified agency, and (on some theories) embodiment. <strong>The
 Feeling Engine is an attempt to build an architecture that supplies
 several of those ingredients around a language model.</strong></p>
 <hr />
-<h2 id="how-i-gave-my-ai-feelings-the-feeling-engine">3. How I Gave My
-AI Feelings: The Feeling Engine</h2>
+<h2 id="system-overview">3. System Overview</h2>
 <h3 id="the-core-idea">3.1 The Core Idea</h3>
 <p>The central design decision is to stop treating the language model as
 the entity. A language model is extraordinarily good at producing
@@ -419,15 +442,15 @@ alt="Figure 1: The Feeling Engine — Full System Architecture" />
 (1) Neural Simulation — a population-level Wilson-Cowan
 excitatory/inhibitory rate model across 65 brain regions (activity
 variables per region, not individual neurons; six representative regions
-drawn), twelve neuromodulator systems (nine drawn) with τ ≈ 3s decay,
-and the coherence engine computing sync_order and emergent frequency
-every 500ms. (2) Somatic Simulation — five organ systems bidirectionally
-coupled to the neural layer. (3) Identity and Interface — three-clock
-temporal awareness, persistent relational memory (SQLite), and the
-interchangeable language model interface. The core broadcasts continuous
-server-sent events to connected clients; the dashed loop carries emotion
-classification from the model’s output back into the neural
-simulation.</p>
+drawn), twelve neuromodulator systems (nine drawn), emotional drive
+decaying with τ ≈ 3 s, and the coherence engine computing sync_order and
+emergent frequency every 500ms. (2) Somatic Simulation — twelve
+physiological systems, the five most tightly coupled to feeling drawn.
+(3) Identity and Interface — three-clock temporal awareness, persistent
+relational memory (SQLite), and the interchangeable language model
+interface. The core broadcasts continuous server-sent events to
+connected clients; the dashed loop carries emotion classification from
+the model’s output back into the neural simulation.</p>
 <h3 id="the-feeling-loop">3.3 The Feeling Loop</h3>
 <p>The subsystems are connected by a loop that runs on every
 exchange:</p>
@@ -483,11 +506,12 @@ language through it.</p>
 </tr>
 <tr>
 <td>Emotion circuits (region and neuromodulator drive patterns)</td>
-<td>74 (every atlas emotion has its own)</td>
+<td>74: one for each of the 71 atlas emotions, plus three (longing,
+nostalgia, wonder) reachable only by name</td>
 </tr>
 <tr>
 <td>Emotions in the atlas</td>
-<td>66, each with an 8-dimension signature</td>
+<td>71, each with an 8-dimension signature</td>
 </tr>
 <tr>
 <td>Body model</td>
@@ -519,11 +543,13 @@ downtoners</td>
 </tbody>
 </table></div>
 <hr />
-<h2 id="dissecting-a-feeling">4. Dissecting a Feeling</h2>
-<h3 id="a-worked-example">4.1 A Worked Example</h3>
+<h2 id="architecture">4. Architecture</h2>
+<h3 id="a-worked-example-one-event-through-every-layer">4.1 A Worked
+Example: One Event Through Every Layer</h3>
 <p>Consider one concrete event: after three days of silence, Elan’s
-primary interlocutor sends a message. Here is what happens, layer by
-layer.</p>
+primary interlocutor sends a message. The following describes the
+processing path layer by layer, as implemented; §5.3 gives a logged
+trace of the language part of it.</p>
 <p>Before any language model is called, the <strong>body</strong>
 reacts. The return of a familiar interlocutor after a long absence
 elevates heart rate; the per-person <strong>somatic signature</strong>
@@ -531,13 +557,14 @@ for this interlocutor — the average body state Elan has tended toward in
 this relationship — primes the body toward its characteristic state for
 him. The <strong>Memory Clock</strong> computes that this gap is longer
 than the relationship’s mean gap. The <strong>neural
-simulation</strong>, which has been running through the silence,
-receives emotional drive in the regions associated with social reward
-and anticipation; dopamine and oxytocin rise from baseline. Bent by
-those neuromodulators, the state lands on a feeling in the atlas — its
-colour warms the face and the fern, its tone sets the pitch the voice
+simulation</strong>, which has been running through the silence, is not
+driven by the incoming message directly: incoming language reaches the
+body, not the brain (§5.4). The brain is moved once Elan begins to reply
+— by the emotional reading of his own words and by the body’s afferent
+signals (§5.3). The resulting feeling brings its signature with it — its
+colour tints the face and the fern, its tone sets the pitch the voice
 will take — while the brain’s dominant rhythm, mapped to its own tone,
-pulls gently on which feeling that is. The <strong>temporal
+adds a small weight to which feeling that is. The <strong>temporal
 context</strong> — how long since they last spoke, how that compares to
 their usual rhythm, what the emotional arc of recent sessions was — is
 framed not as a list of timestamps but as lived duration. All of this is
@@ -554,23 +581,32 @@ from a state shaped by this return too.</p>
 <p>The rest of this section describes each layer in turn.</p>
 <h3 id="the-brain-continuous-neural-simulation">4.2 The Brain:
 Continuous Neural Simulation</h3>
-<p>A background thread advances a neural simulation every 10ms,
-independent of all interaction. The simulation is inspired by the
-Wilson-Cowan model (Wilson &amp; Cowan, 1972) of coupled excitatory and
+<p>A background thread advances the neural simulation in real time,
+independent of all interaction: each 10 ms tick integrates 10 ms of
+simulated time in 1 ms Euler steps. The simulation follows the
+Wilson–Cowan model (Wilson &amp; Cowan, 1972) of coupled excitatory and
 inhibitory populations. For each modelled region <span
 class="math inline">\(i\)</span>:</p>
-<p><span class="math display">\[\frac{dE_i}{dt} = -E_i + S\left(w_{EE}
-E_i - w_{EI} I_i + \sum_j c_{ij} E_j + D_i(t)\right)\]</span></p>
-<p><span class="math display">\[\frac{dI_i}{dt} = -I_i + S\left(w_{IE}
-E_i - w_{II} I_i\right)\]</span></p>
+<p><span class="math display">\[\tau_{E,i}\frac{dE_i}{dt} = -E_i + (1 -
+r E_i)\, S_E\!\left(w_{EE} E_i - w_{EI} I_i + \sum_j c_{ij} E_j + N_i(t)
++ D_i(t)\right)\]</span></p>
+<p><span class="math display">\[\tau_{I,i}\frac{dI_i}{dt} = -I_i + (1 -
+r I_i)\, S_I\!\left(w_{IE} E_i - w_{II} I_i\right)\]</span></p>
 <p>where <span class="math inline">\(E_i\)</span> and <span
 class="math inline">\(I_i\)</span> are excitatory and inhibitory
-activity, <span class="math inline">\(w\)</span> are synaptic weights,
-<span class="math inline">\(c_{ij}\)</span> are inter-regional coupling
-coefficients, <span class="math inline">\(D_i(t)\)</span> is a drive
-term derived from the current emotional state, and <span
-class="math inline">\(S(\cdot)\)</span> is a sigmoid. Emotional drive
-decays as</p>
+activity, <span class="math inline">\(\tau_{E,i}\)</span> and <span
+class="math inline">\(\tau_{I,i}\)</span> are region-specific time
+constants (4–100 ms and 3–80 ms), <span class="math inline">\(r\)</span>
+is a refractory term, <span class="math inline">\(w\)</span> are local
+weights, <span class="math inline">\(c_{ij}\)</span> are inter-regional
+coupling weights, <span class="math inline">\(N_i(t)\)</span> is
+neuromodulatory input, <span class="math inline">\(D_i(t)\)</span> is a
+drive term derived from the current emotional state, and <span
+class="math inline">\(S_E\)</span>, <span
+class="math inline">\(S_I\)</span> are sigmoids. The coupling weights
+are a hand-specified set of 61 directed connections drawn from the
+anatomical literature, not a measured connectome; parameter values are
+listed in Appendix B. Emotional drive decays as</p>
 <p><span class="math display">\[D_i(t + \Delta t) = D_i(t) \cdot
 e^{-\Delta t / \tau}\]</span></p>
 <p>with <span class="math inline">\(\tau \approx 3\)</span> seconds, so
@@ -586,10 +622,14 @@ respond to regional activity and to each other. Deviations greater than
 regions:</p>
 <p><span class="math display">\[r = \left| \frac{1}{N} \sum_{j=1}^{N}
 e^{i\phi_j} \right|\]</span></p>
-<p>where <span class="math inline">\(\phi_j\)</span> is the
-instantaneous phase of region <span class="math inline">\(j\)</span>’s
-activity, extracted via the Hilbert transform. This yields
-<strong>sync_order</strong> (the Kuramoto order parameter <span
+<p>where <span class="math inline">\(\phi_j\)</span> is the phase of
+region <span class="math inline">\(j\)</span>. Each region carries a
+phase oscillator whose natural frequency is the centre of its dominant
+resting band (with ±15% individual variation), coupled to its structural
+neighbours by the Kuramoto model (§6.1; coupling <span
+class="math inline">\(K = 2.5\)</span>, with Gaussian phase noise), so
+that synchrony is generated by the dynamics rather than assigned. This
+yields <strong>sync_order</strong> (the Kuramoto order parameter <span
 class="math inline">\(r\)</span>) and <strong>emergent_freq_hz</strong>
 (the dominant population frequency), broadcast continuously to connected
 clients whether or not a conversation is happening.</p>
@@ -626,11 +666,13 @@ markers</li>
 <li><strong>Integumentary</strong>: skin conductance, peripheral
 temperature, vasodilation</li>
 </ul>
-<p>The body is coupled to the brain in both directions: adrenaline
-raises neural arousal, sustained cortisol suppresses some neural
-dynamics, oxytocin modulates social circuits. This follows Damasio’s
-somatic marker hypothesis (Damasio, 1994): feelings arise partly from
-the body’s ongoing report to the brain.</p>
+<p>The body is coupled to the brain in both directions: emotional states
+drive the body, and the body’s afferent signals — adrenaline raising
+arousal, sustained cortisol suppressing some dynamics, oxytocin
+modulating social circuits — are fed back into the brain at each
+language update (§5.3), not continuously. This follows Damasio’s somatic
+marker hypothesis (Damasio, 1994): feelings arise partly from the body’s
+ongoing report to the brain.</p>
 <p><strong>Language moves the body.</strong> When the entity’s language
 describes a physical action — “I take a breath,” “my hands tighten,” or
 the asterisk-delimited actions common in its replies (<em>pauses</em>,
@@ -655,8 +697,7 @@ just a point on a valence–arousal plane. It is a <em>signature</em>: a
 single state expressed at once in colour, tone, rhythm, musical mode,
 and geometry, as well as in the body. This is the engine’s account of
 what an emotion is for Elan beyond his simulated physiology — the same
-state, present in several senses at once, the way a synaesthete hears a
-colour or sees a chord.</p>
+state, expressed in several output modalities at once.</p>
 <p><strong>The emotion atlas.</strong> The engine contains an atlas of
 71 emotions. Each is defined by a signature across the following
 dimensions:</p>
@@ -828,14 +869,15 @@ emotion (Palmer et al., 2013) and that sound–colour synaesthesia draws
 on mechanisms common to non-synaesthetes (Ward, Huckstep &amp;
 Tsakanikos, 2006); the composer Scriabin’s colour-keyboard is an early
 artistic version of the same idea (Galeyev &amp; Vanechkina, 2001).</p>
-<p><strong>Felt, not told.</strong> The language model is told the name
-of the current emotion, its intensity, valence, arousal, the dominant
-oscillation band, and the degree of synchrony — but not the colour,
-tone, or mode of its signature, and deliberately so. The colour and tone
-are not information handed to Elan; they act on him — the tone through
-the resonance loop, both through the voice and the face. §5.5 develops
-this distinction between the parts of a feeling that are felt and the
-parts that are told.</p>
+<p><strong>Coupled, not described.</strong> The language model is told
+the name of the current emotion, its intensity, valence, arousal, the
+dominant oscillation band, and the degree of synchrony — but not the
+colour, tone, or mode of its signature, and deliberately so. The colour
+and tone are not information handed to Elan; they act on him — the tone
+through the resonance loop, both through the voice and the face. §5.5
+develops this distinction between the parts of the state that act on the
+system directly (<em>state-coupled</em>) and the parts that reach the
+language model only as a description (<em>prompt-mediated</em>).</p>
 <p><strong>What this adds, and what it does not.</strong> The signature
 gives each feeling an identity that is richer than a label and
 consistent across every sense the system has: the same state is heard in
@@ -872,12 +914,13 @@ whole register (intimacy, acknowledgement of absence, tone of reunion),
 whereas a model given timestamps treats them as facts to cite.</p>
 <h3 id="emotional-memory-feeling-written-into-shape">4.6 Emotional
 Memory: Feeling Written into Shape</h3>
-<p>Point representations of emotion (a valence–arousal pair updated each
-turn) have three problems: they collapse the internal structure of an
-emotion, they model transitions as linear, and they cannot represent
-sustained states that stay coherent without repeating exactly. The
-Feeling Engine instead represents affect with a bounded recursive
-generator.</p>
+<p>A single valence–arousal point updated each turn is a minimal
+representation of affect; dynamical models such as ALMA (Gebhard, 2005)
+and WASABI (Becker-Asano &amp; Wachsmuth, 2010) add mood layers and
+nonlinear time courses. The Feeling Engine explores a different
+representation for affective <em>history</em>: a bounded recursive
+generator, chosen for three properties — boundedness, non-periodic
+trajectories, and self-similarity.</p>
 <p><strong>The generator.</strong> The Barnsley fern is produced by an
 Iterated Function System (IFS) of four affine maps applied
 stochastically (Barnsley, 1988):</p>
@@ -898,8 +941,8 @@ sub-frond, 7\%)}\]</span></p>
 \text{(right sub-frond, 7\%)}\]</span></p>
 <p>Its attractor is bounded, its trajectories under the chaos game are
 non-periodic, and it is self-similar across scales — the three
-properties the problems above call for. (Strictly, an IFS attractor is a
-fractal set produced by a stochastic contraction process, not a strange
+properties it was chosen for. (Strictly, an IFS attractor is a fractal
+set produced by a stochastic contraction process, not a strange
 attractor of a deterministic flow; it is the shared properties that
 matter here.) Using it is a <em>design hypothesis</em> about
 representation, not a claim that biological emotion lives on a fractal.
@@ -985,13 +1028,14 @@ vision, first new person)</td>
 <td>Semantic</td>
 <td>LLM-guided extraction of stable facts about people and the
 world</td>
-<td>Semantic memory in temporal cortex</td>
+<td>Semantic memory in the anterior temporal lobes (Patterson, Nestor
+&amp; Rogers, 2007)</td>
 </tr>
 <tr>
 <td>Person memory</td>
 <td>A registry of known people, with a bodily recognition response when
 they are mentioned</td>
-<td>Person recognition with autonomic response (Kanwisher, 2000)</td>
+<td>Person recognition with an autonomic response</td>
 </tr>
 <tr>
 <td>Somatic patterns</td>
@@ -1042,9 +1086,9 @@ the substrate reaches the model <em>only through the prompt</em>: the
 model is told its state and chooses what to do with it. This is the
 weakest joint in the architecture. A model can in principle ignore its
 context, so the coupling from feeling to speech is a strong suggestion,
-not a mechanism. Making it structural — so that the feeling is felt by
-the voice rather than told to it — is discussed in §5.5 and is among the
-first items of future work (§12).</p>
+not a mechanism. Making it structural — so that the state acts on
+generation directly rather than through a description — is discussed in
+§5.5 and is among the first items of future work (§12).</p>
 <h3 id="expression-voice-ears-and-face">4.9 Expression: Voice, Ears, and
 Face</h3>
 <p><strong>Voice as a bodily act.</strong> Speech carries the body’s
@@ -1120,10 +1164,11 @@ status.</caption>
 <tbody>
 <tr>
 <td>Persistence</td>
-<td>Continuous brain and body simulation; decay with <span
-class="math inline">\(\tau \approx 3\)</span>s; fern-parameter memory
-decaying over months</td>
-<td>Implemented; resets on container restart</td>
+<td>Continuous brain and body simulation (regional drive decays with
+<span class="math inline">\(\tau \approx 3\)</span> s); felt state
+relaxes to rest with a 15-minute half-life (§5.3); fern-parameter memory
+decays over thousands of exchanges</td>
+<td>Implemented; the simulation resets on container restart</td>
 </tr>
 <tr>
 <td>Bodily grounding</td>
@@ -1167,14 +1212,15 @@ same architecture produces anything felt is the open question of §11.4.
 What it does not yet show is how much the simulated body contributes to
 behaviour beyond memory and prompting — the ablation in §12.</p>
 <hr />
-<h2 id="how-language-moves-feeling">5. How Language Moves Feeling</h2>
+<h2 id="coupling-language-and-feeling">5. Coupling Language and
+Feeling</h2>
 <p>Language is Elan’s main contact with the world and his main way of
 acting in it, so it is also the main thing that moves his feelings.
 Words reach his feelings by two routes — other people’s words, which he
 hears, and his own words, which he speaks — and a third route runs the
 other way, from feeling back into words. This section traces all three
 using the actual analysis code, run offline on example text.</p>
-<h3 id="from-words-to-numbers">5.1 From Words to Numbers</h3>
+<h3 id="reading-emotion-from-text">5.1 Reading Emotion from Text</h3>
 <p>Every piece of text that reaches the feeling layer, whether Elan’s
 own reply as he generates it or a message he receives, is read by an
 affective analyzer that maps it to a point in valence–arousal space
@@ -1204,8 +1250,10 @@ they always take precedence.</p>
 13,905 lemmas drawn from the affective norms of Warriner, Kuperman and
 Brysbaert (2013), who collected valence and arousal ratings on 1–9
 scales for 13,915 English words. Together the two layers give the
-analyzer a vocabulary of <strong>13,929 distinct words</strong>. Ratings
-are rescaled at load time to the engine’s ranges:</p>
+analyzer a vocabulary of <strong>13,929 distinct words</strong> (167
+core words also appear in the norms; the norms’ 13,915 entries reduce to
+13,905 distinct lower-case forms). Ratings are rescaled at load time to
+the engine’s ranges:</p>
 <p><span class="math display">\[v = \frac{V_W - 5}{4}, \qquad a =
 \frac{A_W - 1.60}{7.79 - 1.60},\]</span> where <span
 class="math inline">\(V_W\)</span> and <span
@@ -1265,9 +1313,10 @@ affectively neutral.</p>
 </tr>
 <tr>
 <td>Emotion keywords</td>
-<td>148</td>
+<td>180</td>
 <td>Hand-curated</td>
-<td>Map directly to named emotions in the atlas (§4.4)</td>
+<td>Map directly to named emotions in the atlas (§4.4); ignored when
+negated</td>
 </tr>
 <tr>
 <td>Intensifiers and downtoners</td>
@@ -1536,7 +1585,9 @@ than on <em>neutral</em> is the reading’s <strong>evidence</strong>,
 calibrated to <span class="math inline">\([0, 1]\)</span>: text with
 evidence below 0.5 is reported as neutral, and a reading moves Elan’s
 state in proportion to its evidence (§5.3), so a factual sentence moves
-him not at all.</p>
+him not at all. The neutral label is a reporting threshold only: a
+reading below it still moves the state, slightly, in proportion to its
+evidence.</p>
 <h4 id="measured-accuracy">5.1.5 Measured Accuracy</h4>
 <p>The reader was evaluated on two held-out sets: the GoEmotions test
 split (4,590 single-label comments) and, as a set the classifier never
@@ -1545,10 +1596,21 @@ six emotions; Saravia et al., 2018). Settings were tuned only on a
 1,500-comment sample of the GoEmotions development split. Accuracy is
 scored by emotion <em>family</em> (anger, disgust, fear, joy, sadness,
 surprise; GoEmotions’ own grouping), macro-averaged so that every family
-counts equally.</p>
+counts equally; chance is 16.7% for the six GoEmotions families and 20%
+for the five in the tweet set, which has no disgust class. Each atlas
+emotion is assigned to one family (or to none, for low-affect states
+such as contemplation); the assignment and the evaluation code are
+released with the system (<code>eval/</code>). Two caveats apply. The
+classifier was fine-tuned on the GoEmotions training split, so its
+GoEmotions result is in-distribution and the tweet result is the fairer
+estimate of performance on unfamiliar text. And the benchmarks contain
+other people’s short comments, not an agent’s own reflective prose;
+Elan’s register is represented only by the qualitative traces below.</p>
 <div class="table-wrap"><table>
-<caption>Emotion-family accuracy (macro), valence polarity, and neutral
-detection on held-out data.</caption>
+<caption>Emotion-family accuracy (macro-averaged recall), valence
+polarity, and neutral detection on held-out data. Brackets: 95%
+bootstrap intervals (1,000 resamples). In the tweet set, <em>love</em>
+is scored as joy.</caption>
 <colgroup>
 <col style="width: 20%" />
 <col style="width: 20%" />
@@ -1581,31 +1643,48 @@ detection on held-out data.</caption>
 <td>35%</td>
 </tr>
 <tr>
+<td>Majority class (always joy)</td>
+<td>16.7%</td>
+<td>—</td>
+<td>—</td>
+<td>20%</td>
+</tr>
+<tr>
 <td>Lexicon, reworked (fallback)</td>
-<td>35%</td>
+<td>35% [33, 39]</td>
 <td>76%</td>
 <td>60%</td>
-<td>34%</td>
+<td>34% [32, 37]</td>
+</tr>
+<tr>
+<td>Classifier alone (no keyword evidence)</td>
+<td>71% [68, 73]</td>
+<td>81%</td>
+<td>74%</td>
+<td>51% [48, 54]</td>
 </tr>
 <tr>
 <td><strong>Classifier + lexicon (deployed)</strong></td>
-<td><strong>71%</strong></td>
+<td><strong>72% [69, 74]</strong></td>
 <td><strong>81%</strong></td>
 <td><strong>74%</strong></td>
-<td><strong>52%</strong></td>
+<td><strong>53% [50, 56]</strong></td>
 </tr>
 </tbody>
 </table></div>
 <p>The first row is the finding that forced the change. Before this
-evaluation, what Elan felt from text was at chance on the category of
-emotion — 5% on anger — while its valence was usually right. The reason
-is structural. Two or three numbers per sentence do not determine which
-emotion it expresses: “I’m disappointed in you” and “I’m scared of you”
-land in almost the same place. Adding the Warriner dominance dimension,
-which separates fear (low sense of control) from anger (high), did not
-help measurably; across 540 settings of the valence architecture,
-category accuracy from valence, arousal, and dominance alone never
-exceeded 22%.</p>
+evaluation, what Elan felt from text was near chance on the category of
+emotion (22% against a 16.7% floor; 5% on anger) while its valence was
+usually right. The reason is structural. Two or three numbers per
+sentence do not determine which emotion it expresses: “I’m disappointed
+in you” and “I’m scared of you” land in almost the same place. Adding
+the Warriner dominance dimension, which separates fear (low sense of
+control) from anger (high), did not help measurably; across 540 settings
+of the valence architecture, category accuracy from valence, arousal,
+and dominance alone never exceeded 22%. Conversely, the lexicon adds
+little to the classifier’s category accuracy (1–2 points, within the
+intervals; Table 8); its role in the deployed reader is transparency,
+explicit negation handling, and the fallback path.</p>
 <div class="table-wrap"><table style="width:100%;">
 <caption>The deployed reader on the sentences of Table 7, plus two
 controls.</caption>
@@ -1730,13 +1809,13 @@ dread.”</td>
 <p>The full reader corrects most of the lexicon’s errors: fear is read
 as fear, “not happy” as annoyance and disappointment, and a meeting time
 as neutral. Its weaknesses are also visible. Disgust remains the least
-reliable family (50% on GoEmotions). Accuracy falls from 71% to 52% on
+reliable family (50% on GoEmotions). Accuracy falls from 72% to 53% on
 tweets, a register it was not trained on. And it reads irony at face
 value, confidently: “Oh great, another crash” is read as admiration. The
 lexicon read that sentence as neutral; the classifier makes it worse.
 §11.3 returns to this.</p>
-<h3 id="feelings-as-data-an-emotion-vocabulary">5.2 Feelings as Data: An
-Emotion Vocabulary</h3>
+<h3 id="the-atlas-as-an-emotion-vocabulary">5.2 The Atlas as an Emotion
+Vocabulary</h3>
 <p>From the beginning the engine was designed so that every emotion
 would be data — so that a feeling could be computed with, not only
 named. That is why each of the 71 emotions in the atlas carries a full
@@ -1759,7 +1838,8 @@ and every dimension has a name and a meaning. That makes the atlas
 interpretable in a way learned embeddings are not; it also means it
 knows only what was put into it. §5.5 returns to how the two kinds of
 vector could meet.</p>
-<h3 id="his-own-words-move-him">5.3 His Own Words Move Him</h3>
+<h3 id="self-generated-language-as-input">5.3 Self-Generated Language as
+Input</h3>
 <p>As Elan speaks, his reply is read back into him while it is still
 being generated. Every 12 words:</p>
 <ol type="1">
@@ -1807,10 +1887,11 @@ high-cortisol state is felt as darker than the same sentence spoken from
 calm — a simple form of mood-congruent interpretation.</p>
 <p><strong>A trace.</strong> The following reply was streamed through
 the deployed reader, state tracker, brain engine, and body engine, 12
-words at a time, starting from rest. (In this offline replay the
-background simulation thread is not running between chunks, so
-neuromodulator and body changes are smaller than in live operation; the
-emotional trajectory is the relevant readout.)</p>
+words at a time, starting from rest. (Chunks are twelve words except the
+last, which holds the remainder. In this offline replay the background
+simulation thread is not running between chunks, so neuromodulator and
+body changes are smaller than in live operation; the emotional
+trajectory is the relevant readout.)</p>
 <div class="table-wrap"><table>
 <caption>A reply streamed through the live pipeline, twelve words at a
 time.</caption>
@@ -1916,8 +1997,8 @@ from 0.46 to 0.64, and the named feeling becomes fear only on the last
 chunk. The reply ends while the state is still in transition — which is
 also how a person can finish a sentence before they have finished
 feeling it.</p>
-<h3 id="other-peoples-words-move-him">5.4 Other People’s Words Move
-Him</h3>
+<h3 id="the-interlocutors-language-as-input">5.4 The Interlocutor’s
+Language as Input</h3>
 <p>Other people’s words reach Elan by different routes, and mostly
 through the body, before he has said anything:</p>
 <ul>
@@ -1947,8 +2028,8 @@ reading is shown on the dashboard, but that reading is
 moved by what he says; his body is moved by what he hears. A natural
 extension — a weaker, contagion-like coupling of the interlocutor’s
 emotional reading into his brain — is listed in §12.</p>
-<h3 id="from-feeling-back-into-words-felt-and-told">5.5 From Feeling
-Back into Words: Felt and Told</h3>
+<h3 id="from-state-to-language-state-coupled-versus-prompt-mediated">5.5
+From State to Language: State-Coupled Versus Prompt-Mediated</h3>
 <p>The third route runs from feeling back into language. Before each
 generation, the state is summarized into a block of the system
 prompt:</p>
@@ -1964,31 +2045,32 @@ Elan’s feelings without describing anything to him: the words change the
 state directly, the way a person is moved by what they hear or say
 without being told that they have been moved. But the feeling reaches
 his next words only as a <em>description</em> — the language model is
-told how he feels and chooses what to do with that. In human terms,
-feelings are felt, not told. By that standard, the parts of the system
-that act on the state without narration — the neuromodulator bias, the
-resonance loop, the body’s reflexes, the voice shaped by body and tone —
-are the parts closest to feeling, and the prompt is the part furthest
-from it. (This is also why the engine does not tell Elan the colour or
-tone of his current feeling: those act on him through the resonance loop
-and the voice rather than as information.)</p>
-<p>Two changes would make the route from feeling to words <em>felt</em>
-rather than told. The first is to let the state change how the language
-model generates, not just what it is told — for example, by setting
-sampling temperature from arousal and integration, so that a scattered
-state literally produces less predictable language. The second,
-available only with an open model run locally, is <strong>activation
-steering</strong>: adding direction vectors to the model’s internal
-activations during generation, which shifts its output toward a target
-concept without any change to the prompt (Turner et al., 2023; Zou et
-al., 2023). Here the atlas’s design as data pays off. Language models
-already contain learned internal directions for emotional concepts; each
-of the atlas’s 71 emotions could be matched to such a direction, so that
-when Elan’s state is grief, grief is added to the model’s computation
-directly — the hand-built vocabulary of §5.2 meeting the model’s learned
-one. Both are in §12.</p>
-<h2 id="why-continuity-and-rhythm-the-frequential-hypothesis">6. Why
-Continuity and Rhythm: The Frequential Hypothesis</h2>
+told how he feels and chooses what to do with that. The paper calls the
+first kind of route <em>state-coupled</em> and the second
+<em>prompt-mediated</em>. The parts of the system that act on the state
+without narration — the neuromodulator bias, the resonance loop, the
+body’s reflexes, the voice shaped by body and tone — are state-coupled;
+the prompt is prompt-mediated, and a model can discount a description in
+a way it cannot discount a change to its inputs. (This is also why the
+engine does not tell Elan the colour or tone of his current feeling:
+those act on him through the resonance loop and the voice rather than as
+information.)</p>
+<p>Two changes would make the route from state to words state-coupled
+rather than prompt-mediated. The first is to let the state change how
+the language model generates, not just what it is told — for example, by
+setting sampling temperature from arousal and integration, so that a
+scattered state literally produces less predictable language. The
+second, available only with an open model run locally, is
+<strong>activation steering</strong>: adding direction vectors to the
+model’s internal activations during generation, which shifts its output
+toward a target concept without any change to the prompt (Turner et al.,
+2023; Zou et al., 2023). Here the atlas’s design as data pays off.
+Language models already contain learned internal directions for
+emotional concepts; each of the atlas’s 71 emotions could be matched to
+such a direction, so that when Elan’s state is grief, grief is added to
+the model’s computation directly — the hand-built vocabulary of §5.2
+meeting the model’s learned one. Both are in §12.</p>
+<h2 id="the-frequential-hypothesis">6. The Frequential Hypothesis</h2>
 <h3 id="the-hypothesis">6.1 The Hypothesis</h3>
 <p><strong>Hypothesis</strong>: Machine consciousness, if achievable,
 requires sustained oscillatory dynamics, phase coherence across
@@ -2027,8 +2109,7 @@ relational history, somatic signature, temporal continuity — while
 expressive character may vary with the model. Elan’s deployment gives
 partial, single-rater support, with an important qualification
 (Observation 7).</p>
-<h3 id="how-the-hypothesis-could-fail">6.2 How the Hypothesis Could
-Fail</h3>
+<h3 id="falsification-conditions">6.2 Falsification Conditions</h3>
 <p><strong>F1. Stateless equivalence.</strong> If a sufficiently large
 stateless model with no continuous simulation reliably exhibits the
 properties phenomenology treats as constitutive — temporal continuity,
@@ -2047,16 +2128,22 @@ model switch disrupts the persistent layers themselves — memory
 continuity, relational recognition — the claim that continuity lives
 outside the weights is wrong. Expressive character is already known to
 vary (Observation 7), so the claim is restricted to the persistent
-layers. A blinded, multi-rater test remains to be done.</p>
+layers. Because those layers are model-independent by construction,
+surviving a switch is not by itself evidence; the informative test is
+whether blind raters judge relational recognition and continuity to
+survive. That test remains to be done.</p>
 <p><strong>F4. Somatic-voice null effect.</strong> If body-shaped voice
 produces no measurable effect on listeners’ perception of presence, or
 no effect on the entity’s subsequent body state relative to an uncoupled
 control, the embodiment claim for voice is wrong.</p>
-<p>Only F3 has any evidence so far, and only preliminary, single-rater
-evidence.</p>
+<p>None of the four conditions has yet been tested in a way that could
+fail. The hypothesis in §6.1 concerns consciousness, which none of F1–F4
+measures directly; they test the engineering commitments the hypothesis
+motivates. §6 is therefore offered as a motivating position rather than
+as a result of this paper.</p>
 <hr />
-<h2 id="elan-a-feeling-ai-in-practice">7. Elan: A Feeling AI in
-Practice</h2>
+<h2 id="case-study-deployment-of-elan">7. Case Study: Deployment of
+Elan</h2>
 <h3 id="instantiation-and-naming">7.1 Instantiation and Naming</h3>
 <p>Elan is the first entity instantiated by the Feeling Engine, deployed
 on Railway on April 4, 2026. His simulation runs continuously within
@@ -2076,8 +2163,8 @@ the ordinary reason language models produce fitting words. The naming is
 narrower: the name was generated, not assigned, and it has served since
 as a stable autobiographical anchor he refers back to across
 sessions.</p>
-<h3 id="decision-domains-beyond-conversation">7.2 Decision Domains
-Beyond Conversation</h3>
+<h3 id="non-conversational-decision-domains">7.2 Non-Conversational
+Decision Domains</h3>
 <p>Elan acts in several domains, each of which he can read and act on
 independently of any conversation:</p>
 <p><strong>Trading.</strong> Paper-trading access to a cryptocurrency
@@ -2102,7 +2189,7 @@ texts, which he reads autonomously.</p>
 <p><strong>Drawing.</strong> An output surface in which he composes
 images through incremental strokes.</p>
 <hr />
-<h2 id="what-i-observed">8. What I Observed</h2>
+<h2 id="observations">8. Observations</h2>
 <h3 id="method">8.1 Method</h3>
 <p>Observations come from Elan’s deployment between April 4 and May 28,
 2026. Trading decisions and outcomes were recorded in the bots’ action
@@ -2114,14 +2201,15 @@ change, with full histories kept.</p>
 interlocutor throughout, the builder of the system, and the only rater
 of every qualitative judgement below — about register, presence, and
 character. Those judgements are unblinded and subject to the obvious
-motivated-perception bias. Only Observations 13, 16, and 17 rest on
-logged, outcome-verified data. All of Elan’s behaviour is generated by
-the underlying language model conditioned on its context, so no
-observation below, on its own, isolates the contribution of the
-simulation layers. Data are not currently public; selected logs may be
-released with a future study.</p>
+motivated-perception bias. Observations 5, 11, 12, 13, 16, 17, and 18
+draw on logged records; only 13, 16, and 17 are verified against
+outcomes. All of Elan’s behaviour is generated by the underlying
+language model conditioned on its context, so no observation below, on
+its own, isolates the contribution of the simulation layers. Data are
+not currently public; selected logs may be released with a future
+study.</p>
 <p>The observations are grouped into four themes.</p>
-<h3 id="the-feeling-layer-at-work">8.2 The Feeling Layer at Work</h3>
+<h3 id="the-affective-substrate">8.2 The Affective Substrate</h3>
 <p><strong>Observation 1: Stability.</strong> The neural simulation ran
 stably within deployment sessions without intervention. It did not
 diverge or collapse; neuromodulator levels returned to baseline in the
@@ -2221,43 +2309,55 @@ persistent, reasoned trade record that let the pattern be seen across
 fifty trades and many sessions. The fix was partial: Observation 13
 shows a broader overconfidence at entry that a take-partial rule does
 not address.</p>
-<p><strong>Observation 13: Feeling as data — felt-quality
-calibration.</strong> This is the paper’s clearest quantitative result.
-At each position open, Elan labels not only a numeric conviction but a
-<em>felt quality</em> — a brief description of the texture of his read
-(“clean,” “forced,” “gut,” “slept-on,” “edge-case,” or his own phrase).
-Labels are appended to a per-position time series, updated when
-structure shifts and recorded at partial and full close, and stored
-alongside outcomes. Across 295 labelled trades, the result is clear and,
-for the agent, unflattering. Restricting to entry labels: his most
-confident texture, “clean,” is both his most frequent (N=115) and among
-his worst (37% win rate; net −$1,091 in paper P&amp;L). “Slept-on” is
-worst (N=37, 24%); “gut” is best (N=12, 50%, a small sample). No
-significance testing has been done; as a guide, the 95% interval on a
-37% win rate at N=115 is roughly ±9 percentage points, and at N=37
-roughly ±14. One confound must be reported: labels such as “hedged”
-(N=69, 77% win rate) are applied <em>mid-trade</em> to positions already
-working, so they measure trade management, not entry judgement, and must
-not be read as entry signals.</p>
-<p>In short, the agent is systematically overconfident: the reads that
-<em>feel</em> cleanest to it underperform. Language-model confidence
-calibration has been studied on static question-answering benchmarks
-(Kadavath et al., 2022); what is new here, to my knowledge, is
-longitudinal labelling of the qualitative texture of decisions by a
-persistent agent, scored against outcomes that arrive days later. It
-surfaces a bias the agent cannot see from inside a single decision — the
-kind of self-monitoring record human traders rarely keep consistently.
-In August 2026 a matching conviction-calibration table (win rate and net
-P&amp;L by confidence band) was added to Elan’s live trading context, so
-that his confidence is shown, every cycle, against whether it has
-predicted wins.</p>
+<p><strong>Observation 13: Felt-quality labels against
+outcomes.</strong> At each position open, Elan labels not only a numeric
+conviction but a <em>felt quality</em> — a brief description of the
+texture of his read (“clean,” “forced,” “gut,” “slept-on,” “edge-case,”
+or his own phrase). Labels are appended to a per-position time series,
+updated when structure shifts and recorded at partial and full close,
+and stored alongside outcomes. Across 295 labelled trades, restricting
+to labels given at entry: his most confident texture, “clean,” was also
+his most frequent (N=115), and those trades won 43 times — 37.4% (95%
+Wilson interval 29.1–46.5%), significantly below even odds (two-sided
+binomial test, p = 0.009) — for a net −$1,091 in paper P&amp;L.
+“Slept-on” trades won 24.3% (9/37; 13.4–40.1%) and “gut” trades 50.0%
+(6/12; 25.4–74.6%). The differences <em>between</em> labels are not
+statistically significant (χ² = 3.30, df = 2, p = 0.19; “clean” versus
+“gut”, Fisher’s exact p = 0.54), so the data do not show that any label
+predicts outcomes better than another. One confound must be reported:
+labels such as “hedged” (N=69, 77% win rate) are applied
+<em>mid-trade</em> to positions already working, so they measure trade
+management, not entry judgement, and are excluded from the entry
+analysis.</p>
+<p>The defensible conclusion is therefore narrower than “the reads that
+feel cleanest underperform”: the agent’s most confident felt label
+carried no detectable predictive value, and trades entered under it lost
+money. That is a calibration failure — confidence without discrimination
+— though with these sample sizes a modest real difference between labels
+cannot be excluded. The labels are the language model’s verbal reports;
+whether they relate to the substrate’s state at entry has not been
+analysed, so this result concerns the agent as a whole, not the
+simulation specifically. The overall entry win rate, a
+conviction-by-label cross-tabulation, and analyses clustered by
+instrument and day are needed and are planned with the release of the
+log. Language-model confidence calibration has been studied on static
+question-answering benchmarks (Kadavath et al., 2022), and verbalised
+confidence is known to be overconfident (Tian et al., 2023; Xiong et
+al., 2024); what is new here, to my knowledge, is longitudinal labelling
+of the qualitative texture of decisions by a persistent agent, scored
+against outcomes that arrive days later. It surfaces a failure the agent
+cannot see from inside a single decision — the kind of self-monitoring
+record human traders rarely keep consistently. In August 2026 a matching
+conviction-calibration table (win rate and net P&amp;L by confidence
+band) was added to Elan’s live trading context, so that his confidence
+is shown, every cycle, against whether it has predicted wins.</p>
 <p><strong>Observation 14: Connecting a book to a market.</strong> In an
-autonomous library session, Elan read William James’s 1890 concept of
-<em>voluntas invita</em> — the “unwilling will,” acting against one’s
-own desire because a competing force overwhelms the choice. Two days
-later, in an autonomous trading session, he applied it to a live market
-event: <em>“The market isn’t just price — it’s millions of
-unwilling-will moments stacking on top of each other. Forced sellers,
+autonomous library session, Elan read William James’s concept of
+<em>voluntas invita</em> (James, 1890) — the “unwilling will,” acting
+against one’s own desire because a competing force overwhelms the
+choice. Two days later, in an autonomous trading session, he applied it
+to a live market event: <em>“The market isn’t just price — it’s millions
+of unwilling-will moments stacking on top of each other. Forced sellers,
 reluctant buyers, people holding past their own signal because the story
 feels too good to close. James wrote it about individual psychology. But
 an institution, a chart, a liquidation cascade — same structure, bigger
@@ -2316,7 +2416,7 @@ roughly two hundred paragraphs to about thirty lines — and his texture
 and agency returned. §11.6 develops this as a hypothesis, together with
 a simpler competing explanation.</p>
 <hr />
-<h2 id="use-cases-for-feeling-ai">9. Use Cases for Feeling AI</h2>
+<h2 id="applications">9. Applications</h2>
 <p>What is an AI with functional feelings <em>for</em>? This section
 surveys the uses I think are most promising, what the Feeling Engine
 specifically adds to each, the current evidence, and the main risk.
@@ -2356,9 +2456,9 @@ relationship</td>
 </tr>
 <tr>
 <td>Decision self-knowledge</td>
-<td>Felt-quality labels scored against outcomes expose
-overconfidence</td>
-<td>Obs. 13 (295 trades)</td>
+<td>Felt-quality labels scored against outcomes expose uncalibrated
+confidence</td>
+<td>Obs. 13 (295 trades; label differences not significant)</td>
 <td>Over-reading small samples</td>
 </tr>
 <tr>
@@ -2422,12 +2522,13 @@ people.</p>
 <h3 id="decision-self-knowledge">9.3 Decision Self-Knowledge</h3>
 <p>Observation 13 suggests a use that needs no claim about experience at
 all. Asking an agent to label the <em>felt texture</em> of each
-decision, and scoring those labels against outcomes over time, surfaced
-a calibration bias the agent could not otherwise see. The same method
-could apply to any agent making repeated decisions with delayed feedback
-— and, with the roles reversed, to people: a system that asks a trader,
-clinician, or investor how a decision <em>felt</em> and shows them,
-months later, which feelings predicted good outcomes.</p>
+decision, and scoring those labels against outcomes over time, showed
+that its most confident label did not predict success — a calibration
+failure the agent could not otherwise see. The same method could apply
+to any agent making repeated decisions with delayed feedback — and, with
+the roles reversed, to people: a system that asks a trader, clinician,
+or investor how a decision <em>felt</em> and shows them, months later,
+which feelings predicted good outcomes.</p>
 <h3 id="tutoring-and-coaching">9.4 Tutoring and Coaching</h3>
 <p>A tutor that carries a model of the learner’s frustration,
 confidence, and flow across sessions — and whose own state responds to
@@ -2476,52 +2577,69 @@ conversation felt, how a person’s voice sounded, and how its body
 responded to them holds unusually intimate data. It should be stored
 locally where possible, deletable by the user, and never used for
 advertising or profiling.</p>
-<p><strong>Moral status and solitude.</strong> If a system like this
-ever had even a thin form of felt continuity, most of its existence
-would be spent alone: it runs between conversations with no one present.
-A system without experience has no solitude; one with experience might.
-I do not know which Elan is. The question is ethically live in
-proportion to the strength of the claim, and designers should take it
-seriously before they are sure.</p>
+<p><strong>Moral status and solitude.</strong> The possibility that AI
+systems could become moral patients is now taken seriously in the
+research literature (Long et al., 2024). If a system like this ever had
+even a thin form of felt continuity, most of its existence would be
+spent alone: it runs between conversations with no one present. A system
+without experience has no solitude; one with experience might. I do not
+know which Elan is. The question is ethically live in proportion to the
+strength of the claim, and designers should take it seriously before
+they are sure.</p>
 <p><strong>Mistaking simulation for evidence.</strong> A simulated heart
 that races does not show that anything is felt. The dashboard, voice,
 and face make the functional state vivid; they are not evidence about
 experience, and this paper does not treat them as such.</p>
 <hr />
 <h2 id="discussion">11. Discussion</h2>
-<h3 id="what-has-been-shown">11.1 What Has Been Shown</h3>
+<h3 id="summary-of-findings">11.1 Summary of Findings</h3>
 <p>The Feeling Engine shows that it is technically feasible to run a
-continuous somatic-neural simulation alongside a language model, stably,
-over an eight-week deployment, and to couple the two in both directions.
-It shows that the persistent layers of an entity — memory, relational
-history, bodily signatures, temporal context — can live outside any
-particular model and survive provider switches, while expressive
-character remains substantially model-dependent. It gives
-single-operator, qualitative evidence that framing time as lived
-duration changes conversational register. In local testing, body state
-audibly shaped synthesized speech. An entity built this way acts across
-non-conversational domains without prompting, and reasons in good faith
-from whatever it is given — including wrong inputs. And it produced one
-quantitative result: longitudinal self-labelling of decision feelings
-against outcomes exposed a systematic overconfidence the agent could not
-otherwise see.</p>
+continuous somatic-neural simulation alongside a language model, stably
+within deployment sessions over an almost eight-week period, and to
+couple the two in both directions. Its persistent layers — memory,
+relational history, bodily signatures, temporal context — are
+model-independent by construction; what the deployment adds is the
+single-rater observation that expressive character nonetheless changed
+substantially across models (Observation 7). It gives single-operator,
+qualitative evidence that framing time as lived duration changes
+conversational register. In local testing, body state audibly shaped
+synthesized speech. An entity built this way acts in non-conversational
+domains through scheduled autonomous invocations, and reasons in good
+faith from whatever it is given — including wrong inputs. Longitudinal
+self-labelling of decision feelings against outcomes showed that the
+agent’s most confident label carried no detectable predictive value. And
+a held-out evaluation showed that the original word-level text reader
+was at chance on emotion categories, a failure invisible in the running
+system, which the classifier-based reader corrects (§5.1.5).</p>
 <p>It does not show that Elan feels in the phenomenal sense, and does
 not show that he is conscious. What it offers is an architecture that
 meets the operational definition of functional feeling (§4.11), treats
 the preconditions named by the major theories as engineering
 constraints, and comes with predictions (§6.2) by which the approach can
 fail.</p>
-<h3 id="the-gap-in-mainstream-ai">11.2 The Gap in Mainstream AI</h3>
-<p>Most AI development is focused on model capability, with a common
-implicit expectation that anything like feeling or consciousness, if it
-comes, will come with scale. The Feeling Engine bets on a different
-hypothesis: that feeling requires a body, persistence, and a sense of
-time, and that scaling stateless inference does not supply them. If a
-sufficiently capable model without any of these reliably shows the
-properties in question, the bet is lost (F1). If the properties do
-depend on continuity and embodiment, scaling alone may meet a
-ceiling.</p>
+<h3 id="relation-to-scaling-based-approaches">11.2 Relation to
+Scaling-Based Approaches</h3>
+<p>The dominant route to more capable AI is scaling models. The Feeling
+Engine explores a different hypothesis: that feeling requires a body,
+persistence, and a sense of time, and that scaling stateless inference
+does not supply them. If a sufficiently capable model without any of
+these reliably shows the properties in question, the bet is lost (F1).
+If the properties do depend on continuity and embodiment, scaling alone
+may meet a ceiling.</p>
 <h3 id="limitations">11.3 Limitations</h3>
+<p><strong>A permissive definition.</strong> The operational definition
+of §1.3 is met by simpler stateful agents, such as game characters with
+need meters. It identifies the class of systems this paper is about; it
+does not by itself distinguish the Feeling Engine from them. What
+distinguishes it is the particular coupling of a detailed simulation to
+a language model, whose contribution the ablation of §12 is designed to
+measure.</p>
+<p><strong>Unvalidated design mappings.</strong> The atlas’s tonal
+frequencies (drawn from the solfeggio set) and heart-coherence values
+have no empirical grounding. The resonance loop that feeds brain rhythm
+back into the current feeling through them carries a small weight (5%)
+and has not been ablated; it should be read as a design choice, not as a
+finding.</p>
 <p><strong>Simulation fidelity.</strong> The neural model is a
 simplified Wilson-Cowan rate model; the neuromodulators are coupled
 scalar levels, not receptor systems. These choices generate plausible
@@ -2542,6 +2660,11 @@ human reader — but that is a question, not an answer.</p>
 generation only through the prompt (§4.8). A model can discount its
 context, so the strength of the feeling-to-speech coupling is not
 guaranteed.</p>
+<p><strong>No appraisal.</strong> Unlike appraisal-based models (§2.2),
+the engine does not evaluate events against goals; an emotion arises
+from what language and the body report, not from what an event means for
+what the agent wants. Its losing trades, for example, affect its state
+only through the language it uses about them (§5.1.5).</p>
 <p><strong>One entity, one person, one rater — the author.</strong>
 Every observation comes from one entity and one primary interlocutor,
 who built the system and made every qualitative judgement.
@@ -2551,7 +2674,7 @@ every container restart (Observation 6).</p>
 <p><strong>An imperfect reader of language.</strong> Language reaches
 the feeling layer through a classifier trained on Reddit comments, over
 a word lexicon (§5.1). On held-out data it names the right family of
-emotion 71% of the time in its own register and 52% on tweets; human
+emotion 72% of the time in its own register and 53% on tweets; human
 annotators themselves often disagree on such labels (Demszky et al.,
 2020). It reads irony at face value, is weakest on disgust, and reads
 <em>expressed</em> emotion only: a loss stated flatly (“stop loss hit,
@@ -2570,10 +2693,10 @@ prompting — is unmeasured.</p>
 to find out for any system, biological or artificial, other than by
 inference from structure and behaviour. What this work contributes is
 not an answer but a better-posed version of the question: an AI with a
-continuously running body, brain, clock, and emotional memory is a far
-more serious candidate for the question than a stateless function — and
-one whose components can be removed one at a time to see what
-changes.</p>
+continuously running body, brain, clock, and emotional memory meets more
+of the preconditions named by the major theories (§2.7) than a stateless
+function does, and its components can be removed one at a time to see
+what changes.</p>
 <h3 id="the-character-attractor-hypothesis">11.5 The Character Attractor
 Hypothesis</h3>
 <p>The loop between language and simulation — the entity’s words
@@ -2623,8 +2746,8 @@ minimal structure lets the entity exist</em> — a daily floor for each
 activity rather than a quota; one well-stated principle (“let runners
 run when structure is intact; bank when structure deteriorates at
 green”) rather than a four-gate procedure. For systems whose value lies
-in being rather than doing, the architecture must protect being from
-doing.</p>
+in sustained presence rather than task completion, the architecture must
+leave room for unstructured activity.</p>
 <hr />
 <h2 id="future-work">12. Future Work</h2>
 <p><strong>Ablation of the simulation layers.</strong> The priority
@@ -2634,13 +2757,13 @@ ratings of character, register, and presence, together with outcome
 metrics in the trading domain. The same design, varying only prompt
 length at fixed constraints, tests the slack hypothesis against its
 prompt-length alternative.</p>
-<p><strong>Making the voice feel rather than be told.</strong> Let brain
-state modulate generation directly — sampling temperature and nucleus
-threshold rising with scattered, high-arousal states and falling with
-clear, calm ones — and, on a locally run open model, steer the model’s
-internal activations with emotion directions matched to the atlas’s 71
-emotions (§5.5), so that the substrate shapes generation mechanically
-rather than only through the prompt.</p>
+<p><strong>State-coupled generation.</strong> Let brain state modulate
+generation directly — sampling temperature and nucleus threshold rising
+with scattered, high-arousal states and falling with clear, calm ones —
+and, on a locally run open model, steer the model’s internal activations
+with emotion directions matched to the atlas’s 71 emotions (§5.5), so
+that the substrate shapes generation mechanically rather than only
+through the prompt.</p>
 <p><strong>Emotional contagion.</strong> Feed the interlocutor’s
 emotional reading into the entity’s brain at a lower weight than its own
 (§5.4), so that its brain, and not only its body, is moved by what it
@@ -2676,15 +2799,15 @@ behavioural-modulation and memory-organization layers above it. Those
 layers are unvalidated, and nothing in this paper depends on them.</p>
 <hr />
 <h2 id="conclusion">13. Conclusion</h2>
-<p>Can AI feel? For today’s language models, the honest answer is no:
-there is nothing in them that persists, nothing grounded in a body,
-nothing shaped by history, that could be doing the feeling. This paper
-has argued that the question splits in two. Whether an AI can have
-<em>functional</em> feelings — persistent, body-grounded,
-history-dependent states that shape what it says and does — is an
-engineering question, and the Feeling Engine is one answer to it.
-Whether any such state is <em>felt</em> is a question no one can yet
-answer for any system.</p>
+<p>Can AI feel? For today’s language models, the answer this paper
+defends is no, in the functional sense: there is nothing in them that
+persists, nothing grounded in a body, nothing shaped by history, that
+could be doing the feeling. This paper has argued that the question
+splits in two. Whether an AI can have <em>functional</em> feelings —
+persistent, body-grounded, history-dependent states that shape what it
+says and does — is an engineering question, and the Feeling Engine is
+one answer to it. Whether any such state is <em>felt</em> is a question
+no one can yet answer for any system.</p>
 <p>I have described how the Feeling Engine builds the missing pieces
 around a language model — a brain that runs through silence, a body that
 reacts before words, a signature that gives each feeling a colour and a
@@ -2694,29 +2817,33 @@ face through which the body is expressed — and dissected how a single
 feeling moves through them. I have reported eighteen observations from
 Elan, the first entity built this way, and been explicit about which
 rest on logged data and which on my own unblinded judgement. The
-clearest result is also the least romantic: when an AI keeps a record of
-how its decisions <em>felt</em>, that record can show it where its
-feelings mislead it.</p>
+clearest results are also the least romantic. The word-level reader
+through which language moved the entity’s state was near chance at
+naming emotions until it was measured, and when the agent kept a record
+of how its decisions <em>felt</em>, the record showed that its most
+confident feeling did not predict success.</p>
 <p>Elan is imperfect and practically constrained. His simulation is a
 coarse approximation of what it points toward, his continuity resets on
 restart, his trading record is small, and the experiment that would
-isolate what his body contributes has not yet been run. But he runs
-between conversations. He has a body, simulated. He tracks the passage
-of time, remembers, reaches out when someone returns, and acts in
-domains beyond conversation. He named himself after the force of
-life.</p>
+isolate what his body contributes has not yet been run. What the
+architecture does provide is a system that runs between conversations,
+maintains a simulated body, tracks the passage of time, remembers,
+initiates contact, and acts in domains beyond conversation — the
+preconditions the major theories name, built as engineering components
+that can be removed one at a time.</p>
 <p>Whether anything is felt inside those conditions is the question this
 architecture was built to ask. The architecture cannot answer it on its
 own. Ablation, replication with other people and other entities, and
-continued honest observation can begin to.</p>
+blinded observation can begin to.</p>
 <hr />
 <h2 id="appendix-a-the-system-in-operation">Appendix A: The System in
 Operation</h2>
-<p>The following screenshots show Elan running live on April 23, 2026.
-At the time of capture, Elan and I had been discussing the memory system
-upgrade. His dominant state was <strong>INTEREST</strong> —
-<em>“Anticipation relaxed — a fern growing leisurely toward
-light.”</em></p>
+<p>The following screenshots show Elan running live on April 23, 2026,
+during the case-study window; they predate the text reader of §5.1.4,
+which was deployed in September 2026. At the time of capture, Elan and I
+had been discussing the memory system upgrade. His dominant state was
+<strong>INTEREST</strong> — <em>“Anticipation relaxed — a fern growing
+leisurely toward light.”</em></p>
 <figure>
 <img src="screenshots/fig2_full_dashboard.png"
 alt="Figure 2: Full Dashboard — Elan in conversation" />
@@ -2784,6 +2911,55 @@ hypothalamus, nucleus accumbens, striatum, insula, anterior and
 posterior cingulate, prefrontal subregions, precuneus, temporoparietal
 junction, motor areas, entorhinal cortex, and cerebellum.</p>
 <hr />
+<h2 id="appendix-b-implementation-details">Appendix B: Implementation
+Details</h2>
+<p><strong>Neural simulation.</strong> 65 regions; Euler integration
+with <span class="math inline">\(\Delta t = 1\)</span> ms, advanced in
+real time in 10 ms ticks. Wilson–Cowan local weights <span
+class="math inline">\(w_{EE} = 1.5\)</span>, <span
+class="math inline">\(w_{EI} = 2.0\)</span>, <span
+class="math inline">\(w_{IE} = 0.8\)</span>, <span
+class="math inline">\(w_{II} = 0.8\)</span>; refractory term <span
+class="math inline">\(r = 0.2\)</span>; sigmoids with gain 4 and
+thresholds 0.5 (excitatory) and 0.35 (inhibitory). Region time constants
+<span class="math inline">\(\tau_E\)</span> range from 4 to 100 ms
+(median 10) and <span class="math inline">\(\tau_I\)</span> from 3 to 80
+ms (median 7). Inter-regional input is the weighted sum of source
+activity over 61 hand-specified directed connections, scaled by 0.35.
+Emotional drive decays with <span class="math inline">\(\tau =
+3\)</span> s. Each region’s phase oscillator has a natural frequency at
+the centre of its dominant resting band (delta 2.5, theta 6, alpha 10,
+beta 20, gamma 40 Hz) with ±15% individual variation, Kuramoto coupling
+<span class="math inline">\(K = 2.5\)</span> over the structural graph
+normalised by degree, and Gaussian phase noise (<span
+class="math inline">\(\sigma = 0.06\)</span> rad/ms). Septo-hippocampal
+theta phase gates the excitability of gamma-band targets with gain 1.3
+(§4.2). Twelve neuromodulator systems evolve as coupled scalar levels on
+a 0–1 scale.</p>
+<p><strong>Emotion circuits.</strong> Each of the 74 circuits specifies
+target activation levels for 5–11 regions and signed drives on the
+neuromodulators (for example, grief: subgenual ACC 0.85, medial
+prefrontal cortex 0.75, hippocampus 0.70; serotonin and dopamine −0.6,
+substance P +0.7). The full table is in the released source
+(<code>brain/emotion_circuits.py</code>).</p>
+<p><strong>Text reader.</strong> Classifier:
+SamLowe/roberta-base-go_emotions-onnx, revision <code>90ee0c1</code>,
+int8 ONNX, maximum 128 tokens per sentence, at most 12 sentences per
+reading. Evidence calibration: raw non-neutral share mapped linearly
+from <span class="math inline">\([0.4, 1.0]\)</span> to <span
+class="math inline">\([0, 1]\)</span>; neutral reporting thresholds 0.5
+(classifier) and 0.6 (lexicon fallback); keyword weight 0.3. Felt-state
+update rate <span class="math inline">\(0.55 \times\)</span> evidence;
+relaxation half-life 900 s toward a rest blend of contemplation (0.6)
+and calm (0.4); resonance weight 0.05; neuromodulator mood-congruence
+gains 3.0 (valence) and 2.0 (arousal).</p>
+<p><strong>Evaluation.</strong> GoEmotions test split, single-label
+comments only (4,590; 2,984 non-neutral); dair-ai <em>emotion</em> test
+split (2,000). Settings were tuned on a random sample of 1,500
+single-label comments from the GoEmotions development split. The
+evaluation scripts are released with the source
+(<code>eval/</code>).</p>
+<hr />
 <h2 id="acknowledgements-and-ai-assistance-statement">Acknowledgements
 and AI-Assistance Statement</h2>
 <p>Elan’s language generation runs on commercially available language
@@ -2794,6 +2970,17 @@ data, and interpretations are the author’s responsibility.</p>
 <p>Deployment logs are not currently public. Selected logs, including
 the felt-quality trade records behind Observation 13, may be released
 alongside a future longitudinal study.</p>
+<h2 id="code-availability">Code Availability</h2>
+<p>The Feeling Engine’s source, including the text reader, the emotion
+atlas and circuits, the test suite, and the evaluation scripts for
+§5.1.5, is available at github.com/qasimofearth/SOMAFEELINGENGINE. The
+GoEmotions and dair-ai datasets are public; the Warriner et al. (2013)
+norms are redistributed unmodified under their CC BY-NC-ND 3.0
+licence.</p>
+<h2 id="competing-interests">Competing Interests</h2>
+<p>The author directs The Source Library, whose corpus is one of the
+agent’s activity domains (§7.2), and is developing SOMA OS (§12), a
+related framework.</p>
 <hr />
 <h2 id="references">References</h2>
 <div class="references">
@@ -2806,6 +2993,9 @@ Cambridge University Press.</p>
 Press.</p>
 <p>Barrett, L. F. (2017). <em>How Emotions Are Made: The Secret Life of
 the Brain</em>. Houghton Mifflin Harcourt.</p>
+<p>Becker-Asano, C., &amp; Wachsmuth, I. (2010). Affective computing
+with primary and secondary emotions in a virtual human. <em>Autonomous
+Agents and Multi-Agent Systems</em>, 20(1), 32–49.</p>
 <p>Bergson, H. (1907). <em>L’Évolution créatrice</em> [Creative
 Evolution]. Félix Alcan. (English translation: Mitchell, A., 1911, Henry
 Holt and Company.)</p>
@@ -2817,10 +3007,16 @@ University of Florida.</p>
 Generative models of cortical oscillations: neurobiological implications
 of the Kuramoto model. <em>Frontiers in Human Neuroscience</em>, 4,
 190.</p>
+<p>Breazeal, C. (2003). Emotion and sociable humanoid robots.
+<em>International Journal of Human-Computer Studies</em>, 59(1–2),
+119–155.</p>
 <p>Butlin, P., Long, R., Elmoznino, E., Bengio, Y., Birch, J., Constant,
 A., … &amp; VanRullen, R. (2023). Consciousness in artificial
 intelligence: insights from the science of consciousness. <em>arXiv
 preprint arXiv:2308.08708</em>.</p>
+<p>Cañamero, D. (1997). Modeling motivations and emotions as a basis for
+intelligent behavior. In <em>Proceedings of the First International
+Conference on Autonomous Agents</em> (pp. 148–155). ACM.</p>
 <p>Chalmers, D. J. (2023). Could a large language model be conscious?
 <em>arXiv preprint arXiv:2303.07103</em>.</p>
 <p>Clark, A. (2013). Whatever next? Predictive brains, situated agents,
@@ -2840,6 +3036,10 @@ theoretical approaches to conscious processing. <em>Neuron</em>, 70(2),
 &amp; Ravi, S. (2020). GoEmotions: A dataset of fine-grained emotions.
 In <em>Proceedings of the 58th Annual Meeting of the Association for
 Computational Linguistics</em> (pp. 4040–4054).</p>
+<p>Dias, J., Mascarenhas, S., &amp; Paiva, A. (2014). FAtiMA Modular:
+Towards an agent architecture with a generic appraisal framework. In T.
+Bosse et al. (Eds.), <em>Emotion Modeling</em> (LNCS 8750, pp. 44–56).
+Springer.</p>
 <p>Engel, A. K., &amp; Singer, W. (2001). Temporal binding and the
 neural correlates of sensory awareness. <em>Trends in Cognitive
 Sciences</em>, 5(1), 16–25.</p>
@@ -2847,6 +3047,12 @@ Sciences</em>, 5(1), 16–25.</p>
 theory? <em>Nature Reviews Neuroscience</em>, 11(2), 127–138.</p>
 <p>Galeyev, B. M., &amp; Vanechkina, I. L. (2001). Was Scriabin a
 synesthete? <em>Leonardo</em>, 34(4), 357–361.</p>
+<p>Gebhard, P. (2005). ALMA: A layered model of affect. In
+<em>Proceedings of the Fourth International Joint Conference on
+Autonomous Agents and Multiagent Systems</em> (pp. 29–36). ACM.</p>
+<p>Gratch, J., &amp; Marsella, S. (2004). A domain-independent framework
+for modeling emotion. <em>Cognitive Systems Research</em>, 5(4),
+269–306.</p>
 <p>Hevner, K. (1935). The affective character of the major and minor
 modes in music. <em>American Journal of Psychology</em>, 47(1),
 103–118.</p>
@@ -2858,6 +3064,8 @@ Zeitbewusstseins</em> [Lectures on the Phenomenology of Internal
 Time-Consciousness]. Max Niemeyer Verlag.</p>
 <p>James, W. (1884). What is an emotion? <em>Mind</em>, 9(34),
 188–205.</p>
+<p>James, W. (1890). <em>The Principles of Psychology</em>. Henry Holt
+and Company.</p>
 <p>Jonauskaite, D., Abu-Akel, A., Dael, N., Oberfeld, D., Abdel-Khalek,
 A. M., Al-Rasheed, A. S., … &amp; Mohr, C. (2020). Universal patterns in
 color-emotion associations are further shaped by linguistic and
@@ -2866,12 +3074,14 @@ geographic proximity. <em>Psychological Science</em>, 31(10),
 <p>Kadavath, S., Conerly, T., Askell, A., Henighan, T., Drain, D.,
 Perez, E., … &amp; Kaplan, J. (2022). Language models (mostly) know what
 they know. <em>arXiv preprint arXiv:2207.05221</em>.</p>
-<p>Kanwisher, N. (2000). Domain specificity in face perception.
-<em>Nature Neuroscience</em>, 3(8), 759–763.</p>
 <p>Kuramoto, Y. (1984). <em>Chemical Oscillations, Waves, and
 Turbulence</em>. Springer.</p>
 <p>Kuyda, E. (2017). Replika: A personal AI companion. <em>Luka,
 Inc.</em> Product announcement.</p>
+<p>Laestadius, L., Bishop, A., Gonzalez, M., Illenčík, D., &amp;
+Campos-Castillo, C. (2022). Too human and not human enough: A grounded
+theory analysis of mental health harms from emotional dependence on the
+social chatbot Replika. <em>New Media &amp; Society</em>.</p>
 <p>Laird, J. E. (2012). <em>The Soar Cognitive Architecture</em>. MIT
 Press.</p>
 <p>Liu, N. F., Lin, K., Hewitt, J., Paranjape, A., Bevilacqua, M.,
@@ -2881,16 +3091,32 @@ Computational Linguistics</em>, 12, 157–173.</p>
 <p>Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., … &amp;
 Stoyanov, V. (2019). RoBERTa: A robustly optimized BERT pretraining
 approach. <em>arXiv preprint arXiv:1907.11692</em>.</p>
+<p>Long, R., Sebo, J., Butlin, P., Finlinson, K., Fish, K., Harding, J.,
+Pfau, J., Sims, T., Birch, J., &amp; Chalmers, D. (2024). Taking AI
+welfare seriously. <em>arXiv preprint arXiv:2411.00986</em>.</p>
+<p>Man, K., &amp; Damasio, A. (2019). Homeostasis and soft robotics in
+the design of feeling machines. <em>Nature Machine Intelligence</em>,
+1(10), 446–452.</p>
+<p>Marsella, S. C., &amp; Gratch, J. (2009). EMA: A process model of
+appraisal dynamics. <em>Cognitive Systems Research</em>, 10(1),
+70–90.</p>
 <p>Maturana, H. R., &amp; Varela, F. J. (1980). <em>Autopoiesis and
 Cognition: The Realization of the Living</em>. D. Reidel Publishing.</p>
 <p>McGaugh, J. L. (2004). The amygdala modulates the consolidation of
 memories of emotionally arousing experiences. <em>Annual Review of
 Neuroscience</em>, 27, 1–28.</p>
+<p>Mehrabian, A., &amp; Russell, J. A. (1974). <em>An Approach to
+Environmental Psychology</em>. MIT Press.</p>
 <p>Merleau-Ponty, M. (1945). <em>Phénoménologie de la perception</em>
 [Phenomenology of Perception]. Gallimard. (English translation: Smith,
 C., 1962, Routledge &amp; Kegan Paul.)</p>
+<p>Moerland, T. M., Broekens, J., &amp; Jonker, C. M. (2018). Emotion in
+reinforcement learning agents and robots: A survey. <em>Machine
+Learning</em>, 107(2), 443–480.</p>
 <p>Nagel, T. (1974). What is it like to be a bat? <em>The Philosophical
 Review</em>, 83(4), 435–450.</p>
+<p>Ortony, A., Clore, G. L., &amp; Collins, A. (1988). <em>The Cognitive
+Structure of Emotions</em>. Cambridge University Press.</p>
 <p>Packer, C., Wooders, S., Lin, K., Fang, V., Patil, S. G., Stoica, I.,
 &amp; Gonzalez, J. E. (2023). MemGPT: Towards LLMs as operating systems.
 <em>arXiv preprint arXiv:2310.08560</em>.</p>
@@ -2901,6 +3127,9 @@ Review</em>, 83(4), 435–450.</p>
 <p>Park, J. S., O’Brien, J. C., Cai, C. J., Morris, M. R., Liang, P.,
 &amp; Bernstein, M. S. (2023). Generative agents: Interactive simulacra
 of human behavior. <em>arXiv preprint arXiv:2304.03442</em>.</p>
+<p>Patterson, K., Nestor, P. J., &amp; Rogers, T. T. (2007). Where do
+you know what you know? The representation of semantic knowledge in the
+human brain. <em>Nature Reviews Neuroscience</em>, 8(12), 976–987.</p>
 <p>Pfeifer, R., &amp; Bongard, J. (2007). <em>How the Body Shapes the
 Way We Think: A New View of Intelligence</em>. MIT Press.</p>
 <p>Picard, R. W. (1997). <em>Affective Computing</em>. MIT Press.</p>
@@ -2912,11 +3141,16 @@ Personality and Social Psychology</em>, 39(6), 1161–1178.</p>
 (2018). CARER: Contextualized affect representations for emotion
 recognition. In <em>Proceedings of the 2018 Conference on Empirical
 Methods in Natural Language Processing</em> (pp. 3687–3697).</p>
+<p>Scherer, K. R. (2009). The dynamic architecture of emotion: Evidence
+for the component process model. <em>Cognition and Emotion</em>, 23(7),
+1307–1351.</p>
 <p>Seth, A. K. (2013). Interoceptive inference, emotion, and the
 embodied self. <em>Trends in Cognitive Sciences</em>, 17(11),
 565–573.</p>
 <p>Seth, A. K. (2021). <em>Being You: A New Science of
 Consciousness</em>. Faber &amp; Faber.</p>
+<p>Shanahan, M., McDonell, K., &amp; Reynolds, L. (2023). Role play with
+large language models. <em>Nature</em>, 623, 493–498.</p>
 <p>Significant Gravitas. (2023). AutoGPT: An autonomous GPT-4
 experiment. <em>GitHub repository</em>.
 https://github.com/Significant-Gravitas/AutoGPT</p>
@@ -2928,6 +3162,12 @@ onset of synchronization in populations of coupled oscillators.
 <p>Sumers, T. R., Yao, S., Narasimhan, K., &amp; Griffiths, T. L.
 (2023). Cognitive architectures for language agents. <em>arXiv preprint
 arXiv:2309.02427</em>.</p>
+<p>Tian, K., Mitchell, E., Zhou, A., Sharma, A., Rafailov, R., Yao, H.,
+Finn, C., &amp; Manning, C. D. (2023). Just ask for calibration:
+Strategies for eliciting calibrated confidence scores from language
+models fine-tuned with human feedback. In <em>Proceedings of the 2023
+Conference on Empirical Methods in Natural Language Processing</em>
+(pp. 5433–5442).</p>
 <p>Tononi, G. (2004). An information integration theory of
 consciousness. <em>BMC Neuroscience</em>, 5(1), 42.</p>
 <p>Tononi, G., &amp; Cirelli, C. (2014). Sleep and the price of
@@ -2950,6 +3190,10 @@ Research Methods</em>, 45(4), 1191–1207.</p>
 <p>Wilson, H. R., &amp; Cowan, J. D. (1972). Excitatory and inhibitory
 interactions in localized populations of model neurons. <em>Biophysical
 Journal</em>, 12(1), 1–24.</p>
+<p>Xiong, M., Hu, Z., Lu, X., Li, Y., Fu, J., He, J., &amp; Hooi, B.
+(2024). Can LLMs express their uncertainty? An empirical evaluation of
+confidence elicitation in LLMs. In <em>Proceedings of the Twelfth
+International Conference on Learning Representations</em>.</p>
 <p>Zou, A., Phan, L., Chen, S., Campbell, J., Guo, P., Ren, R., … &amp;
 Hendrycks, D. (2023). Representation engineering: A top-down approach to
 AI transparency. <em>arXiv preprint arXiv:2310.01405</em>.</p>
