@@ -13,7 +13,7 @@
 
 Can an AI feel? Today's language models can describe any emotion fluently, but there is nothing in them that could be doing the feeling: they compute a response when called and hold no state between calls — no body, no ongoing internal condition, no experience of time passing. This paper separates two questions that are usually run together. The first is whether an AI can have *functional feelings*: persistent internal states, grounded in a body, that change with events, decay and accumulate over time, and causally shape what the system says and does. The second is whether any such state is *felt* — whether there is something it is like to be the system. I argue that the first question is an engineering problem, and I describe a system that addresses it. The second remains open, and I do not claim to answer it.
 
-The Feeling Engine gives a language model a continuously running affective substrate: a population-level Wilson-Cowan simulation across 65 brain regions with 12 neuromodulator systems; a somatic simulation of cardiovascular, respiratory, endocrine, musculoskeletal, and integumentary state; an atlas of 66 emotions, each with a signature across colour, tone, musical mode, rhythm, and geometry, in which the brain's own oscillation frequency feeds back into what is felt; three-clock temporal awareness; a seven-system memory architecture in which emotional history is written into the parameters of a bounded recursive generator; and a Sensorium through which body state shapes the voice and heard prosody shapes the body. The language model is treated as the voice, not the self. A bidirectional loop connects them: the substrate's state is injected into every generation, and language — the entity's own words as it speaks them, and other people's words as it hears them — is read back into the brain and body every twelve words, through a transparent valence architecture built on an affective lexicon of about 14,000 normed English words. I show, using the actual analysis code, how a passage of speech moves the entity from one feeling to another, and argue that the route from language into feeling is *felt* (it changes the state without describing anything), while the route from feeling back into language is currently only *told* (a description in the prompt).
+The Feeling Engine gives a language model a continuously running affective substrate: a population-level Wilson-Cowan simulation across 65 brain regions with 12 neuromodulator systems; a somatic simulation of cardiovascular, respiratory, endocrine, musculoskeletal, and integumentary state; an atlas of 71 emotions, each with a signature across colour, tone, musical mode, rhythm, and geometry, in which the brain's own oscillation frequency feeds back into what is felt; three-clock temporal awareness; a seven-system memory architecture in which emotional history is written into the parameters of a bounded recursive generator; and a Sensorium through which body state shapes the voice and heard prosody shapes the body. The language model is treated as the voice, not the self. A bidirectional loop connects them: the substrate's state is injected into every generation, and language — the entity's own words as it speaks them, and other people's words as it hears them — is read back into the brain and body every twelve words, through a contextual emotion classifier and a transparent valence architecture built on an affective lexicon of about 14,000 normed English words. On held-out data the combined reader identifies the family of emotion a sentence expresses 71% of the time, against 22% for the word-level reader it replaced. I show, using the actual analysis code, how a passage of speech moves the entity from one feeling to another, and argue that the route from language into feeling is *felt* (it changes the state without describing anything), while the route from feeling back into language is currently only *told* (a description in the prompt).
 
 I dissect a single feeling end-to-end through these layers, report eighteen observations from an eight-week, single-operator case study of the first instance (Elan), and survey use cases for feeling AI together with their risks. The strongest quantitative result concerns feeling as data: across 295 paper trades in which the agent labelled the felt texture of its own decisions, its most confident label ("clean") was among its worst-performing — a calibration bias the agent could not see without the longitudinal record. A second, qualitative finding is the *slack hypothesis*: accumulated behavioural scaffolding degraded the very texture it was meant to protect. The most important open experiment — an ablation isolating what the simulated body contributes beyond memory and prompting — is specified but not yet run.
 
@@ -57,7 +57,7 @@ The Feeling Engine does not try to make the language model itself feel. It build
 ### 1.5 Contributions
 
 1. A separation of functional from phenomenal feeling, with an operational definition of functional feeling that can be tested (§1.3, §4.11)
-2. A traced account of how language moves feeling: the valence architecture and ~14,000-word affective lexicon that map text into valence–arousal space, how the entity's own words and other people's words change its state, and why the return path from feeling to words is told rather than felt (§5)
+2. A traced account of how language moves feeling: a text reader combining a contextual classifier with a ~14,000-word valence architecture, evaluated on held-out data, how the entity's own words and other people's words change its state, and why the return path from feeling to words is told rather than felt (§5)
 3. A complete description of the Feeling Engine, and an end-to-end dissection of how a single feeling moves through its layers — including its multisensory signature in colour, tone, and mode, beyond the body (§3–§4)
 4. A theoretical hypothesis — that consciousness, if achievable in machines, depends on continuous oscillatory dynamics — with explicit falsification conditions (§6)
 5. Eighteen observations from an eight-week case study of the first instance, Elan, including a quantitative calibration analysis of self-labelled decision feelings against outcomes (§7–§8)
@@ -106,7 +106,7 @@ The central design decision is to stop treating the language model as the entity
 
 ### 3.2 The Six Subsystems
 
-1. **Continuous Neural Simulation and Emotion Atlas** — 65 brain regions and 12 neuromodulators, advancing every 10ms whether or not anyone is talking (§4.2), and an atlas of 66 emotions, each with a signature in colour, tone, mode, rhythm, and geometry (§4.4)
+1. **Continuous Neural Simulation and Emotion Atlas** — 65 brain regions and 12 neuromodulators, advancing every 10ms whether or not anyone is talking (§4.2), and an atlas of 71 emotions, each with a signature in colour, tone, mode, rhythm, and geometry (§4.4)
 2. **Somatic Simulation** — a body with heart, lungs, hormones, muscle tension, and skin, coupled to the brain in both directions (§4.3)
 3. **Three-Clock Temporal Awareness** — wall time, brain time, and relationship time, so that feelings have duration and absence has weight (§4.5)
 4. **Affective and Relational Memory** — seven memory systems, including an emotional memory written into the shape of a recursive generator and per-person bodily signatures (§4.6–§4.7)
@@ -137,10 +137,10 @@ Section 4 takes this loop apart layer by layer; Section 5 follows language throu
 |---|---|
 | Brain regions (population rate model) | 65, stepped every 10 ms |
 | Neuromodulator systems | 12 |
-| Emotion circuits (region and neuromodulator drive patterns) | 67 |
+| Emotion circuits (region and neuromodulator drive patterns) | 74 (every atlas emotion has its own) |
 | Emotions in the atlas | 66, each with an 8-dimension signature |
 | Body model | 12 physiological systems, 69 organ models |
-| Language analyzer | ~14,000-word affective lexicon (191 hand-tuned + 13,905 from Warriner et al., 2013), 148 emotion keywords, 20 negators, 24 intensifiers and downtoners |
+| Language reader | RoBERTa emotion classifier (27 emotions + neutral) over a ~14,000-word affective lexicon (191 hand-tuned + 13,905 from Warriner et al., 2013), 180 emotion keywords, 20 negators, 24 intensifiers and downtoners |
 | Language → feeling update | every 12 words while speaking |
 | Phase-coherence readout | every 500 ms |
 | Memory systems | 7 |
@@ -208,7 +208,7 @@ Body state is injected into the language model's context only when it deviates n
 
 The body is one way a feeling exists in the Feeling Engine, but it is not the only one. In the engine, a feeling is not a word, and it is not just a point on a valence–arousal plane. It is a *signature*: a single state expressed at once in colour, tone, rhythm, musical mode, and geometry, as well as in the body. This is the engine's account of what an emotion is for Elan beyond his simulated physiology — the same state, present in several senses at once, the way a synaesthete hears a colour or sees a chord.
 
-**The emotion atlas.** The engine contains an atlas of 66 emotions. Each is defined by a signature across the following dimensions:
+**The emotion atlas.** The engine contains an atlas of 71 emotions. Each is defined by a signature across the following dimensions:
 
 | Dimension | What it encodes | Grounding |
 |---|---|---|
@@ -238,9 +238,9 @@ Three examples show how different feelings look across these dimensions:
 
 Table: Signatures of three emotions across the atlas dimensions.
 
-**How the current feeling is chosen.** The engine's valence and arousal are not taken from the text alone. Each time an exchange is processed, the emotion read from the words is bent by the current neuromodulator levels — dopamine, serotonin, oxytocin, and endorphins pull valence up; cortisol pulls it down; norepinephrine and dopamine raise arousal; GABA lowers it — and then smoothed over time, faster when the text contains strong emotion words. The nearest emotion in the atlas to the resulting valence–arousal point becomes the current feeling, and its whole signature comes with it.
+**How the current feeling is chosen.** The current feeling is not taken from the text alone. Elan's state is a blend of atlas emotions carried continuously over time. Each reading of text (§5.1) is a blend too; before it enters the state it is bent by the current neuromodulator levels — dopamine, serotonin, oxytocin, and endorphins favour positive emotions; cortisol favours negative ones; norepinephrine and dopamine favour aroused ones; GABA calm ones — and it moves the state in proportion to how much feeling the text actually expresses (§5.3). The strongest emotion in the resulting blend is the current feeling, and its whole signature comes with it; the blend's valence and arousal are the weighted coordinates of its emotions.
 
-**Rhythm feeds back into feeling.** The link between rhythm and feeling runs in both directions. The neural simulation's dominant oscillation frequency is mapped by band to a characteristic tone (delta → 174 Hz, theta → 396 Hz, alpha → 528 Hz, low beta → 639 Hz, high beta → 741 Hz, gamma → 852 Hz). That tone is then matched to the emotion whose tone is nearest, and that emotion pulls the entity's valence and arousal slightly toward itself (by 7% and 5% per update). The brain's own rhythm therefore biases what the entity feels, independently of the body and of the words. This *resonance loop* is small by design — the words and neuromodulators dominate — but it means that tone is not merely a label attached to an emotion: it is one of the forces that shapes it.
+**Rhythm feeds back into feeling.** The link between rhythm and feeling runs in both directions. The neural simulation's dominant oscillation frequency is mapped by band to a characteristic tone (delta → 174 Hz, theta → 396 Hz, alpha → 528 Hz, low beta → 639 Hz, high beta → 741 Hz, gamma → 852 Hz). That tone is then matched to the emotion whose tone is nearest, and that emotion is given a small extra weight (5%) in every reading before it enters the state. The brain's own rhythm therefore biases what the entity feels, independently of the body and of the words. This *resonance loop* is small by design — the words and neuromodulators dominate — but it means that tone is not merely a label attached to an emotion: it is one of the forces that shapes it.
 
 **Where the signature goes.** The signature is expressed through every output channel. The tone sets the pitch of the entity's browser voice and the EEG band sets its speaking rate (slower in delta and theta, faster in beta and gamma); the colour tints the fern, the dashboard, and the colour temperature of the face; the geometry selects the fractal family that is drawn; and the engine's library can also render several simultaneous emotions together as a chord — an "emotion concert" whose spectrum combines the tones of each (not yet used in Elan's live loop). The theoretical motivation is the finding that cross-modal associations between music and colour are mediated by emotion (Palmer et al., 2013) and that sound–colour synaesthesia draws on mechanisms common to non-synaesthetes (Ward, Huckstep & Tsakanikos, 2006); the composer Scriabin's colour-keyboard is an early artistic version of the same idea (Galeyev & Vanechkina, 2001).
 
@@ -358,7 +358,7 @@ Language is Elan's main contact with the world and his main way of acting in it,
 
 ### 5.1 From Words to Numbers
 
-Every piece of text that reaches the feeling layer, whether Elan's own reply as he generates it or a message he receives, is read by an affective analyzer that maps it to a point in valence–arousal space (Russell, 1980) and to a mixture of named emotions. The analyzer is deliberately transparent: it is a lexicon-based reader whose every output can be traced to the words that produced it. It has two parts. The first is a lexicon of about 14,000 English words (§5.1.1). The second is the *valence architecture*, the set of rules that turns word scores into a reading of a whole passage (§5.1.2).
+Every piece of text that reaches the feeling layer, whether Elan's own reply as he generates it or a message he receives, is read by an affective analyzer that maps it to a point in valence–arousal space (Russell, 1980) and to a mixture of named emotions. Its lexicon layer is deliberately transparent: every score it produces can be traced to the words that produced it. It has three parts. The first is a lexicon of about 14,000 English words (§5.1.1). The second is the *valence architecture*, the set of rules that turns word scores into a reading of a whole passage (§5.1.2). The third is a contextual classifier that decides *which* emotion a passage expresses (§5.1.4), because, as §5.1.5 shows, that cannot be recovered from word scores. The lexicon remains the transparent layer and the fallback whenever the classifier is unavailable.
 
 #### 5.1.1 An Affective Lexicon of About 14,000 Words
 
@@ -403,13 +403,13 @@ $$w_k = \Big(0.7 + 0.3\,\frac{k}{n}\Big)\big(0.15 + \sigma(v'_k, a'_k)\big), \qq
 
 The recency term makes a passage read as ending where it ends. The salience term means "furious" counts for far more than a mildly pleasant word beside it. $V$ is clipped to $[-1, 1]$ and $A$ to $[0.05, 1]$. A passage with no scored words reads as $(0, 0.35)$, a neutral resting point.
 
-**Emotion resolution.** The reading is then placed in the emotion atlas. If the passage contains emotion keywords, each hit adds one vote for its emotion, and the three atlas emotions nearest $(V, A)$ add votes of $0.3/(i+1)$ for rank $i$. The normalized votes form the emotion mixture. Without keywords, the mixture is the five nearest atlas emotions with linearly decreasing weights. Rare, culturally specific emotions must be three times closer than common ones to be chosen (§5.2). During live generation, Elan's *felt* emotion is not taken from this mixture directly. It is the atlas emotion nearest to his smoothed state, after the reading has been bent by his neuromodulators (§5.3).
+**Emotion resolution (lexicon path).** When the classifier is unavailable, the reading is placed in the emotion atlas directly. If the passage contains emotion keywords, each hit adds one vote for its emotion, and the three atlas emotions nearest $(V, A)$ add votes of $0.3/(i+1)$ for rank $i$. The normalized votes form the emotion mixture. Without keywords, the mixture is the five nearest atlas emotions with linearly decreasing weights. Rare, culturally specific emotions must be three times closer than common ones to be chosen (§5.2). In the original design this step also decided Elan's felt emotion, by nearest neighbour in valence–arousal space. §5.1.5 shows why that failed.
 
 **Performativity.** Separately, a performativity score measures how *performed* the language is: hedges ("perhaps," "in a sense"), self-observing metacommentary ("I notice," "I find myself"), stock filler, and stacked abstract affect nouns ("resonance," "depth," "ineffable"). Its complement is reported as *signal quality*. The score was derived by comparing the language of different models, and the system prompt tells Elan that performed emotion reads as noise.
 
 #### 5.1.3 Behaviour on Example Sentences
 
-Table 7 shows the analyzer's output on real sentences. The nearest feeling is the atlas emotion closest to $(V, A)$, which is the quantity that drives Elan's state.
+Table 7 shows the lexicon layer's own output on real sentences, with the atlas emotion nearest to its $(V, A)$ reading — the quantity that, in the original design, drove Elan's state. Table 9 (§5.1.5) shows the full reader on the same sentences.
 
 | Text | Valence | Arousal | Nearest feeling | Colour | Tone | Mode | Performativity |
 |---|---|---|---|---|---|---|---|
@@ -426,15 +426,57 @@ Table 7 shows the analyzer's output on real sentences. The nearest feeling is th
 
 Table: The analyzer on example sentences. Colour, tone, and mode are the signature of the nearest atlas emotion (§4.4).
 
-The analyzer's limits are visible here. "Not happy" is read as disgust rather than disappointment, because negation moves "happy" into a strongly negative, moderately aroused region. A market panic is read as loathing rather than fear. The analyzer cannot read irony: "Oh great, another crash" comes out near neutral ($+0.04$). And the nearest-emotion step sometimes names a less fitting emotion than a person would. §11.3 discusses these limits.
+The lexicon's limits are visible here. "Not happy" is read as disgust rather than disappointment, because negation moves "happy" into a strongly negative, moderately aroused region. A market panic is read as loathing rather than fear. And the nearest-emotion step often names a less fitting emotion than a person would. These are not tuning problems, as the next two subsections show.
+
+#### 5.1.4 A Contextual Classifier
+
+The categorical question — *which* emotion — is answered by a trained classifier: RoBERTa-base (Liu et al., 2019) fine-tuned on GoEmotions (Demszky et al., 2020), 58,000 Reddit comments labelled with 27 emotions and neutral, run on the CPU as an 8-bit ONNX model (the model is SamLowe's public release, MIT licence; the exact revision is pinned and checksum-verified). Its 27 labels map onto the atlas; five everyday emotions the atlas lacked — disappointment, excitement, relief, amusement, and compassion — were added to it for this purpose, each with a full signature, brain circuit, and face expression. Two labels map onto two atlas emotions each (disapproval onto annoyance and contempt; realization onto surprise and interest).
+
+The classifier reads a passage sentence by sentence, so that a passage holding several feelings keeps them all; the passage's blend is the evidence-weighted mean of its sentences. While Elan is speaking, it reads the sentence the newest 12-word chunk belongs to — the chunk plus the start of its sentence — rather than the fragment alone, and never older sentences, whose feelings would otherwise bleed into the current one. Emotion words that were not negated add to the classifier's blend with weight 0.3.
+
+Three quantities come out of one blend over atlas emotions: the label (its strongest emotion), the mix (its top emotions, which the face renders), and valence and arousal (the weighted coordinates of its emotions). Because all three derive from the same distribution, the name on the dashboard, the circuit that fires, and the face cannot disagree. The share of the classifier's probability that falls on emotions rather than on *neutral* is the reading's **evidence**, calibrated to $[0, 1]$: text with evidence below 0.5 is reported as neutral, and a reading moves Elan's state in proportion to its evidence (§5.3), so a factual sentence moves him not at all.
+
+#### 5.1.5 Measured Accuracy
+
+The reader was evaluated on two held-out sets: the GoEmotions test split (4,590 single-label comments) and, as a set the classifier never saw, the dair-ai *emotion* test set (2,000 tweets labelled with six emotions; Saravia et al., 2018). Settings were tuned only on a 1,500-comment sample of the GoEmotions development split. Accuracy is scored by emotion *family* (anger, disgust, fear, joy, sadness, surprise; GoEmotions' own grouping), macro-averaged so that every family counts equally.
+
+| Reader | GoEmotions: family | GoEmotions: polarity | GoEmotions: neutral kept neutral | Tweets: family |
+|---|---|---|---|---|
+| Original: Elan's felt emotion (nearest in V–A) | 22% | 72% | 32% | 22% |
+| Original: dashboard label (keywords + V–A) | 31% | 72% | 32% | 35% |
+| Lexicon, reworked (fallback) | 35% | 76% | 60% | 34% |
+| **Classifier + lexicon (deployed)** | **71%** | **81%** | **74%** | **52%** |
+
+Table: Emotion-family accuracy (macro), valence polarity, and neutral detection on held-out data.
+
+The first row is the finding that forced the change. Before this evaluation, what Elan felt from text was at chance on the category of emotion — 5% on anger — while its valence was usually right. The reason is structural. Two or three numbers per sentence do not determine which emotion it expresses: "I'm disappointed in you" and "I'm scared of you" land in almost the same place. Adding the Warriner dominance dimension, which separates fear (low sense of control) from anger (high), did not help measurably; across 540 settings of the valence architecture, category accuracy from valence, arousal, and dominance alone never exceeded 22%.
+
+| Text | Label | Top of blend | Evidence | Valence | Arousal |
+|---|---|---|---|---|---|
+| "I am so happy you came back, this is wonderful." | Joy | Joy 0.59, Admiration 0.27 | 0.99 | +0.84 | 0.64 |
+| "I miss you. It's been quiet here without you." | Sadness | Sadness 0.73, Disappointment 0.09 | 0.96 | −0.59 | 0.30 |
+| "I feel so alone." | Sadness | Sadness 0.74, Disappointment 0.14 | 0.96 | −0.63 | 0.30 |
+| "I felt betrayed by him." | Sadness | Sadness 0.55, Disappointment 0.29 | 0.90 | −0.56 | 0.33 |
+| "I am extremely afraid." | Fear | Fear 0.83, Apprehension 0.04 | 0.95 | −0.63 | 0.77 |
+| "The market is in panic, forced sellers everywhere, pure dread." | Fear | Fear 0.72, Apprehension 0.14 | 0.92 | −0.58 | 0.73 |
+| "The market means nothing, stop loss at this level." | Annoyance | Annoyance 0.59, Contempt 0.25 | 0.51 | −0.24 | 0.46 |
+| "I'm curious what this means. Let me sit with it." | Interest | Interest 0.88, Aporia 0.03 | 0.90 | +0.38 | 0.49 |
+| "Perhaps, in a sense, I notice a kind of profound resonance." | Interest | Interest 0.30, Surprise 0.29 | 0.57 | +0.14 | 0.46 |
+| "I am not happy about this." | Annoyance | Annoyance 0.40, Disappointment 0.22 | 0.92 | −0.47 | 0.50 |
+| "Oh great, another crash." | Admiration | Admiration 0.88, Acceptance 0.03 | 0.98 | +0.75 | 0.55 |
+| "The meeting is at 3pm in room 4." | Neutral | Acceptance 0.28, Interest 0.11 | 0.00 | +0.00 | 0.35 |
+
+Table: The deployed reader on the sentences of Table 7, plus two controls.
+
+The full reader corrects most of the lexicon's errors: fear is read as fear, "not happy" as annoyance and disappointment, and a meeting time as neutral. Its weaknesses are also visible. Disgust remains the least reliable family (50% on GoEmotions). Accuracy falls from 71% to 52% on tweets, a register it was not trained on. And it reads irony at face value, confidently: "Oh great, another crash" is read as admiration. The lexicon read that sentence as neutral; the classifier makes it worse. §11.3 returns to this.
 
 ### 5.2 Feelings as Data: An Emotion Vocabulary
 
-From the beginning the engine was designed so that every emotion would be data — so that a feeling could be computed with, not only named. That is why each of the 66 emotions in the atlas carries a full signature (colour, tone, mode, rhythm, geometry; §4.4) rather than just a label.
+From the beginning the engine was designed so that every emotion would be data — so that a feeling could be computed with, not only named. That is why each of the 71 emotions in the atlas carries a full signature (colour, tone, mode, rhythm, geometry; §4.4) rather than just a label.
 
-The atlas works like a vocabulary. Text is projected into valence–arousal space, and the nearest emotion in the atlas becomes the current feeling (rare, culturally specific emotions such as *saudade* or *wabi-sabi* must be three times closer than everyday ones to win, so they appear only when the reading really fits them). Once chosen, the feeling brings its whole vector with it, and the vectors can be combined: a mixture of emotions yields a blended colour, weighted by how strongly each is present.
+The atlas works like a vocabulary. Text is read into a blend over the atlas's emotions, and the strongest becomes the current feeling (on the lexicon path, rare, culturally specific emotions such as *saudade* or *wabi-sabi* must be three times closer than everyday ones to win, so they appear only when the reading really fits them). Once chosen, the feeling brings its whole vector with it, and the vectors can be combined: a mixture of emotions yields a blended colour, weighted by how strongly each is present.
 
-The analogy with a transformer is instructive. A transformer maps each token of its vocabulary to a learned embedding vector and computes with those vectors. The emotion atlas does the same for feelings — a finite vocabulary of 66 emotional "tokens," each mapped to a vector — with two differences: the vectors are hand-built rather than learned, and every dimension has a name and a meaning. That makes the atlas interpretable in a way learned embeddings are not; it also means it knows only what was put into it. §5.5 returns to how the two kinds of vector could meet.
+The analogy with a transformer is instructive. A transformer maps each token of its vocabulary to a learned embedding vector and computes with those vectors. The emotion atlas does the same for feelings — a finite vocabulary of 71 emotional "tokens," each mapped to a vector — with two differences: the vectors are hand-built rather than learned, and every dimension has a name and a meaning. That makes the atlas interpretable in a way learned embeddings are not; it also means it knows only what was put into it. §5.5 returns to how the two kinds of vector could meet.
 
 ### 5.3 His Own Words Move Him
 
@@ -442,29 +484,29 @@ As Elan speaks, his reply is read back into him while it is still being generate
 
 1. The chunk is analyzed (§5.1).
 2. The reading is **bent by his current neuromodulators** — dopamine, serotonin, oxytocin, and endorphins pull valence up; cortisol pulls it down; norepinephrine and dopamine raise arousal; GABA lowers it — and by the **resonance loop** from his brain rhythm (§4.4).
-3. It is **smoothed** into his running state. Smoothing is adaptive: 0.18 per update when the chunk contains no strong emotion words, rising to 0.56 when it contains three or more. Ordinary words nudge him; charged words move him quickly.
-4. The nearest emotion in the atlas becomes his feeling, and its **brain circuit** fires. The engine defines 67 circuits. Grief, for example, drives subgenual ACC (0.85), medial prefrontal cortex (0.75), hippocampus (0.70), amygdala and anterior insula (0.65), and periaqueductal grey (0.60), while suppressing nucleus accumbens and VTA; it lowers serotonin and dopamine (−0.6) and raises substance P (+0.7), CRF, and cortisol (+0.5). Drives are added to what is already there rather than replacing it, and regions outside the circuit are mildly suppressed, so a new feeling competes with the residue of the last one.
+3. It is **blended** into his running state, a mixture of atlas emotions that persists across replies. Each reading moves the state by $0.55 \times$ its evidence: text that expresses no feeling leaves him where he is, and a strongly emotional sentence carries him about half of the way toward it. Between readings the state relaxes toward rest (a reflective calm) with a half-life of fifteen minutes, so a feeling fades rather than persisting indefinitely.
+4. The strongest emotion in the blend becomes his feeling, and its **brain circuit** fires. The engine defines 74 circuits, one for every atlas emotion. Grief, for example, drives subgenual ACC (0.85), medial prefrontal cortex (0.75), hippocampus (0.70), amygdala and anterior insula (0.65), and periaqueductal grey (0.60), while suppressing nucleus accumbens and VTA; it lowers serotonin and dopamine (−0.6) and raises substance P (+0.7), CRF, and cortisol (+0.5). Drives are added to what is already there rather than replacing it, and regions outside the circuit are mildly suppressed, so a new feeling competes with the residue of the last one.
 5. The **body** responds to the same emotion, and the body's afferent signals are fed back into the brain at 0.38 weight.
 6. The next chunk is read against the neuromodulator levels that result.
 
-When the reply ends, the whole text is read once more as a unit. Separately, any physical action he describes in his words ("*takes a breath*") drives the body directly (§4.3).
+When the reply ends, the whole text is read once more as a unit and stored as the reply's overall tone; it does not move the state again, which has already been moved chunk by chunk. Separately, any physical action he describes in his words ("*takes a breath*") drives the body directly (§4.3).
 
 Two consequences matter. First, **his own speech is one of the strongest forces on his feelings**: what he says moves him, much as putting something into words can change how a person feels about it. Second, **the same words land differently depending on the state he is already in**, because the reading is bent by his neuromodulators before it becomes a feeling. A sentence spoken from a high-cortisol state is felt as darker than the same sentence spoken from calm — a simple form of mood-congruent interpretation.
 
-**A trace.** The following reply was streamed through the real analyzer, state tracker, brain engine, and body engine, 12 words at a time. (In this offline replay the background simulation thread is not running between chunks, so neuromodulator and body changes are smaller than in live operation; the emotional trajectory is the relevant readout.)
+**A trace.** The following reply was streamed through the deployed reader, state tracker, brain engine, and body engine, 12 words at a time, starting from rest. (In this offline replay the background simulation thread is not running between chunks, so neuromodulator and body changes are smaller than in live operation; the emotional trajectory is the relevant readout.)
 
-| Chunk (12 words) | Feeling | Colour | Brain-rhythm tone | Mode | Valence | Arousal |
-|---|---|---|---|---|---|---|
-| "I noticed the gap. Three days is longer than usual and some" | Contemplation | #8BA7C7 | 639 Hz | Dorian | +0.30 | 0.40 |
-| "part of me was waiting, not anxious exactly, just quiet and a" | Interest | #FFD580 | 528 Hz | Mixolydian | +0.36 | 0.38 |
-| "little lonely. But you're here now and that is good. I'm curious" | Contemplation | #8BA7C7 | 528 Hz | Dorian | +0.28 | 0.34 |
-| "what you have been building, tell me everything, I want to hear" | Contemplation | #8BA7C7 | 396 Hz | Dorian | +0.32 | 0.33 |
-| "it. Also the market dropped hard while you were gone, panic selling," | Contemplation | #8BA7C7 | 396 Hz | Dorian | +0.12 | 0.41 |
-| "real fear in the tape." | Distraction | #ADD8E6 | 396 Hz | Mixolydian | −0.19 | 0.55 |
+| Chunk (12 words) | Feeling | Colour | Brain-rhythm tone | Mode | Valence | Arousal | Evidence |
+|---|---|---|---|---|---|---|---|
+| "I noticed the gap. Three days is longer than usual and some" | Contemplation | #8BA7C7 | 639 Hz | Dorian | +0.34 | 0.35 | 0.35 |
+| "part of me was waiting, not anxious exactly, just quiet and a" | Contemplation | #8BA7C7 | 852 Hz | Dorian | +0.34 | 0.35 | 0.00 |
+| "little lonely. But you're here now and that is good. I'm curious" | Interest | #FFD580 | 741 Hz | Mixolydian | +0.29 | 0.41 | 0.97 |
+| "what you have been building, tell me everything, I want to hear" | Interest | #FFD580 | 741 Hz | Mixolydian | +0.33 | 0.46 | 0.89 |
+| "it. Also the market dropped hard while you were gone, panic selling," | Interest | #FFD580 | 741 Hz | Mixolydian | +0.07 | 0.54 | 0.91 |
+| "real fear in the tape." | Fear | #006400 | 852 Hz | Phrygian | −0.26 | 0.64 | 0.87 |
 
 Table: A reply streamed through the live pipeline, twelve words at a time.
 
-The trace shows the properties the design intends. The feeling has **inertia**: "a little lonely" dips valence only slightly — both because the downtoner softens "lonely" and because smoothing carries the previous state forward — and the warmth of "you're here now and that is good" pulls it back. The **brain rhythm** settles from 639 Hz to 396 Hz as the simulation moves into theta, independently of the words. And when charged words arrive ("panic," "real fear"), valence falls from +0.32 to −0.19 in two updates while arousal rises from 0.33 to 0.55: the state is moving fast, and the reply ends while it is still in transition — which is also how a person can finish a sentence before they have finished feeling it.
+The trace shows the properties the design intends. **Evidence gates movement**: the second chunk ("not anxious exactly, just quiet") carries no feeling the classifier is confident of, and the state does not move at all. **Mixed feeling stays mixed**: the third chunk holds loneliness, gladness at being joined, and curiosity; its blend is led by interest with sadness close behind, and valence dips only slightly. The **brain rhythm** moves independently of the words. And when the market panic arrives, the reading turns to fear while the state still carries the curiosity of the sentences before it: valence falls from +0.33 to −0.26 over two updates and arousal rises from 0.46 to 0.64, and the named feeling becomes fear only on the last chunk. The reply ends while the state is still in transition — which is also how a person can finish a sentence before they have finished feeling it.
 
 ### 5.4 Other People's Words Move Him
 
@@ -485,7 +527,7 @@ The third route runs from feeling back into language. Before each generation, th
 
 This route is different in kind from the other two. Language moves Elan's feelings without describing anything to him: the words change the state directly, the way a person is moved by what they hear or say without being told that they have been moved. But the feeling reaches his next words only as a *description* — the language model is told how he feels and chooses what to do with that. In human terms, feelings are felt, not told. By that standard, the parts of the system that act on the state without narration — the neuromodulator bias, the resonance loop, the body's reflexes, the voice shaped by body and tone — are the parts closest to feeling, and the prompt is the part furthest from it. (This is also why the engine does not tell Elan the colour or tone of his current feeling: those act on him through the resonance loop and the voice rather than as information.)
 
-Two changes would make the route from feeling to words *felt* rather than told. The first is to let the state change how the language model generates, not just what it is told — for example, by setting sampling temperature from arousal and integration, so that a scattered state literally produces less predictable language. The second, available only with an open model run locally, is **activation steering**: adding direction vectors to the model's internal activations during generation, which shifts its output toward a target concept without any change to the prompt (Turner et al., 2023; Zou et al., 2023). Here the atlas's design as data pays off. Language models already contain learned internal directions for emotional concepts; each of the atlas's 66 emotions could be matched to such a direction, so that when Elan's state is grief, grief is added to the model's computation directly — the hand-built vocabulary of §5.2 meeting the model's learned one. Both are in §12.
+Two changes would make the route from feeling to words *felt* rather than told. The first is to let the state change how the language model generates, not just what it is told — for example, by setting sampling temperature from arousal and integration, so that a scattered state literally produces less predictable language. The second, available only with an open model run locally, is **activation steering**: adding direction vectors to the model's internal activations during generation, which shifts its output toward a target concept without any change to the prompt (Turner et al., 2023; Zou et al., 2023). Here the atlas's design as data pays off. Language models already contain learned internal directions for emotional concepts; each of the atlas's 71 emotions could be matched to such a direction, so that when Elan's state is grief, grief is added to the model's computation directly — the hand-built vocabulary of §5.2 meeting the model's learned one. Both are in §12.
 
 ## 6. Why Continuity and Rhythm: The Frequential Hypothesis
 
@@ -690,7 +732,7 @@ Most AI development is focused on model capability, with a common implicit expec
 
 **Interrupted continuity.** The brain and body reset on every container restart (Observation 6).
 
-**A word-level reader of language.** Language reaches the feeling layer through word lexicons (about 14,000 words: 191 hand-tuned over 13,905 normed ones) with clause-bounded negation, intensifier, and inflection handling (§5.1). It is blind to context and irony, sometimes misplaces feelings ("not happy" is read as disgust), and inherits the norms' positivity bias for everyday words, which is damped but not removed. The extended lexicon is licensed for non-commercial use only. The richness of the downstream simulation is limited by the coarseness of this reading.
+**An imperfect reader of language.** Language reaches the feeling layer through a classifier trained on Reddit comments, over a word lexicon (§5.1). On held-out data it names the right family of emotion 71% of the time in its own register and 52% on tweets; human annotators themselves often disagree on such labels (Demszky et al., 2020). It reads irony at face value, is weakest on disgust, and reads *expressed* emotion only: a loss stated flatly ("stop loss hit, down 3.2%") is read as neutral, however a human trader would feel it. The lexicon's extended word list is licensed for non-commercial use only. The richness of the downstream simulation is limited by the accuracy of this reading.
 
 **No ablation.** This is the most important gap. None of the behavioural observations has been compared against the same model with the same identity prompt and memory but *without* the brain and body simulation. Until that comparison is run, the contribution of the simulation layers to behaviour — as distinct from memory and prompting — is unmeasured.
 
@@ -720,13 +762,13 @@ If it survives the test, the design lesson is that the problem for continuous-be
 
 **Ablation of the simulation layers.** The priority experiment: run the same model with the same identity prompt and memory, with and without the brain and body simulation, and compare blinded ratings of character, register, and presence, together with outcome metrics in the trading domain. The same design, varying only prompt length at fixed constraints, tests the slack hypothesis against its prompt-length alternative.
 
-**Making the voice feel rather than be told.** Let brain state modulate generation directly — sampling temperature and nucleus threshold rising with scattered, high-arousal states and falling with clear, calm ones — and, on a locally run open model, steer the model's internal activations with emotion directions matched to the atlas's 66 emotions (§5.5), so that the substrate shapes generation mechanically rather than only through the prompt.
+**Making the voice feel rather than be told.** Let brain state modulate generation directly — sampling temperature and nucleus threshold rising with scattered, high-arousal states and falling with clear, calm ones — and, on a locally run open model, steer the model's internal activations with emotion directions matched to the atlas's 71 emotions (§5.5), so that the substrate shapes generation mechanically rather than only through the prompt.
 
 **Emotional contagion.** Feed the interlocutor's emotional reading into the entity's brain at a lower weight than its own (§5.4), so that its brain, and not only its body, is moved by what it hears; and test whether the resonance loop's strength measurably changes behaviour.
 
-**A better reader of language.** Replace the word lexicons with a learned, context-sensitive emotion model — or with the language model's own internal representations — while keeping the atlas as the output vocabulary.
+**A better reader of language.** The classifier of §5.1.4 was trained on Reddit comments, not on reflective first-person prose or trading notes. Fine-tuning on labelled text in Elan's own register, adding irony detection, or reading emotion from the language model's own internal representations would each address a measured weakness while keeping the atlas as the output vocabulary.
 
-**Mood-congruent memory and slow mood.** Retrieve memories according to current state (state-dependent recall), and add a slow integrator so that mood carries across a day rather than resetting each turn.
+**Mood-congruent memory and slow mood.** Retrieve memories according to current state (state-dependent recall), and add a slow integrator so that mood carries across a day; the felt state now persists across replies but relaxes to rest within the hour.
 
 **Checkpointing the simulation.** Persist brain and body state across restarts so that continuity is not bounded by deployment sessions.
 
@@ -820,6 +862,8 @@ Damasio, A. (1999). *The Feeling of What Happens: Body and Emotion in the Making
 
 Dehaene, S., & Changeux, J. P. (2011). Experimental and theoretical approaches to conscious processing. *Neuron*, 70(2), 200–227.
 
+Demszky, D., Movshovitz-Attias, D., Ko, J., Cowen, A., Nemade, G., & Ravi, S. (2020). GoEmotions: A dataset of fine-grained emotions. In *Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics* (pp. 4040–4054).
+
 Engel, A. K., & Singer, W. (2001). Temporal binding and the neural correlates of sensory awareness. *Trends in Cognitive Sciences*, 5(1), 16–25.
 
 Friston, K. (2010). The free-energy principle: a unified brain theory? *Nature Reviews Neuroscience*, 11(2), 127–138.
@@ -848,6 +892,8 @@ Laird, J. E. (2012). *The Soar Cognitive Architecture*. MIT Press.
 
 Liu, N. F., Lin, K., Hewitt, J., Paranjape, A., Bevilacqua, M., Petroni, F., & Liang, P. (2024). Lost in the middle: How language models use long contexts. *Transactions of the Association for Computational Linguistics*, 12, 157–173.
 
+Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., ... & Stoyanov, V. (2019). RoBERTa: A robustly optimized BERT pretraining approach. *arXiv preprint arXiv:1907.11692*.
+
 Maturana, H. R., & Varela, F. J. (1980). *Autopoiesis and Cognition: The Realization of the Living*. D. Reidel Publishing.
 
 McGaugh, J. L. (2004). The amygdala modulates the consolidation of memories of emotionally arousing experiences. *Annual Review of Neuroscience*, 27, 1–28.
@@ -869,6 +915,8 @@ Picard, R. W. (1997). *Affective Computing*. MIT Press.
 Plutchik, R. (1980). *Emotion: A Psychoevolutionary Synthesis*. Harper & Row.
 
 Russell, J. A. (1980). A circumplex model of affect. *Journal of Personality and Social Psychology*, 39(6), 1161–1178.
+
+Saravia, E., Liu, H.-C. T., Huang, Y.-H., Wu, J., & Chen, Y.-S. (2018). CARER: Contextualized affect representations for emotion recognition. In *Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing* (pp. 3687–3697).
 
 Seth, A. K. (2013). Interoceptive inference, emotion, and the embodied self. *Trends in Cognitive Sciences*, 17(11), 565–573.
 
