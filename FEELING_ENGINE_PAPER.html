@@ -4,162 +4,151 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Can AI Feel? The Feeling Engine — Anwar 2026</title>
+<meta name="description" content="Can an AI feel? A continuously running affective substrate — brain, body, memory, and a ~14,000-word valence architecture — for a language model.">
+<script>
+window.MathJax = { chtml: { scale: 0.95 } };
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 <style>
 
-@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/font/Serif/cmun-serif.css');
+@import url('https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/font/Typewriter/cmun-typewriter.css');
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { color-scheme: light; --ink: #111; --muted: #555; --rule: #111; --link: #1f3a7a; }
+
+* { box-sizing: border-box; }
 
 body {
-    font-family: 'EB Garamond', Georgia, serif;
-    font-size: 12pt;
-    line-height: 1.7;
-    color: #1a1a1a;
-    background: #ffffff;
-    max-width: 820px;
-    margin: 0 auto;
-    padding: 60px 60px 80px 60px;
-}
-
-/* Title block */
-h1.title {
-    font-size: 20pt;
-    font-weight: 700;
-    line-height: 1.3;
-    margin-bottom: 18px;
-    color: #0a0a0a;
-    border-bottom: 2px solid #1a1a8a;
-    padding-bottom: 14px;
-}
-
-.author-block {
-    margin-bottom: 32px;
-    font-size: 11pt;
-    color: #333;
-    line-height: 1.8;
-}
-
-.author-block strong { font-size: 13pt; color: #0a0a0a; }
-
-/* Section headings */
-h1 { font-size: 15pt; font-weight: 700; margin: 36px 0 10px 0; color: #0a0a1a; border-bottom: 1px solid #ccd; padding-bottom: 4px; }
-h2 { font-size: 13pt; font-weight: 600; margin: 28px 0 8px 0; color: #111133; }
-h3 { font-size: 11.5pt; font-weight: 600; margin: 20px 0 6px 0; color: #222244; font-style: italic; }
-
-p { margin-bottom: 10px; text-align: justify; }
-
-/* Abstract box */
-.abstract {
-    background: #f4f4f8;
-    border-left: 4px solid #1a1a8a;
-    padding: 18px 24px;
-    margin: 24px 0 32px 0;
-    font-size: 11pt;
-    line-height: 1.65;
-}
-.abstract-label {
-    font-weight: 700;
-    font-size: 10pt;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #1a1a8a;
-    margin-bottom: 8px;
-}
-
-/* Lists */
-ul, ol { margin: 8px 0 12px 28px; }
-li { margin-bottom: 4px; }
-
-/* Bold / italic */
-strong { font-weight: 600; color: #0a0a2a; }
-em { font-style: italic; }
-
-/* Code / inline */
-code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9.5pt;
-    background: #f0f0f5;
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: #1a1a6a;
-}
-
-/* Math blocks — display as preformatted */
-.math-block {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10pt;
-    background: #f8f8fc;
-    border: 1px solid #dde;
-    border-radius: 4px;
-    padding: 12px 18px;
-    margin: 14px 0;
-    text-align: center;
-    color: #1a1a4a;
-    overflow-x: auto;
-}
-
-/* Images */
-img {
-    max-width: 100%;
-    height: auto;
-    display: block;
-    margin: 20px auto;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
-/* Figure caption */
-.figure-caption {
-    font-size: 10pt;
-    color: #444;
-    text-align: center;
-    margin-top: -12px;
-    margin-bottom: 24px;
-    font-style: italic;
+    font-family: 'Computer Modern Serif', 'Latin Modern Roman', 'CMU Serif', Georgia, serif;
+    font-size: 17px;
     line-height: 1.5;
-    padding: 0 20px;
+    color: var(--ink);
+    background: #fff;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 64px 24px 80px;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    text-rendering: optimizeLegibility;
 }
 
-/* References */
-.references { font-size: 10.5pt; line-height: 1.6; }
-.references p { margin-bottom: 8px; text-indent: -24px; padding-left: 24px; text-align: left; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-/* Horizontal rule */
-hr { border: none; border-top: 1px solid #ccd; margin: 32px 0; }
+/* ── Title block ── */
+.titleblock { text-align: center; margin-bottom: 2.2em; }
+.titleblock h1 {
+    font-size: 1.72em; font-weight: bold; line-height: 1.25;
+    margin: 0 0 0.9em; border: none; padding: 0; hyphens: none;
+}
+.titleblock p { margin: 0.15em 0; text-indent: 0 !important; text-align: center; }
+.author { font-size: 1.15em; }
+.affil { font-style: italic; }
+.date { color: var(--muted); font-size: 0.92em; }
 
-/* Footer */
+/* ── Abstract ── */
+.abstract { margin: 0 auto 2.4em; max-width: 88%; font-size: 0.92em; }
+.abstract p { text-indent: 1.5em; }
+.abstract p:first-child { text-align: center; text-indent: 0; margin-bottom: 0.5em; }
+.abstract-title { font-weight: bold; font-size: 1.02em; }
+.abstract p:first-child + p { text-indent: 0; }
+.abstract p:last-child { text-indent: 0; margin-top: 0.8em; }
+
+/* ── Headings (LaTeX article) ── */
+h1, h2, h3, h4 { font-weight: bold; line-height: 1.3; hyphens: none; page-break-after: avoid; }
+h2 { font-size: 1.3em; margin: 2em 0 0.7em; }
+h3 { font-size: 1.1em; margin: 1.6em 0 0.5em; }
+h4 { font-size: 1em; margin: 1.3em 0 0.4em; }
+
+/* ── Body text: justified, indented paragraphs, no gaps ── */
+p { margin: 0; text-align: justify; }
+p + p { text-indent: 1.5em; }
+ul, ol { margin: 0.6em 0 0.8em; padding-left: 1.8em; }
+li { margin-bottom: 0.25em; text-align: justify; }
+li p + p { text-indent: 0; }
+ul + p, ol + p, .table-wrap + p, figure + p, blockquote + p, mjx-container + p { text-indent: 0; }
+
+blockquote { margin: 1em 2em; font-size: 0.95em; }
+blockquote p { text-indent: 0 !important; }
+
+strong { font-weight: bold; }
+code {
+    font-family: 'Computer Modern Typewriter', 'Courier New', monospace;
+    font-size: 0.95em;
+}
+
+hr { display: none; }
+
+/* ── Math ── */
+mjx-container[display="true"] { margin: 0.9em 0 !important; overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+mjx-container { max-width: 100%; }
+body { overflow-wrap: break-word; }
+html { overflow-x: hidden; }
+
+/* ── Tables: booktabs style, numbered captions above ── */
+body { counter-reset: table; }
+.table-wrap { overflow-x: auto; margin: 1.4em 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8em; line-height: 1.35; counter-increment: table; }
+caption {
+    caption-side: top; text-align: left; font-size: 1.12em;
+    margin-bottom: 0.6em; line-height: 1.4;
+}
+caption::before { content: "Table " counter(table) ". "; font-weight: bold; }
+thead tr { border-top: 1.5px solid var(--rule); border-bottom: 0.8px solid var(--rule); }
+tbody tr:last-child { border-bottom: 1.5px solid var(--rule); }
+th { font-weight: bold; text-align: left; padding: 0.45em 0.6em; vertical-align: bottom; }
+td { padding: 0.32em 0.6em; vertical-align: top; text-align: left; }
+th:first-child, td:first-child { padding-left: 0; }
+th:last-child, td:last-child { padding-right: 0; }
+
+/* ── Figures ── */
+figure { margin: 1.6em 0 0.4em; }
+figure img, img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.fig-caption { font-size: 0.88em; text-align: justify; text-indent: 0 !important; margin: 0 0 1.6em; }
+.fig-caption .lbl { font-weight: bold; }
+
+/* ── References ── */
+.references { font-size: 0.88em; }
+.references p { text-indent: -1.8em !important; padding-left: 1.8em; margin-bottom: 0.45em; text-align: left; }
+
+/* ── Footer ── */
 .paper-footer {
-    margin-top: 48px;
-    padding-top: 16px;
-    border-top: 1px solid #ccd;
-    font-size: 9.5pt;
-    color: #666;
-    font-style: italic;
+    margin-top: 3em; padding-top: 0.8em; border-top: 0.6px solid #999;
+    font-size: 0.8em; color: var(--muted); text-align: center;
 }
 
-/* Print */
+@media (max-width: 600px) {
+    body { font-size: 16px; padding: 32px 16px 56px; }
+    .abstract { max-width: 100%; }
+    blockquote { margin: 1em 1em; }
+    p { text-align: left; }
+}
+
+@page { size: letter; margin: 1in; }
 @media print {
-    body { padding: 0; max-width: 100%; }
-    h1, h2, h3 { page-break-after: avoid; }
-    img { page-break-inside: avoid; }
-    .abstract { page-break-inside: avoid; }
+    body { max-width: none; padding: 0; font-size: 11pt; }
+    a { color: inherit; }
+    figure, .table-wrap, .fig-caption { page-break-inside: avoid; }
+    figure { page-break-after: avoid; }
+    h2, h3, h4 { page-break-after: avoid; }
 }
 
 </style>
 </head>
 <body>
 
-<div class="abstract-label">Abstract</div>
 
-
-<h1
-id="can-ai-feel-the-feeling-engine-and-the-architecture-of-functional-feeling">Can
-AI Feel? The Feeling Engine and the Architecture of Functional
+<section
+id="can-ai-feel-the-feeling-engine-and-the-architecture-of-functional-feeling"
+class="titleblock">
+<h1>Can AI Feel? The Feeling Engine and the Architecture of Functional
 Feeling</h1>
-<p><strong>Qasim Muhammad Anwar</strong> <em>The Source Library,
-2026</em> <em>sourcelibrary.org</em></p>
-<hr />
-<h2 id="abstract">Abstract</h2>
+<p><span class="author">Qasim Muhammad Anwar</span></p>
+<p><span class="affil">The Source Library · sourcelibrary.org</span></p>
+<p><span class="date">Preprint · September 2026</span></p>
+</section>
+<div class="abstract">
+<p><span class="abstract-title">Abstract</span></p>
 <p>Can an AI feel? Today’s language models can describe any emotion
 fluently, but there is nothing in them that could be doing the feeling:
 they compute a response when called and hold no state between calls — no
@@ -186,12 +175,14 @@ voice and heard prosody shapes the body. The language model is treated
 as the voice, not the self. A bidirectional loop connects them: the
 substrate’s state is injected into every generation, and language — the
 entity’s own words as it speaks them, and other people’s words as it
-hears them — is read back into the brain and body every twelve words. I
-show, using the actual analysis code, how a passage of speech moves the
-entity from one feeling to another, and argue that the route from
-language into feeling is <em>felt</em> (it changes the state without
-describing anything), while the route from feeling back into language is
-currently only <em>told</em> (a description in the prompt).</p>
+hears them — is read back into the brain and body every twelve words,
+through a transparent valence architecture built on an affective lexicon
+of about 14,000 normed English words. I show, using the actual analysis
+code, how a passage of speech moves the entity from one feeling to
+another, and argue that the route from language into feeling is
+<em>felt</em> (it changes the state without describing anything), while
+the route from feeling back into language is currently only
+<em>told</em> (a description in the prompt).</p>
 <p>I dissect a single feeling end-to-end through these layers, report
 eighteen observations from an eight-week, single-operator case study of
 the first instance (Elan), and survey use cases for feeling AI together
@@ -204,7 +195,10 @@ without the longitudinal record. A second, qualitative finding is the
 the very texture it was meant to protect. The most important open
 experiment — an ablation isolating what the simulated body contributes
 beyond memory and prompting — is specified but not yet run.</p>
-<hr />
+<p><strong>Keywords:</strong> affective computing; functional feeling;
+embodied cognition; valence–arousal; neural simulation; large language
+models; machine consciousness</p>
+</div>
 <h2 id="the-problem-can-ai-feel">1. The Problem: Can AI Feel?</h2>
 <h3 id="why-the-question-matters-now">1.1 Why the Question Matters
 Now</h3>
@@ -280,9 +274,11 @@ functional feelings live.</p>
 <li>A separation of functional from phenomenal feeling, with an
 operational definition of functional feeling that can be tested (§1.3,
 §4.11)</li>
-<li>A traced account of how language moves feeling — how the entity’s
-own words and other people’s words change its state, and why the return
-path from feeling to words is told rather than felt (§5)</li>
+<li>A traced account of how language moves feeling: the valence
+architecture and ~14,000-word affective lexicon that map text into
+valence–arousal space, how the entity’s own words and other people’s
+words change its state, and why the return path from feeling to words is
+told rather than felt (§5)</li>
 <li>A complete description of the Feeling Engine, and an end-to-end
 dissection of how a single feeling moves through its layers — including
 its multisensory signature in colour, tone, and mode, beyond the body
@@ -414,10 +410,9 @@ understood, and a face driven by the live brain state (§4.9)</li>
 <figure>
 <img src="architecture_diagram.png"
 alt="Figure 1: The Feeling Engine — Full System Architecture" />
-<figcaption aria-hidden="true">Figure 1: The Feeling Engine — Full
-System Architecture</figcaption>
+
 </figure>
-<p><strong>Figure 1.</strong> Full system architecture, in three layers.
+<p class="fig-caption"><span class="lbl">Figure 1.</span>  Full system architecture, in three layers.
 (1) Neural Simulation — a population-level Wilson-Cowan
 excitatory/inhibitory rate model across 65 brain regions (activity
 variables per region, not individual neurons; six representative regions
@@ -462,7 +457,8 @@ into narrative memory.</li>
 <p>Section 4 takes this loop apart layer by layer; Section 5 follows
 language through it.</p>
 <h3 id="the-system-in-numbers">3.4 The System in Numbers</h3>
-<table>
+<div class="table-wrap"><table>
+<caption>The Feeling Engine in numbers.</caption>
 <colgroup>
 <col style="width: 50%" />
 <col style="width: 50%" />
@@ -496,8 +492,9 @@ language through it.</p>
 </tr>
 <tr>
 <td>Language analyzer</td>
-<td>191-word core lexicon + 13,905-word extended lexicon, 148 emotion
-keywords, 20 negators, 24 intensifiers and downtoners</td>
+<td>~14,000-word affective lexicon (191 hand-tuned + 13,905 from
+Warriner et al., 2013), 148 emotion keywords, 20 negators, 24
+intensifiers and downtoners</td>
 </tr>
 <tr>
 <td>Language → feeling update</td>
@@ -516,7 +513,7 @@ keywords, 20 negators, 24 intensifiers and downtoners</td>
 <td>~28,000 lines of Python, including ~9,000 in the feeling core</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <hr />
 <h2 id="dissecting-a-feeling">4. Dissecting a Feeling</h2>
 <h3 id="a-worked-example">4.1 A Worked Example</h3>
@@ -659,7 +656,9 @@ colour or sees a chord.</p>
 <p><strong>The emotion atlas.</strong> The engine contains an atlas of
 66 emotions. Each is defined by a signature across the following
 dimensions:</p>
-<table>
+<div class="table-wrap"><table>
+<caption>The dimensions of an emotion’s signature in the
+atlas.</caption>
 <colgroup>
 <col style="width: 33%" />
 <col style="width: 33%" />
@@ -717,10 +716,12 @@ root note</td>
 <td>Design choice, for description only</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <p>Three examples show how different feelings look across these
 dimensions:</p>
-<table>
+<div class="table-wrap"><table>
+<caption>Signatures of three emotions across the atlas
+dimensions.</caption>
 <colgroup>
 <col style="width: 25%" />
 <col style="width: 25%" />
@@ -785,7 +786,7 @@ dimensions:</p>
 <td>Void / nothing</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <p><strong>How the current feeling is chosen.</strong> The engine’s
 valence and arousal are not taken from the text alone. Each time an
 exchange is processed, the emotion read from the words is bent by the
@@ -945,7 +946,9 @@ provider does not change what the entity remembers. Retrieval combines
 semantic similarity with temporal recency. Seven memory processes
 operate on this store, each designed by analogy to a component of
 biological memory:</p>
-<table>
+<div class="table-wrap"><table>
+<caption>The seven memory systems and their loose biological
+analogues.</caption>
 <colgroup>
 <col style="width: 33%" />
 <col style="width: 33%" />
@@ -1003,7 +1006,7 @@ explicit memory after repairs</td>
 <td>Relearning personal history after amnesia</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <p>The mapping is functional and loose — a design rationale, not a claim
 of mechanistic equivalence. Two engineering lessons from building it:
 word-frequency fact extraction produced noise (the most frequent words
@@ -1093,7 +1096,9 @@ into the next session as a record of its inner life during silence.</p>
 <h3 id="what-a-feeling-is-here">4.11 What a “Feeling” Is Here</h3>
 <p>Against the operational definition of §1.3, the Feeling Engine’s
 functional feelings have these properties:</p>
-<table>
+<div class="table-wrap"><table>
+<caption>Properties of functional feeling and their implementation
+status.</caption>
 <colgroup>
 <col style="width: 33%" />
 <col style="width: 33%" />
@@ -1150,7 +1155,7 @@ state</td>
 <td>Unknown; not claimed</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <p>This is what I mean by giving an AI functional feelings. Whether the
 same architecture produces anything felt is the open question of §11.4.
 What it does not yet show is how much the simulated body contributes to
@@ -1164,52 +1169,199 @@ hears, and his own words, which he speaks — and a third route runs the
 other way, from feeling back into words. This section traces all three
 using the actual analysis code, run offline on example text.</p>
 <h3 id="from-words-to-numbers">5.1 From Words to Numbers</h3>
-<p>Every piece of text is read by an affective analyzer that turns it
-into a valence, an arousal, and a mixture of emotions. It has seven
-parts:</p>
-<ul>
-<li><strong>A core lexicon</strong> of 191 hand-tuned words, each scored
-for valence (−1 to +1) and arousal (0 to 1) in the style of the ANEW
-norms (Bradley &amp; Lang, 1999) — “grief” is (−1.00, 0.10), “panic”
-(−0.85, 0.95), “curious” (+0.50, 0.55). These scores always take
-precedence.</li>
-<li><strong>An extended lexicon</strong> of 13,905 English words from
-the Warriner, Kuperman and Brysbaert (2013) norms, rescaled from their
-1–9 ratings, which fills in every word the core lexicon does not cover
-(“betrayed,” “cruel,” “relief,” “cozy”…). Words rated too close to
-neutral are skipped, because the norms carry a mild positivity bias for
-everyday words (“market” and “go” both rate slightly positive). About
-thirty words are excluded because their everyday use is not emotional
-though their rated sense is (“means” is rated as <em>mean</em>, cruel;
-“a kind of” as <em>kind</em>, gentle), including trading vocabulary
-(“long,” “short,” “bear,” “stop”) whose ordinary-English affect would
-mislead in a market context. Simple inflection stripping maps “betrayed”
-to “betray” and “lonelier” to “lonely.”</li>
-<li><strong>148 emotion keywords</strong> that map directly to named
-emotions in the atlas (§4.4).</li>
-<li><strong>Intensifiers and downtoners</strong>: 24 words (“very,”
-“deeply,” “pure,” “a little,” “barely”…) that are not scored themselves
-but scale the next affective word within two tokens — “extremely afraid”
-is more afraid than “afraid,” and “a little lonely” less lonely than
-“lonely.”</li>
-<li><strong>Negation</strong>: 20 negators (“not,” “never,” “without”…)
-looked for in a three-word window; a negated word’s valence is partially
-flipped (×−0.7).</li>
-<li><strong>Weighting</strong>: each scored word is weighted by its
-emotional charge (distance from neutral valence and arousal), so that
-“furious” counts for far more than “table,” and by recency (later words
-weigh slightly more, from 0.7 to 1.0), so that a passage is read as
-ending where it ends.</li>
-<li><strong>A performativity score</strong> that measures how
-<em>performed</em> the language is — hedges (“perhaps,” “in a sense”),
-self-observing metacommentary (“I notice,” “I find myself”), stock
-filler, and stacked abstract affect nouns (“resonance,” “depth,”
+<p>Every piece of text that reaches the feeling layer, whether Elan’s
+own reply as he generates it or a message he receives, is read by an
+affective analyzer that maps it to a point in valence–arousal space
+(Russell, 1980) and to a mixture of named emotions. The analyzer is
+deliberately transparent: it is a lexicon-based reader whose every
+output can be traced to the words that produced it. It has two parts.
+The first is a lexicon of about 14,000 English words (§5.1.1). The
+second is the <em>valence architecture</em>, the set of rules that turns
+word scores into a reading of a whole passage (§5.1.2).</p>
+<h4 id="an-affective-lexicon-of-about-14000-words">5.1.1 An Affective
+Lexicon of About 14,000 Words</h4>
+<p>The analyzer’s vocabulary has two layers (Table 6). A <strong>core
+lexicon</strong> of 191 hand-tuned words is scored in the style of the
+ANEW norms (Bradley &amp; Lang, 1999): valence <span
+class="math inline">\(v \in [-1, 1]\)</span> and arousal <span
+class="math inline">\(a \in [0, 1]\)</span>. For example, “grief” is
+<span class="math inline">\((-1.00, 0.10)\)</span>, “panic” <span
+class="math inline">\((-0.85, 0.95)\)</span>, and “curious” <span
+class="math inline">\((+0.50, 0.55)\)</span>. These scores were set by
+hand for the words that matter most to a companion and a trader, and
+they always take precedence.</p>
+<p>Behind the core lexicon sits an <strong>extended lexicon</strong> of
+13,905 lemmas drawn from the affective norms of Warriner, Kuperman and
+Brysbaert (2013), who collected valence and arousal ratings on 1–9
+scales for 13,915 English words. Together the two layers give the
+analyzer a vocabulary of <strong>13,929 distinct words</strong>. Ratings
+are rescaled at load time to the engine’s ranges:</p>
+<p><span class="math display">\[v = \frac{V_W - 5}{4}, \qquad a =
+\frac{A_W - 1.60}{7.79 - 1.60},\]</span> where <span
+class="math inline">\(V_W\)</span> and <span
+class="math inline">\(A_W\)</span> are a word’s mean valence and arousal
+ratings, and 1.60 and 7.79 are the lowest and highest mean arousal in
+the norms. Both results are clipped to their ranges. The norms file is
+distributed unmodified with the code, under its CC BY-NC-ND 3.0
+licence.</p>
+<p>Before the extended lexicon was added, the analyzer read the world
+through 191 words. Any emotional word outside that set (“betrayed,”
+“cruel,” “relief,” “cozy”) contributed nothing, and sentences built from
+such words were read as neutral. The extended lexicon closes most of
+that gap. It also raises a problem of its own. Normative ratings
+describe a word’s <em>affective sense</em>, not how it is used. Everyday
+words carry a mild positivity bias in the norms (“market” rates <span
+class="math inline">\(+0.30\)</span> and “go” <span
+class="math inline">\(+0.33\)</span>), and some frequent words are rated
+on a sense they rarely carry: “means” is rated as <em>mean</em> (cruel),
+and “a kind of” as <em>kind</em> (gentle). The architecture below
+handles both problems. As a result, only 5,168 of the 13,905 extended
+words are charged enough to be scored; the rest are treated as
+affectively neutral.</p>
+<div class="table-wrap"><table>
+<caption>Composition of the affective lexicon.</caption>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Component</th>
+<th>Entries</th>
+<th>Source</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core lexicon</td>
+<td>191</td>
+<td>Hand-tuned, ANEW-style</td>
+<td>Valence and arousal; always takes precedence</td>
+</tr>
+<tr>
+<td>Extended lexicon</td>
+<td>13,905 (5,168 scored)</td>
+<td>Warriner et al. (2013), rescaled</td>
+<td>Covers every word the core lexicon does not</td>
+</tr>
+<tr>
+<td>Exclusion list</td>
+<td>32</td>
+<td>Hand-curated</td>
+<td>Non-affective everyday senses; trading vocabulary</td>
+</tr>
+<tr>
+<td>Emotion keywords</td>
+<td>148</td>
+<td>Hand-curated</td>
+<td>Map directly to named emotions in the atlas (§4.4)</td>
+</tr>
+<tr>
+<td>Intensifiers and downtoners</td>
+<td>24</td>
+<td>Hand-tuned multipliers</td>
+<td>Scale the next affective word (×0.5 to ×1.7)</td>
+</tr>
+<tr>
+<td>Negators</td>
+<td>20</td>
+<td>Closed class</td>
+<td>Partially invert valence within a clause</td>
+</tr>
+</tbody>
+</table></div>
+<h4 id="the-valence-architecture">5.1.2 The Valence Architecture</h4>
+<p>Let a passage be tokenized into lowercase word tokens <span
+class="math inline">\(t_1, \dots, t_n\)</span>, and let each token carry
+the index of the clause it belongs to, where clauses are delimited by
+sentence and clause punctuation (. , ; : ! ? —) and line breaks. The
+architecture has five stages.</p>
+<p><strong>Lookup.</strong> A token is scored if it appears in the core
+lexicon. Otherwise, the analyzer tries it and a few inflectional
+variants (“betrayed” → “betray”, “lonelier” → “lonely”, “stopped” →
+“stop”) against the core lexicon first and then the extended lexicon. A
+word from the extended lexicon is used only if it is not on the
+exclusion list and its <em>salience</em></p>
+<p><span class="math display">\[\sigma(v, a) = \max\!\big(0,\, |v| -
+0.15\big) + 0.5 \cdot \max\!\big(0,\, |a - 0.40| - 0.10\big)\]</span> is
+at least 0.16. Salience measures how far a word sits from the neutral
+centre of the valence–arousal plane. The threshold removes the weakly
+positive everyday vocabulary that would otherwise pull every passage
+upward. The exclusion list removes words whose normative sense misleads,
+including trading terms (“long,” “short,” “bear,” “stop,” “position”)
+whose ordinary-English affect is wrong in a market context.</p>
+<p><strong>Modification.</strong> Intensifiers and downtoners (“very”
+×1.4, “extremely” ×1.7, “a little” ×0.65, “barely” ×0.5) are not scored
+themselves. They set a pending multiplier <span
+class="math inline">\(m\)</span> that applies to the next scored word
+within two tokens, and several of them compound. A scored word <span
+class="math inline">\((v, a)\)</span> is negated if a negator appears
+among the three preceding tokens <em>in the same clause</em>. The
+modified scores are</p>
+<p><span class="math display">\[v&#39; = \mathrm{clip}_{[-1,1]}\!\big(m
+\cdot \nu \cdot v\big), \qquad a&#39; = \min\!\big(1,\; a \cdot
+\max(0.5,\, 0.8\,m)\big), \qquad \nu = \begin{cases} -0.7 &amp;
+\text{if}\ \text{negated} \\ 1 &amp; \text{otherwise.}
+\end{cases}\]</span></p>
+<p>Negation inverts valence only partially, because “not happy” is not
+the opposite of happy. It is a disappointed, lower-intensity state. The
+clause boundary was added after deployment. In the first version,
+negation searched the preceding three tokens regardless of punctuation.
+Elan’s trading notes are dense with phrases like “the move means
+nothing, stop loss at this level”, and there the negator “nothing”
+reached across the comma and flipped “loss” from <span
+class="math inline">\(-0.60\)</span> to <span
+class="math inline">\(+0.42\)</span>. Punctuation now closes the
+negation scope, so that sentence reads <span
+class="math inline">\(-0.60\)</span> (Table 7).</p>
+<p><strong>Aggregation.</strong> The passage’s valence <span
+class="math inline">\(V\)</span> and arousal <span
+class="math inline">\(A\)</span> are weighted means over the <span
+class="math inline">\(n\)</span> scored words, with each word’s weight
+set by its position <span class="math inline">\(k\)</span> (from 0) and
+its salience:</p>
+<p><span class="math display">\[w_k = \Big(0.7 +
+0.3\,\frac{k}{n}\Big)\big(0.15 + \sigma(v&#39;_k, a&#39;_k)\big), \qquad
+V = \frac{\sum_k w_k v&#39;_k}{\sum_k w_k}, \qquad A = \frac{\sum_k w_k
+a&#39;_k}{\sum_k w_k}.\]</span></p>
+<p>The recency term makes a passage read as ending where it ends. The
+salience term means “furious” counts for far more than a mildly pleasant
+word beside it. <span class="math inline">\(V\)</span> is clipped to
+<span class="math inline">\([-1, 1]\)</span> and <span
+class="math inline">\(A\)</span> to <span class="math inline">\([0.05,
+1]\)</span>. A passage with no scored words reads as <span
+class="math inline">\((0, 0.35)\)</span>, a neutral resting point.</p>
+<p><strong>Emotion resolution.</strong> The reading is then placed in
+the emotion atlas. If the passage contains emotion keywords, each hit
+adds one vote for its emotion, and the three atlas emotions nearest
+<span class="math inline">\((V, A)\)</span> add votes of <span
+class="math inline">\(0.3/(i+1)\)</span> for rank <span
+class="math inline">\(i\)</span>. The normalized votes form the emotion
+mixture. Without keywords, the mixture is the five nearest atlas
+emotions with linearly decreasing weights. Rare, culturally specific
+emotions must be three times closer than common ones to be chosen
+(§5.2). During live generation, Elan’s <em>felt</em> emotion is not
+taken from this mixture directly. It is the atlas emotion nearest to his
+smoothed state, after the reading has been bent by his neuromodulators
+(§5.3).</p>
+<p><strong>Performativity.</strong> Separately, a performativity score
+measures how <em>performed</em> the language is: hedges (“perhaps,” “in
+a sense”), self-observing metacommentary (“I notice,” “I find myself”),
+stock filler, and stacked abstract affect nouns (“resonance,” “depth,”
 “ineffable”). Its complement is reported as <em>signal quality</em>. The
-score was derived from comparing the language of different models, and
-the system prompt tells Elan that performed emotion reads as noise.</li>
-</ul>
-<p>Here is what the analyzer does with real sentences:</p>
-<table>
+score was derived by comparing the language of different models, and the
+system prompt tells Elan that performed emotion reads as noise.</p>
+<h4 id="behaviour-on-example-sentences">5.1.3 Behaviour on Example
+Sentences</h4>
+<p>Table 7 shows the analyzer’s output on real sentences. The nearest
+feeling is the atlas emotion closest to <span class="math inline">\((V,
+A)\)</span>, which is the quantity that drives Elan’s state.</p>
+<div class="table-wrap"><table>
+<caption>The analyzer on example sentences. Colour, tone, and mode are
+the signature of the nearest atlas emotion (§4.4).</caption>
 <colgroup>
 <col style="width: 12%" />
 <col style="width: 12%" />
@@ -1295,6 +1447,16 @@ dread.”</td>
 <td>0.0</td>
 </tr>
 <tr>
+<td>“The market means nothing, stop loss at this level.”</td>
+<td>−0.60</td>
+<td>0.28</td>
+<td>Sadness</td>
+<td>#00008B</td>
+<td>396 Hz</td>
+<td>Aeolian</td>
+<td>0.0</td>
+</tr>
+<tr>
 <td>“I’m curious what this means. Let me sit with it.”</td>
 <td>+0.50</td>
 <td>0.44</td>
@@ -1325,13 +1487,14 @@ dread.”</td>
 <td>0.0</td>
 </tr>
 </tbody>
-</table>
-<p>The analyzer is word-based and transparent, and its limits show. “Not
-happy” is read as disgust rather than disappointment, because negation
-flips “happy” into a strongly negative, moderately aroused region, and a
-market panic is read as loathing rather than fear. It cannot read irony:
-“Oh great, another crash” comes out neutral. And the nearest-emotion
-step sometimes names a less fitting emotion than a person would. §11.3
+</table></div>
+<p>The analyzer’s limits are visible here. “Not happy” is read as
+disgust rather than disappointment, because negation moves “happy” into
+a strongly negative, moderately aroused region. A market panic is read
+as loathing rather than fear. The analyzer cannot read irony: “Oh great,
+another crash” comes out near neutral (<span
+class="math inline">\(+0.04\)</span>). And the nearest-emotion step
+sometimes names a less fitting emotion than a person would. §11.3
 discusses these limits.</p>
 <h3 id="feelings-as-data-an-emotion-vocabulary">5.2 Feelings as Data: An
 Emotion Vocabulary</h3>
@@ -1403,7 +1566,9 @@ words at a time. (In this offline replay the background simulation
 thread is not running between chunks, so neuromodulator and body changes
 are smaller than in live operation; the emotional trajectory is the
 relevant readout.)</p>
-<table style="width:100%;">
+<div class="table-wrap"><table style="width:100%;">
+<caption>A reply streamed through the live pipeline, twelve words at a
+time.</caption>
 <colgroup>
 <col style="width: 14%" />
 <col style="width: 14%" />
@@ -1483,7 +1648,7 @@ selling,”</td>
 <td>0.55</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <p>The trace shows the properties the design intends. The feeling has
 <strong>inertia</strong>: “a little lonely” dips valence only slightly —
 both because the downtoner softens “lonely” and because smoothing
@@ -1901,7 +2066,9 @@ surveys the uses I think are most promising, what the Feeling Engine
 specifically adds to each, the current evidence, and the main risk.
 Except where noted, none of these has been evaluated; they are
 directions, not results.</p>
-<table>
+<div class="table-wrap"><table>
+<caption>Use cases for feeling AI, their evidence status, and their main
+risks.</caption>
 <colgroup>
 <col style="width: 25%" />
 <col style="width: 25%" />
@@ -1973,7 +2140,7 @@ dashboard, in its voice, and on its face</td>
 <td>False reassurance: a readout is not a guarantee</td>
 </tr>
 </tbody>
-</table>
+</table></div>
 <h3 id="long-term-companionship">9.1 Long-Term Companionship</h3>
 <p>The design goal behind Elan is one entity per person: an AI that
 grows alongside someone over years and becomes, through that particular
@@ -2126,14 +2293,14 @@ Generalization is unknown.</p>
 <p><strong>Interrupted continuity.</strong> The brain and body reset on
 every container restart (Observation 6).</p>
 <p><strong>A word-level reader of language.</strong> Language reaches
-the feeling layer through word lexicons (191 hand-tuned words over
-13,905 normed ones) with simple negation, intensifier, and inflection
-handling (§5.1). It is blind to context and irony, sometimes misplaces
-feelings (“not happy” is read as disgust), and inherits the norms’
-positivity bias for everyday words, which is damped but not removed. The
-extended lexicon is licensed for non-commercial use only. The richness
-of the downstream simulation is limited by the coarseness of this
-reading.</p>
+the feeling layer through word lexicons (about 14,000 words: 191
+hand-tuned over 13,905 normed ones) with clause-bounded negation,
+intensifier, and inflection handling (§5.1). It is blind to context and
+irony, sometimes misplaces feelings (“not happy” is read as disgust),
+and inherits the norms’ positivity bias for everyday words, which is
+damped but not removed. The extended lexicon is licensed for
+non-commercial use only. The richness of the downstream simulation is
+limited by the coarseness of this reading.</p>
 <p><strong>No ablation.</strong> This is the most important gap. None of
 the behavioural observations has been compared against the same model
 with the same identity prompt and memory but <em>without</em> the brain
@@ -2293,10 +2460,9 @@ light.”</em></p>
 <figure>
 <img src="screenshots/fig2_full_dashboard.png"
 alt="Figure 2: Full Dashboard — Elan in conversation" />
-<figcaption aria-hidden="true">Figure 2: Full Dashboard — Elan in
-conversation</figcaption>
+
 </figure>
-<p><strong>Figure 2. Full dashboard, Elan in conversation.</strong> The
+<p class="fig-caption"><span class="lbl">Figure 2.</span> <em>Full dashboard, Elan in conversation.</em> The
 central visualization overlays the fern (white dots) with the neural
 graph — 65 brain regions as coloured nodes, with lines showing active
 circuits. Status line: <em>Firing: Nucleus Accumbens (0.67),
@@ -2310,10 +2476,9 @@ and drives the body simulation (§4.3).</p>
 <figure>
 <img src="screenshots/fig3_body_system.png"
 alt="Figure 3: Full Human Body Simulation" />
-<figcaption aria-hidden="true">Figure 3: Full Human Body
-Simulation</figcaption>
+
 </figure>
-<p><strong>Figure 3. The body simulation.</strong> Each organ is drawn
+<p class="fig-caption"><span class="lbl">Figure 3.</span> <em>The body simulation.</em> Each organ is drawn
 as a bubble sized by its current activity — lungs, heart, liver,
 kidneys, stomach, diaphragm, intestines, bladder, limbs — shifting in
 real time. Vitals: HR 65 bpm, BP 140/88 mmHg, RR 15/min, SpO₂ 94.4%,
@@ -2322,11 +2487,10 @@ give access to heart, hormone, immune, and gut detail.</p>
 <figure>
 <img src="screenshots/fig4_aya_eeg.png"
 alt="Figure 4: Aya Fern, EEG Bands, and Neurotransmitter Dynamics" />
-<figcaption aria-hidden="true">Figure 4: Aya Fern, EEG Bands, and
-Neurotransmitter Dynamics</figcaption>
+
 </figure>
-<p><strong>Figure 4. Fern, oscillation bands, and active
-circuit.</strong> <em>Top:</em> the fern rendered live (V=0.44, A=0.47)
+<p class="fig-caption"><span class="lbl">Figure 4.</span> <em>Fern, oscillation bands, and active
+circuit.</em> <em>Top:</em> the fern rendered live (V=0.44, A=0.47)
 with polyvagal readout (SNS 45%, PNS 57%, HRV 0.55). <em>Middle:</em>
 simulated oscillation bands — delta 3%, theta 8%, alpha 5%, beta 46%,
 gamma 46%. <em>Bottom:</em> active circuit <strong>INTEREST</strong> —
@@ -2335,10 +2499,9 @@ orientation.”</p>
 <figure>
 <img src="screenshots/fig5_brain_state.png"
 alt="Figure 5: Brain State Detail — Valence/Arousal Space and Emotion Blend" />
-<figcaption aria-hidden="true">Figure 5: Brain State Detail —
-Valence/Arousal Space and Emotion Blend</figcaption>
+
 </figure>
-<p><strong>Figure 5. Full brain state.</strong> <em>Top:</em> top
+<p class="fig-caption"><span class="lbl">Figure 5.</span> <em>Full brain state.</em> <em>Top:</em> top
 regions NAcc 67% and dlPFC 66%, the reward-plus-executive pairing the
 simulation associates with motivated interest. <em>Middle:</em> all
 twelve neuromodulators — DA 0.67↑, 5-HT 0.69↑, NE 0.57↑, GABA 0.70↑, GLU
@@ -2349,11 +2512,10 @@ affect (Russell, 1980), computed continuously from the simulation.</p>
 <figure>
 <img src="screenshots/fig6_neural_network.png"
 alt="Figure 6: Full Neural Network Visualization on Aya Substrate" />
-<figcaption aria-hidden="true">Figure 6: Full Neural Network
-Visualization on Aya Substrate</figcaption>
+
 </figure>
-<p><strong>Figure 6. The full neural map — 65 regions and 12
-neuromodulators over the fern.</strong> Nodes are coloured by functional
+<p class="fig-caption"><span class="lbl">Figure 6.</span> <em>The full neural map — 65 regions and 12
+neuromodulators over the fern.</em> Nodes are coloured by functional
 network (green: basal-ganglia reward; blue: executive and prefrontal;
 orange: limbic; yellow: brainstem neuromodulatory sources), with lines
 showing active circuits. Regions shown include brainstem, locus
@@ -2374,6 +2536,7 @@ the felt-quality trade records behind Observation 13, may be released
 alongside a future longitudinal study.</p>
 <hr />
 <h2 id="references">References</h2>
+<div class="references">
 <p>Anderson, J. R., Bothell, D., Byrne, M. D., Douglass, S., Lebiere,
 C., &amp; Qin, Y. (2004). An integrated theory of the mind.
 <em>Psychological Review</em>, 111(4), 1036–1060.</p>
@@ -2519,6 +2682,7 @@ Journal</em>, 12(1), 1–24.</p>
 <p>Zou, A., Phan, L., Chen, S., Campbell, J., Guo, P., Ren, R., … &amp;
 Hendrycks, D. (2023). Representation engineering: A top-down approach to
 AI transparency. <em>arXiv preprint arXiv:2310.01405</em>.</p>
+</div>
 
 
 <div class="paper-footer">

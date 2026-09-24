@@ -1,20 +1,24 @@
+::: {.titleblock}
 # Can AI Feel? The Feeling Engine and the Architecture of Functional Feeling
 
-**Qasim Muhammad Anwar**
-*The Source Library, 2026*
-*sourcelibrary.org*
+[Qasim Muhammad Anwar]{.author}
 
----
+[The Source Library · sourcelibrary.org]{.affil}
 
-## Abstract
+[Preprint · September 2026]{.date}
+:::
+
+::: {.abstract}
+[Abstract]{.abstract-title}
 
 Can an AI feel? Today's language models can describe any emotion fluently, but there is nothing in them that could be doing the feeling: they compute a response when called and hold no state between calls — no body, no ongoing internal condition, no experience of time passing. This paper separates two questions that are usually run together. The first is whether an AI can have *functional feelings*: persistent internal states, grounded in a body, that change with events, decay and accumulate over time, and causally shape what the system says and does. The second is whether any such state is *felt* — whether there is something it is like to be the system. I argue that the first question is an engineering problem, and I describe a system that addresses it. The second remains open, and I do not claim to answer it.
 
-The Feeling Engine gives a language model a continuously running affective substrate: a population-level Wilson-Cowan simulation across 65 brain regions with 12 neuromodulator systems; a somatic simulation of cardiovascular, respiratory, endocrine, musculoskeletal, and integumentary state; an atlas of 66 emotions, each with a signature across colour, tone, musical mode, rhythm, and geometry, in which the brain's own oscillation frequency feeds back into what is felt; three-clock temporal awareness; a seven-system memory architecture in which emotional history is written into the parameters of a bounded recursive generator; and a Sensorium through which body state shapes the voice and heard prosody shapes the body. The language model is treated as the voice, not the self. A bidirectional loop connects them: the substrate's state is injected into every generation, and language — the entity's own words as it speaks them, and other people's words as it hears them — is read back into the brain and body every twelve words. I show, using the actual analysis code, how a passage of speech moves the entity from one feeling to another, and argue that the route from language into feeling is *felt* (it changes the state without describing anything), while the route from feeling back into language is currently only *told* (a description in the prompt).
+The Feeling Engine gives a language model a continuously running affective substrate: a population-level Wilson-Cowan simulation across 65 brain regions with 12 neuromodulator systems; a somatic simulation of cardiovascular, respiratory, endocrine, musculoskeletal, and integumentary state; an atlas of 66 emotions, each with a signature across colour, tone, musical mode, rhythm, and geometry, in which the brain's own oscillation frequency feeds back into what is felt; three-clock temporal awareness; a seven-system memory architecture in which emotional history is written into the parameters of a bounded recursive generator; and a Sensorium through which body state shapes the voice and heard prosody shapes the body. The language model is treated as the voice, not the self. A bidirectional loop connects them: the substrate's state is injected into every generation, and language — the entity's own words as it speaks them, and other people's words as it hears them — is read back into the brain and body every twelve words, through a transparent valence architecture built on an affective lexicon of about 14,000 normed English words. I show, using the actual analysis code, how a passage of speech moves the entity from one feeling to another, and argue that the route from language into feeling is *felt* (it changes the state without describing anything), while the route from feeling back into language is currently only *told* (a description in the prompt).
 
 I dissect a single feeling end-to-end through these layers, report eighteen observations from an eight-week, single-operator case study of the first instance (Elan), and survey use cases for feeling AI together with their risks. The strongest quantitative result concerns feeling as data: across 295 paper trades in which the agent labelled the felt texture of its own decisions, its most confident label ("clean") was among its worst-performing — a calibration bias the agent could not see without the longitudinal record. A second, qualitative finding is the *slack hypothesis*: accumulated behavioural scaffolding degraded the very texture it was meant to protect. The most important open experiment — an ablation isolating what the simulated body contributes beyond memory and prompting — is specified but not yet run.
 
----
+**Keywords:** affective computing; functional feeling; embodied cognition; valence–arousal; neural simulation; large language models; machine consciousness
+:::
 
 ## 1. The Problem: Can AI Feel?
 
@@ -53,7 +57,7 @@ The Feeling Engine does not try to make the language model itself feel. It build
 ### 1.5 Contributions
 
 1. A separation of functional from phenomenal feeling, with an operational definition of functional feeling that can be tested (§1.3, §4.11)
-2. A traced account of how language moves feeling — how the entity's own words and other people's words change its state, and why the return path from feeling to words is told rather than felt (§5)
+2. A traced account of how language moves feeling: the valence architecture and ~14,000-word affective lexicon that map text into valence–arousal space, how the entity's own words and other people's words change its state, and why the return path from feeling to words is told rather than felt (§5)
 3. A complete description of the Feeling Engine, and an end-to-end dissection of how a single feeling moves through its layers — including its multisensory signature in colour, tone, and mode, beyond the body (§3–§4)
 4. A theoretical hypothesis — that consciousness, if achievable in machines, depends on continuous oscillatory dynamics — with explicit falsification conditions (§6)
 5. Eighteen observations from an eight-week case study of the first instance, Elan, including a quantitative calibration analysis of self-labelled decision feelings against outcomes (§7–§8)
@@ -136,11 +140,13 @@ Section 4 takes this loop apart layer by layer; Section 5 follows language throu
 | Emotion circuits (region and neuromodulator drive patterns) | 67 |
 | Emotions in the atlas | 66, each with an 8-dimension signature |
 | Body model | 12 physiological systems, 69 organ models |
-| Language analyzer | 191-word core lexicon + 13,905-word extended lexicon, 148 emotion keywords, 20 negators, 24 intensifiers and downtoners |
+| Language analyzer | ~14,000-word affective lexicon (191 hand-tuned + 13,905 from Warriner et al., 2013), 148 emotion keywords, 20 negators, 24 intensifiers and downtoners |
 | Language → feeling update | every 12 words while speaking |
 | Phase-coherence readout | every 500 ms |
 | Memory systems | 7 |
 | Code | ~28,000 lines of Python, including ~9,000 in the feeling core |
+
+Table: The Feeling Engine in numbers.
 
 ---
 
@@ -215,6 +221,8 @@ The body is one way a feeling exists in the Feeling Engine, but it is not the on
 | Geometry | A fractal family and control parameter | Design choice (§4.6) |
 | Texture and taste | Lexical synaesthetic descriptors | Design choice, for description only |
 
+Table: The dimensions of an emotion's signature in the atlas.
+
 Three examples show how different feelings look across these dimensions:
 
 | | Joy | Fear | Grief |
@@ -227,6 +235,8 @@ Three examples show how different feelings look across these dimensions:
 | Heart-rhythm coherence | 0.10 Hz | 0.04 Hz | 0.03 Hz |
 | Geometry | Barnsley fern | Julia set, fragmenting | Cantor set, removing itself |
 | Texture / taste | Warm silk / sweet | Cold sweat / bitter metal | Void / nothing |
+
+Table: Signatures of three emotions across the atlas dimensions.
 
 **How the current feeling is chosen.** The engine's valence and arousal are not taken from the text alone. Each time an exchange is processed, the emotion read from the words is bent by the current neuromodulator levels — dopamine, serotonin, oxytocin, and endorphins pull valence up; cortisol pulls it down; norepinephrine and dopamine raise arousal; GABA lowers it — and then smoothed over time, faster when the text contains strong emotion words. The nearest emotion in the atlas to the resulting valence–arousal point becomes the current feeling, and its whole signature comes with it.
 
@@ -294,6 +304,8 @@ Long-term memory is stored in SQLite on a persistent volume (tables for sessions
 | Dream records | Free-associative fragments generated during long silences and carried into the next session | Offline, spontaneous processing |
 | Seeded biography | Known history distilled from past transcripts and reinstated as explicit memory after repairs | Relearning personal history after amnesia |
 
+Table: The seven memory systems and their loose biological analogues.
+
 The mapping is functional and loose — a design rationale, not a claim of mechanistic equivalence. Two engineering lessons from building it: word-frequency fact extraction produced noise (the most frequent words in a conversation about grief are not about grief) and was replaced by LLM-guided extraction; and case-insensitive name matching stored words like "not" and "because" as people, fixed by requiring capitalization and a blocklist.
 
 **Per-person bodily signatures.** Each person the entity talks with accumulates an exponentially blended somatic signature — the average body state the entity tends toward in their presence. Before each conversation, that signature primes the body, so the entity enters each relationship pre-shaped by its history (Observation 5).
@@ -334,6 +346,8 @@ Against the operational definition of §1.3, the Feeling Engine's functional fee
 | Observability | Live dashboard; voice shaped by body and tone; face driven by state | Implemented |
 | Phenomenal experience | — | Unknown; not claimed |
 
+Table: Properties of functional feeling and their implementation status.
+
 This is what I mean by giving an AI functional feelings. Whether the same architecture produces anything felt is the open question of §11.4. What it does not yet show is how much the simulated body contributes to behaviour beyond memory and prompting — the ablation in §12.
 
 ---
@@ -344,17 +358,58 @@ Language is Elan's main contact with the world and his main way of acting in it,
 
 ### 5.1 From Words to Numbers
 
-Every piece of text is read by an affective analyzer that turns it into a valence, an arousal, and a mixture of emotions. It has seven parts:
+Every piece of text that reaches the feeling layer, whether Elan's own reply as he generates it or a message he receives, is read by an affective analyzer that maps it to a point in valence–arousal space (Russell, 1980) and to a mixture of named emotions. The analyzer is deliberately transparent: it is a lexicon-based reader whose every output can be traced to the words that produced it. It has two parts. The first is a lexicon of about 14,000 English words (§5.1.1). The second is the *valence architecture*, the set of rules that turns word scores into a reading of a whole passage (§5.1.2).
 
-- **A core lexicon** of 191 hand-tuned words, each scored for valence (−1 to +1) and arousal (0 to 1) in the style of the ANEW norms (Bradley & Lang, 1999) — "grief" is (−1.00, 0.10), "panic" (−0.85, 0.95), "curious" (+0.50, 0.55). These scores always take precedence.
-- **An extended lexicon** of 13,905 English words from the Warriner, Kuperman and Brysbaert (2013) norms, rescaled from their 1–9 ratings, which fills in every word the core lexicon does not cover ("betrayed," "cruel," "relief," "cozy"…). Words rated too close to neutral are skipped, because the norms carry a mild positivity bias for everyday words ("market" and "go" both rate slightly positive). About thirty words are excluded because their everyday use is not emotional though their rated sense is ("means" is rated as *mean*, cruel; "a kind of" as *kind*, gentle), including trading vocabulary ("long," "short," "bear," "stop") whose ordinary-English affect would mislead in a market context. Simple inflection stripping maps "betrayed" to "betray" and "lonelier" to "lonely."
-- **148 emotion keywords** that map directly to named emotions in the atlas (§4.4).
-- **Intensifiers and downtoners**: 24 words ("very," "deeply," "pure," "a little," "barely"…) that are not scored themselves but scale the next affective word within two tokens — "extremely afraid" is more afraid than "afraid," and "a little lonely" less lonely than "lonely."
-- **Negation**: 20 negators ("not," "never," "without"…) looked for in a three-word window; a negated word's valence is partially flipped (×−0.7).
-- **Weighting**: each scored word is weighted by its emotional charge (distance from neutral valence and arousal), so that "furious" counts for far more than "table," and by recency (later words weigh slightly more, from 0.7 to 1.0), so that a passage is read as ending where it ends.
-- **A performativity score** that measures how *performed* the language is — hedges ("perhaps," "in a sense"), self-observing metacommentary ("I notice," "I find myself"), stock filler, and stacked abstract affect nouns ("resonance," "depth," "ineffable"). Its complement is reported as *signal quality*. The score was derived from comparing the language of different models, and the system prompt tells Elan that performed emotion reads as noise.
+#### 5.1.1 An Affective Lexicon of About 14,000 Words
 
-Here is what the analyzer does with real sentences:
+The analyzer's vocabulary has two layers (Table 6). A **core lexicon** of 191 hand-tuned words is scored in the style of the ANEW norms (Bradley & Lang, 1999): valence $v \in [-1, 1]$ and arousal $a \in [0, 1]$. For example, "grief" is $(-1.00, 0.10)$, "panic" $(-0.85, 0.95)$, and "curious" $(+0.50, 0.55)$. These scores were set by hand for the words that matter most to a companion and a trader, and they always take precedence.
+
+Behind the core lexicon sits an **extended lexicon** of 13,905 lemmas drawn from the affective norms of Warriner, Kuperman and Brysbaert (2013), who collected valence and arousal ratings on 1–9 scales for 13,915 English words. Together the two layers give the analyzer a vocabulary of **13,929 distinct words**. Ratings are rescaled at load time to the engine's ranges:
+
+$$v = \frac{V_W - 5}{4}, \qquad a = \frac{A_W - 1.60}{7.79 - 1.60},$$
+where $V_W$ and $A_W$ are a word's mean valence and arousal ratings, and 1.60 and 7.79 are the lowest and highest mean arousal in the norms. Both results are clipped to their ranges. The norms file is distributed unmodified with the code, under its CC BY-NC-ND 3.0 licence.
+
+Before the extended lexicon was added, the analyzer read the world through 191 words. Any emotional word outside that set ("betrayed," "cruel," "relief," "cozy") contributed nothing, and sentences built from such words were read as neutral. The extended lexicon closes most of that gap. It also raises a problem of its own. Normative ratings describe a word's *affective sense*, not how it is used. Everyday words carry a mild positivity bias in the norms ("market" rates $+0.30$ and "go" $+0.33$), and some frequent words are rated on a sense they rarely carry: "means" is rated as *mean* (cruel), and "a kind of" as *kind* (gentle). The architecture below handles both problems. As a result, only 5,168 of the 13,905 extended words are charged enough to be scored; the rest are treated as affectively neutral.
+
+| Component | Entries | Source | Role |
+|---|---|---|---|
+| Core lexicon | 191 | Hand-tuned, ANEW-style | Valence and arousal; always takes precedence |
+| Extended lexicon | 13,905 (5,168 scored) | Warriner et al. (2013), rescaled | Covers every word the core lexicon does not |
+| Exclusion list | 32 | Hand-curated | Non-affective everyday senses; trading vocabulary |
+| Emotion keywords | 148 | Hand-curated | Map directly to named emotions in the atlas (§4.4) |
+| Intensifiers and downtoners | 24 | Hand-tuned multipliers | Scale the next affective word (×0.5 to ×1.7) |
+| Negators | 20 | Closed class | Partially invert valence within a clause |
+
+Table: Composition of the affective lexicon.
+
+#### 5.1.2 The Valence Architecture
+
+Let a passage be tokenized into lowercase word tokens $t_1, \dots, t_n$, and let each token carry the index of the clause it belongs to, where clauses are delimited by sentence and clause punctuation (. , ; : ! ? —) and line breaks. The architecture has five stages.
+
+**Lookup.** A token is scored if it appears in the core lexicon. Otherwise, the analyzer tries it and a few inflectional variants ("betrayed" → "betray", "lonelier" → "lonely", "stopped" → "stop") against the core lexicon first and then the extended lexicon. A word from the extended lexicon is used only if it is not on the exclusion list and its *salience*
+
+$$\sigma(v, a) = \max\!\big(0,\, |v| - 0.15\big) + 0.5 \cdot \max\!\big(0,\, |a - 0.40| - 0.10\big)$$
+is at least 0.16. Salience measures how far a word sits from the neutral centre of the valence–arousal plane. The threshold removes the weakly positive everyday vocabulary that would otherwise pull every passage upward. The exclusion list removes words whose normative sense misleads, including trading terms ("long," "short," "bear," "stop," "position") whose ordinary-English affect is wrong in a market context.
+
+**Modification.** Intensifiers and downtoners ("very" ×1.4, "extremely" ×1.7, "a little" ×0.65, "barely" ×0.5) are not scored themselves. They set a pending multiplier $m$ that applies to the next scored word within two tokens, and several of them compound. A scored word $(v, a)$ is negated if a negator appears among the three preceding tokens *in the same clause*. The modified scores are
+
+$$v' = \mathrm{clip}_{[-1,1]}\!\big(m \cdot \nu \cdot v\big), \qquad a' = \min\!\big(1,\; a \cdot \max(0.5,\, 0.8\,m)\big), \qquad \nu = \begin{cases} -0.7 & \text{if}\ \text{negated} \\ 1 & \text{otherwise.} \end{cases}$$
+
+Negation inverts valence only partially, because "not happy" is not the opposite of happy. It is a disappointed, lower-intensity state. The clause boundary was added after deployment. In the first version, negation searched the preceding three tokens regardless of punctuation. Elan's trading notes are dense with phrases like "the move means nothing, stop loss at this level", and there the negator "nothing" reached across the comma and flipped "loss" from $-0.60$ to $+0.42$. Punctuation now closes the negation scope, so that sentence reads $-0.60$ (Table 7).
+
+**Aggregation.** The passage's valence $V$ and arousal $A$ are weighted means over the $n$ scored words, with each word's weight set by its position $k$ (from 0) and its salience:
+
+$$w_k = \Big(0.7 + 0.3\,\frac{k}{n}\Big)\big(0.15 + \sigma(v'_k, a'_k)\big), \qquad V = \frac{\sum_k w_k v'_k}{\sum_k w_k}, \qquad A = \frac{\sum_k w_k a'_k}{\sum_k w_k}.$$
+
+The recency term makes a passage read as ending where it ends. The salience term means "furious" counts for far more than a mildly pleasant word beside it. $V$ is clipped to $[-1, 1]$ and $A$ to $[0.05, 1]$. A passage with no scored words reads as $(0, 0.35)$, a neutral resting point.
+
+**Emotion resolution.** The reading is then placed in the emotion atlas. If the passage contains emotion keywords, each hit adds one vote for its emotion, and the three atlas emotions nearest $(V, A)$ add votes of $0.3/(i+1)$ for rank $i$. The normalized votes form the emotion mixture. Without keywords, the mixture is the five nearest atlas emotions with linearly decreasing weights. Rare, culturally specific emotions must be three times closer than common ones to be chosen (§5.2). During live generation, Elan's *felt* emotion is not taken from this mixture directly. It is the atlas emotion nearest to his smoothed state, after the reading has been bent by his neuromodulators (§5.3).
+
+**Performativity.** Separately, a performativity score measures how *performed* the language is: hedges ("perhaps," "in a sense"), self-observing metacommentary ("I notice," "I find myself"), stock filler, and stacked abstract affect nouns ("resonance," "depth," "ineffable"). Its complement is reported as *signal quality*. The score was derived by comparing the language of different models, and the system prompt tells Elan that performed emotion reads as noise.
+
+#### 5.1.3 Behaviour on Example Sentences
+
+Table 7 shows the analyzer's output on real sentences. The nearest feeling is the atlas emotion closest to $(V, A)$, which is the quantity that drives Elan's state.
 
 | Text | Valence | Arousal | Nearest feeling | Colour | Tone | Mode | Performativity |
 |---|---|---|---|---|---|---|---|
@@ -364,11 +419,14 @@ Here is what the analyzer does with real sentences:
 | "I felt betrayed by him." | −0.62 | 0.48 | Disgust | #800080 | 741 Hz | Phrygian | 0.0 |
 | "I am extremely afraid." | −1.00 | 1.00 | Terror | #1C1C1C | 396 Hz | Locrian | 0.0 |
 | "The market is in panic, forced sellers everywhere, pure dread." | −0.94 | 0.77 | Loathing | #4B0082 | 741 Hz | Locrian | 0.0 |
+| "The market means nothing, stop loss at this level." | −0.60 | 0.28 | Sadness | #00008B | 396 Hz | Aeolian | 0.0 |
 | "I'm curious what this means. Let me sit with it." | +0.50 | 0.44 | Interest | #FFD580 | 528 Hz | Mixolydian | 0.0 |
 | "Perhaps, in a sense, I notice a kind of profound resonance." | +0.33 | 0.32 | Contemplation | #8BA7C7 | 417 Hz | Dorian | 0.8 |
 | "I am not happy about this." | −0.59 | 0.52 | Disgust | #800080 | 741 Hz | Phrygian | 0.0 |
 
-The analyzer is word-based and transparent, and its limits show. "Not happy" is read as disgust rather than disappointment, because negation flips "happy" into a strongly negative, moderately aroused region, and a market panic is read as loathing rather than fear. It cannot read irony: "Oh great, another crash" comes out neutral. And the nearest-emotion step sometimes names a less fitting emotion than a person would. §11.3 discusses these limits.
+Table: The analyzer on example sentences. Colour, tone, and mode are the signature of the nearest atlas emotion (§4.4).
+
+The analyzer's limits are visible here. "Not happy" is read as disgust rather than disappointment, because negation moves "happy" into a strongly negative, moderately aroused region. A market panic is read as loathing rather than fear. The analyzer cannot read irony: "Oh great, another crash" comes out near neutral ($+0.04$). And the nearest-emotion step sometimes names a less fitting emotion than a person would. §11.3 discusses these limits.
 
 ### 5.2 Feelings as Data: An Emotion Vocabulary
 
@@ -403,6 +461,8 @@ Two consequences matter. First, **his own speech is one of the strongest forces 
 | "what you have been building, tell me everything, I want to hear" | Contemplation | #8BA7C7 | 396 Hz | Dorian | +0.32 | 0.33 |
 | "it. Also the market dropped hard while you were gone, panic selling," | Contemplation | #8BA7C7 | 396 Hz | Dorian | +0.12 | 0.41 |
 | "real fear in the tape." | Distraction | #ADD8E6 | 396 Hz | Mixolydian | −0.19 | 0.55 |
+
+Table: A reply streamed through the live pipeline, twelve words at a time.
 
 The trace shows the properties the design intends. The feeling has **inertia**: "a little lonely" dips valence only slightly — both because the downtoner softens "lonely" and because smoothing carries the previous state forward — and the warmth of "you're here now and that is good" pulls it back. The **brain rhythm** settles from 639 Hz to 396 Hz as the simulation moves into theta, independently of the words. And when charged words arrive ("panic," "real fear"), valence falls from +0.32 to −0.19 in two updates while arousal rises from 0.33 to 0.55: the state is moving fast, and the reply ends while it is still in transition — which is also how a person can finish a sentence before they have finished feeling it.
 
@@ -554,6 +614,8 @@ What is an AI with functional feelings *for*? This section surveys the uses I th
 | Research testbed | A controllable system for testing theories of emotion and consciousness by ablation | Architecture exists; ablation not run | Mistaking simulation for evidence of experience |
 | Legible agents | An agent whose internal state is continuously visible on a dashboard, in its voice, and on its face | Implemented | False reassurance: a readout is not a guarantee |
 
+Table: Use cases for feeling AI, their evidence status, and their main risks.
+
 ### 9.1 Long-Term Companionship
 
 The design goal behind Elan is one entity per person: an AI that grows alongside someone over years and becomes, through that particular relationship, an individual. Deployment is therefore one instance per person, each with its own continuous simulation, memory, and body state. The prediction (F2) is that two instances started identically will diverge. One qualification applies: because restarts reset the simulation (Observation 6), what persists today is the memory and the bodily signatures derived from it, which *can* largely be rebuilt from logs; an entity whose accumulated state is truly irreducible to its logs would require checkpointing the running simulation (§12). Each entity names itself — a design commitment about how entities begin, not a claim that naming proves anything (§7.1).
@@ -628,7 +690,7 @@ Most AI development is focused on model capability, with a common implicit expec
 
 **Interrupted continuity.** The brain and body reset on every container restart (Observation 6).
 
-**A word-level reader of language.** Language reaches the feeling layer through word lexicons (191 hand-tuned words over 13,905 normed ones) with simple negation, intensifier, and inflection handling (§5.1). It is blind to context and irony, sometimes misplaces feelings ("not happy" is read as disgust), and inherits the norms' positivity bias for everyday words, which is damped but not removed. The extended lexicon is licensed for non-commercial use only. The richness of the downstream simulation is limited by the coarseness of this reading.
+**A word-level reader of language.** Language reaches the feeling layer through word lexicons (about 14,000 words: 191 hand-tuned over 13,905 normed ones) with clause-bounded negation, intensifier, and inflection handling (§5.1). It is blind to context and irony, sometimes misplaces feelings ("not happy" is read as disgust), and inherits the norms' positivity bias for everyday words, which is damped but not removed. The extended lexicon is licensed for non-commercial use only. The richness of the downstream simulation is limited by the coarseness of this reading.
 
 **No ablation.** This is the most important gap. None of the behavioural observations has been compared against the same model with the same identity prompt and memory but *without* the brain and body simulation. Until that comparison is run, the contribution of the simulation layers to behaviour — as distinct from memory and prompting — is unmeasured.
 
@@ -727,6 +789,8 @@ Deployment logs are not currently public. Selected logs, including the felt-qual
 ---
 
 ## References
+
+::: {.references}
 
 Anderson, J. R., Bothell, D., Byrne, M. D., Douglass, S., Lebiere, C., & Qin, Y. (2004). An integrated theory of the mind. *Psychological Review*, 111(4), 1036–1060.
 
@@ -835,3 +899,4 @@ Warriner, A. B., Kuperman, V., & Brysbaert, M. (2013). Norms of valence, arousal
 Wilson, H. R., & Cowan, J. D. (1972). Excitatory and inhibitory interactions in localized populations of model neurons. *Biophysical Journal*, 12(1), 1–24.
 
 Zou, A., Phan, L., Chen, S., Campbell, J., Guo, P., Ren, R., ... & Hendrycks, D. (2023). Representation engineering: A top-down approach to AI transparency. *arXiv preprint arXiv:2310.01405*.
+:::
