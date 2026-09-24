@@ -451,6 +451,10 @@ def analyze_text(text: str) -> EmotionalReading:
     """
     text_lower = text.lower()
     tokens = re.findall(r"[a-z']+", text_lower)
+    # Clause index per token, so negation can't reach across punctuation
+    # ("means nothing, stop loss" must not flip "loss").
+    clause_of = [c for c, clause in enumerate(re.split(r"[.,;:!?\u2014\n]+", text_lower))
+                 for _ in re.findall(r"[a-z']+", clause)]
 
     # ── Pass 1: direct emotion keyword matching ──
     keyword_emotions: Dict[str, float] = {}
@@ -499,8 +503,9 @@ def analyze_text(text: str) -> EmotionalReading:
         multiplier = pending_mult
         pending_mult, pending_ttl = 1.0, 0
 
-        # Check window for negation (3 words back)
-        negated = any(tokens[i - j] in NEGATORS for j in range(1, 4) if i - j >= 0)
+        # Check window for negation (3 words back, same clause only)
+        negated = any(tokens[i - j] in NEGATORS and clause_of[i - j] == clause_of[i]
+                      for j in range(1, 4) if i - j >= 0)
 
         v, a = score
         if negated:
