@@ -20,3 +20,4 @@ feeling_output/
 *.log
 /tmp/
 .vercel
+paper_site/
