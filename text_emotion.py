@@ -84,6 +84,7 @@ AFFECTIVE_LEXICON: Dict[str, Tuple[float, float]] = {
     "dangerous": (-0.75, 0.75), "crisis": (-0.70, 0.80),
 
     # Negative valence, low arousal
+    "alone": (-0.55, 0.25), "miss": (-0.45, 0.45),
     "sad": (-0.75, 0.25), "sadness": (-0.75, 0.25), "grief": (-1.0, 0.10),
     "sorrow": (-0.80, 0.20), "melancholy": (-0.60, 0.20), "depressed": (-0.85, 0.15),
     "lonely": (-0.75, 0.20), "empty": (-0.65, 0.10), "lost": (-0.55, 0.30),
@@ -98,10 +99,6 @@ AFFECTIVE_LEXICON: Dict[str, Tuple[float, float]] = {
     "jealous": (-0.55, 0.65), "envy": (-0.55, 0.65), "proud": (0.75, 0.70),
     "pride": (0.75, 0.70), "humble": (0.45, 0.25), "remorse": (-0.85, 0.30),
     "regret": (-0.65, 0.35), "nostalgia": (-0.10, 0.35), "longing": (-0.20, 0.45),
-
-    # Intensifiers (handled separately, but included for lexicon completeness)
-    "very": (0, 0), "extremely": (0, 0), "deeply": (0, 0), "profoundly": (0, 0),
-    "slightly": (0, 0), "somewhat": (0, 0), "rather": (0, 0),
 
     # Abstract / conceptual (slight positive lean for ideas)
     "truth": (0.42, 0.38), "meaning": (0.45, 0.42), "purpose": (0.48, 0.45),
@@ -286,7 +283,93 @@ INTENSIFIERS = {"very": 1.4, "extremely": 1.7, "deeply": 1.5, "profoundly": 1.6,
                 "incredibly": 1.6, "absolutely": 1.5, "utterly": 1.6, "completely": 1.5,
                 "slightly": 0.6, "somewhat": 0.7, "rather": 0.8, "quite": 0.9,
                 "a bit": 0.65, "little": 0.6, "barely": 0.5, "truly": 1.3,
-                "so": 1.2, "such": 1.2, "really": 1.3, "genuinely": 1.2}
+                "so": 1.2, "such": 1.2, "really": 1.3, "genuinely": 1.2,
+                "real": 1.25, "pure": 1.3, "total": 1.4, "totally": 1.4}
+
+
+# ──────────────────────────────────────────────────────────────
+# EXTENDED LEXICON — Warriner, Kuperman & Brysbaert (2013)
+# 13,915 English lemmas rated for valence and arousal (1–9 scales).
+# Licensed CC BY-NC-ND 3.0: the CSV ships unmodified in data/warriner_2013/
+# and is rescaled here at load time. The hand-tuned AFFECTIVE_LEXICON above
+# always takes precedence; Warriner fills in every word it doesn't cover.
+# ──────────────────────────────────────────────────────────────
+
+import csv as _csv
+import os as _os
+
+_WARRINER_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                               "data", "warriner_2013", "Ratings_Warriner_et_al.csv")
+_W_A_MIN, _W_A_MAX = 1.6, 7.79   # observed arousal range in the norms
+
+
+def _load_warriner() -> Dict[str, Tuple[float, float]]:
+    try:
+        with open(_WARRINER_PATH, newline="") as f:
+            out = {}
+            for row in _csv.DictReader(f):
+                v = (float(row["V.Mean.Sum"]) - 5.0) / 4.0                    # 1..9 → -1..+1
+                a = (float(row["A.Mean.Sum"]) - _W_A_MIN) / (_W_A_MAX - _W_A_MIN)  # → 0..1
+                out[row["Word"].lower()] = (max(-1.0, min(1.0, v)), max(0.0, min(1.0, a)))
+            return out
+    except Exception as e:
+        print(f"[text_emotion] Warriner lexicon unavailable ({e}); using core lexicon only")
+        return {}
+
+
+EXTENDED_LEXICON: Dict[str, Tuple[float, float]] = _load_warriner()
+
+# Everyday words in the norms carry a mild positivity bias ("go" +0.33,
+# "market" +0.30). Words this close to neutral are skipped so they don't
+# dilute the charged ones; every scored word is also weighted by salience.
+_MIN_EXTENDED_SALIENCE = 0.16
+
+
+# Words whose everyday use is not affective, though the norms rate their
+# affective sense ("means" → mean/cruel, "a kind of" → kind/gentle), plus
+# trading vocabulary whose ordinary-English affect is misleading here.
+_EXTENDED_EXCLUDE = frozenset({
+    "mean", "means", "meant", "kind", "kinds", "like", "likes", "liked",
+    "well", "right", "sort", "fine", "pretty", "just", "lot", "sure",
+    "mind", "matter", "deal", "long", "short", "bear", "bull", "put",
+    "call", "position", "stop", "spread", "margin", "level", "live", "lives",
+})
+
+
+def _salience(v: float, a: float) -> float:
+    """How emotionally charged a word is: distance from neutral valence and arousal."""
+    return max(0.0, abs(v) - 0.15) + 0.5 * max(0.0, abs(a - 0.40) - 0.10)
+
+
+def _lemma_candidates(tok: str) -> List[str]:
+    """Cheap inflection stripping: betrayed → betray, lonelier → lonely, hurting → hurt."""
+    c = [tok]
+    if tok.endswith("'s"): c.append(tok[:-2])
+    if tok.endswith("ies") or tok.endswith("ied"): c.append(tok[:-3] + "y")
+    if tok.endswith("ier"): c.append(tok[:-3] + "y")
+    if tok.endswith("ing") and len(tok) > 5:
+        c += [tok[:-3], tok[:-3] + "e"]
+        if len(tok) > 6 and tok[-4] == tok[-5]: c.append(tok[:-4])   # running → run
+    if tok.endswith("ed") and len(tok) > 4:
+        c += [tok[:-2], tok[:-1]]
+        if len(tok) > 5 and tok[-3] == tok[-4]: c.append(tok[:-3])   # stopped → stop
+    if tok.endswith("es") and len(tok) > 4: c.append(tok[:-2])
+    if tok.endswith("s") and len(tok) > 3: c.append(tok[:-1])
+    if tok.endswith("ly") and len(tok) > 5: c.append(tok[:-2])
+    return c
+
+
+def _word_score(tok: str) -> Optional[Tuple[float, float]]:
+    """(valence, arousal) for a token, or None if it carries no affect."""
+    if tok in AFFECTIVE_LEXICON:
+        return AFFECTIVE_LEXICON[tok]
+    for cand in _lemma_candidates(tok):
+        if cand in AFFECTIVE_LEXICON:
+            return AFFECTIVE_LEXICON[cand]
+        if cand in EXTENDED_LEXICON and cand not in _EXTENDED_EXCLUDE and tok not in _EXTENDED_EXCLUDE:
+            v, a = EXTENDED_LEXICON[cand]
+            return (v, a) if _salience(v, a) >= _MIN_EXTENDED_SALIENCE else None
+    return None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -383,33 +466,58 @@ def analyze_text(text: str) -> EmotionalReading:
         i += 1
 
     # ── Pass 2: lexicon valence/arousal with negation + intensifiers ──
+    # Intensifiers ("very", "deeply", "a bit") are not scored themselves: they
+    # scale the next affective word within two tokens. Each scored word is
+    # weighted by recency and by salience, so charged words dominate bland ones.
     valence_scores = []
     arousal_scores = []
+    saliences = []
 
+    pending_mult, pending_ttl = 1.0, 0
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
 
-        # Check for intensifier
-        multiplier = INTENSIFIERS.get(token, 1.0)
+        if token == "a" and nxt in ("bit", "little"):
+            pending_mult, pending_ttl = pending_mult * INTENSIFIERS["a bit"], 2
+            i += 2
+            continue
+        if token in INTENSIFIERS and token != "little":
+            pending_mult, pending_ttl = pending_mult * INTENSIFIERS[token], 2
+            i += 1
+            continue
+
+        score = _word_score(token)
+        if score is None:
+            pending_ttl -= 1
+            if pending_ttl <= 0:
+                pending_mult = 1.0
+            i += 1
+            continue
+
+        multiplier = pending_mult
+        pending_mult, pending_ttl = 1.0, 0
 
         # Check window for negation (3 words back)
-        negated = any(tokens[max(0,i-j)] in NEGATORS for j in range(1,4))
+        negated = any(tokens[i - j] in NEGATORS for j in range(1, 4) if i - j >= 0)
 
-        if token in AFFECTIVE_LEXICON:
-            v, a = AFFECTIVE_LEXICON[token]
-            if negated:
-                v = -v * 0.7  # negation partially flips valence
-            v *= multiplier
-            a *= max(0.5, multiplier * 0.8)  # arousal also amplified
-            valence_scores.append(v)
-            arousal_scores.append(a)
+        v, a = score
+        if negated:
+            v = -v * 0.7  # negation partially flips valence
+        v = max(-1.0, min(1.0, v * multiplier))
+        a = min(1.0, a * max(0.5, multiplier * 0.8))  # arousal also amplified
+        valence_scores.append(v)
+        arousal_scores.append(a)
+        saliences.append(_salience(v, a))
         i += 1
 
     # Aggregate
     if valence_scores:
-        # Weighted mean: words later in text weighted slightly more (recency)
-        weights = [0.7 + 0.3 * (i / len(valence_scores)) for i in range(len(valence_scores))]
+        # Weighted mean: later words weigh slightly more (recency), and charged
+        # words weigh more than mild ones (salience).
+        n = len(valence_scores)
+        weights = [(0.7 + 0.3 * (k / n)) * (0.15 + saliences[k]) for k in range(n)]
         total_w = sum(weights)
         valence = sum(v * w for v, w in zip(valence_scores, weights)) / total_w
         arousal = sum(a * w for a, w in zip(arousal_scores, weights)) / total_w
