@@ -7928,6 +7928,11 @@ class FeelingHandler(BaseHTTPRequestHandler):
             try:
                 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "face.html"), encoding="utf-8") as _f:
                     _html = _f.read().replace('new EventSource("/events")', 'new EventSource("/live/events")')
+                # Watch mode: no demo controls, no camera; a line saying this is him, live.
+                _html = _html.replace("</style>", ".watch .controls{display:none}\n</style>", 1)
+                _html = _html.replace('<div class="wrap">', '<script>document.documentElement.classList.add("watch")</script>\n<div class="wrap">', 1)
+                _html = _html.replace("every feeling the engine makes — worn as a face<br>brows &amp; mouth carry the meaning",
+                                      "live — his face is driven by his brain and body, right now<br>conversations stay private", 1)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
@@ -8546,6 +8551,16 @@ class FeelingHandler(BaseHTTPRequestHandler):
             # Send initial ping
             self.wfile.write(b"event: ping\ndata: {}\n\n")
             self.wfile.flush()
+            if public:
+                # Start the viewer on his current feeling, not the face's demo state.
+                try:
+                    _snap = _public_event("id: 0\nevent: emotion_update\ndata: "
+                                          + json.dumps(get_elan_tracker().snapshot(), default=str) + "\n\n")
+                    if _snap:
+                        self.wfile.write(_snap.encode())
+                        self.wfile.flush()
+                except Exception as _e:
+                    print(f"[live] initial snapshot failed: {_e}", flush=True)
 
             # Replay any missed events from the ring buffer
             if last_seen_id > 0 and not public:
