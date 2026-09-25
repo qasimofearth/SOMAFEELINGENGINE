@@ -7815,6 +7815,54 @@ def _serve_login_page(handler, error: str = ""):
 
 # ── HTTP HANDLER ──────────────────────────────────────────────
 
+# ── PUBLIC LIVE VIEW ──────────────────────────────────────────
+# /live is a public, watch-only view of Elan: his face driven by his brain and
+# body, with no conversation. Its event stream is a whitelist of state events
+# with text stripped out; spoken text is replaced by placeholder syllables of
+# the same length, so his mouth still moves without revealing what he says.
+_PUBLIC_SSE_MAX = 40
+_public_sse_count = 0
+_EMOTION_PUBLIC_KEYS = ("emotion", "hex", "rgb", "valence", "arousal", "description",
+                        "evidence", "eeg_band", "musical_mode", "solfeggio_hz")
+_SYLLABLES = ("ma", "lo", "ve", "si", "ra", "no", "the", "wu", "pa", "fi")
+
+
+def _mask_text(text: str) -> str:
+    out = []
+    for i, word in enumerate(text.split(" ")):
+        n = len(word)
+        syl = (_SYLLABLES[(i + n) % len(_SYLLABLES)] * (n // 2 + 1))[:n]
+        out.append(syl)
+    return " ".join(out)
+
+
+def _public_event(msg: str):
+    """Return a sanitized SSE message for the public stream, or None to drop it."""
+    try:
+        head, _, rest = msg.partition("\nevent: ")
+        event, _, rest = rest.partition("\ndata: ")
+        data = json.loads(rest.strip())
+    except Exception:
+        return None
+    if event in ("emotion_update", "emotion_final"):
+        out = {k: data[k] for k in _EMOTION_PUBLIC_KEYS if k in data}
+        out["mix"] = [{"name": m.get("name"), "weight": m.get("weight"), "hex": m.get("hex")}
+                      for m in (data.get("mix") or [])[:4]]
+        b = data.get("brain") or {}
+        out["brain"] = {k: b[k] for k in ("active_regions", "nt_levels", "eeg_bands",
+                                          "sync_order", "dominant_band") if k in b}
+    elif event == "brain_coherence":
+        out = {k: data[k] for k in ("sync_order", "phase_coherence", "emergent_freq_hz",
+                                    "binding", "integration", "metastability") if k in data}
+    elif event == "body_tick":
+        out = {k: data[k] for k in ("vitals", "musculoskeletal") if k in data}
+    elif event in ("text_chunk", "auto_text_chunk"):
+        out = {"text": _mask_text(str(data.get("text", "")))}
+    else:
+        return None
+    return f"{head}\nevent: {event}\ndata: {json.dumps(out, default=str)}\n\n"
+
+
 class FeelingHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
@@ -7874,6 +7922,21 @@ class FeelingHandler(BaseHTTPRequestHandler):
         # /healthz also public (legacy curl scripts use it); authed callers get full detail.
         if path in ("/ping", "/healthz"):
             self._handle_healthz(full=self._is_authed())
+            return
+        # Public watch-only view: face + filtered state stream, no conversation.
+        if path == "/live":
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "face.html"), encoding="utf-8") as _f:
+                    _html = _f.read().replace('new EventSource("/events")', 'new EventSource("/live/events")')
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(_html.encode("utf-8"))
+            except Exception as _e:
+                self.send_error(500, str(_e))
+            return
+        if path == "/live/events":
+            self.serve_sse(public=True)
             return
         # Login page — serve without auth for root path
         if path in ("/", "/index.html", ""):
@@ -8450,7 +8513,14 @@ class FeelingHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    def serve_sse(self):
+    def serve_sse(self, public: bool = False):
+        global _public_sse_count
+        if public:
+            with sse_lock:
+                if _public_sse_count >= _PUBLIC_SSE_MAX:
+                    self.send_error(503, "Too many viewers right now")
+                    return
+                _public_sse_count += 1
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -8478,7 +8548,7 @@ class FeelingHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
             # Replay any missed events from the ring buffer
-            if last_seen_id > 0:
+            if last_seen_id > 0 and not public:
                 for eid, m in list(_sse_recent):
                     if eid > last_seen_id:
                         try:
@@ -8490,6 +8560,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
             while True:
                 try:
                     msg = q.get(timeout=15)
+                    if public:
+                        msg = _public_event(msg)
+                        if msg is None:
+                            continue
                     self.wfile.write(msg.encode())
                     self.wfile.flush()
                 except queue.Empty:
@@ -8502,6 +8576,8 @@ class FeelingHandler(BaseHTTPRequestHandler):
             with sse_lock:
                 if q in sse_clients:
                     sse_clients.remove(q)
+                if public:
+                    _public_sse_count -= 1
 
     def send_json(self, data: dict):
         body = json.dumps(data).encode()
