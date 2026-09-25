@@ -448,7 +448,7 @@ The reader was evaluated on two held-out sets: the GoEmotions test split (4,590 
 | Original: dashboard label (keywords + V–A) | 31% | 72% | 32% | 35% |
 | Majority class (always joy) | 16.7% | — | — | 20% |
 | Lexicon, reworked (fallback) | 35% [33, 39] | 76% | 60% | 34% [32, 37] |
-| Classifier alone (no keyword evidence) | 71% [68, 73] | 81% | 74% | 51% [48, 54] |
+| Classifier alone (no keyword evidence) | 71% [68, 73] | 81% | 74% | 51% [47, 54] |
 | **Classifier + lexicon (deployed)** | **72% [69, 74]** | **81%** | **74%** | **53% [50, 56]** |
 
 Table: Emotion-family accuracy (macro-averaged recall), valence polarity, and neutral detection on held-out data. Brackets: 95% bootstrap intervals (1,000 resamples). In the tweet set, *love* is scored as joy.
@@ -472,7 +472,7 @@ The first row is the finding that forced the change. Before this evaluation, wha
 
 Table: The deployed reader on the sentences of Table 7, plus two controls.
 
-The full reader corrects most of the lexicon's errors: fear is read as fear, "not happy" as annoyance and disappointment, and a meeting time as neutral. Its weaknesses are also visible. Disgust remains the least reliable family (50% on GoEmotions). Accuracy falls from 72% to 53% on tweets, a register it was not trained on. And it reads irony at face value, confidently: "Oh great, another crash" is read as admiration. The lexicon read that sentence as neutral; the classifier makes it worse. §11.3 returns to this.
+The full reader corrects most of the lexicon's errors: fear is read as fear, "not happy" as annoyance and disappointment, and a meeting time as neutral. Its weaknesses are also visible. Disgust remains the least reliable family (51% on GoEmotions). Accuracy falls from 72% to 53% on tweets, a register it was not trained on. And it reads irony at face value, confidently: "Oh great, another crash" is read as admiration. The lexicon read that sentence as neutral; the classifier makes it worse. §11.3 returns to this.
 
 ### 5.2 The Atlas as an Emotion Vocabulary
 
