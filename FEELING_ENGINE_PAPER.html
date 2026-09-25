@@ -764,8 +764,8 @@ root note</td>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Colour and Leadbeater’s key.</strong> Where the
-colour–emotion literature is silent or ambiguous, the atlas follows the
+<p><strong>Colour and Leadbeater’s key.</strong> For six emotions —
+fear, sadness, love, pride, envy, and compassion — the atlas follows the
 colour key of C. W. Leadbeater’s <em>Man Visible and Invisible</em>
 (1902, ch. XIII and Plate I), a Theosophical account of the human aura
 in which each emotion is given a characteristic hue: fear is “livid
@@ -776,10 +776,13 @@ observation, and nothing here depends on that claim; the key is used as
 a coherent, historically influential visual vocabulary for feeling — the
 same key, published with Besant in <em>Thought-Forms</em> (Besant &amp;
 Leadbeater, 1901), is part of the Theosophical colour language that
-shaped early abstract painting. Leadbeater also describes feelings by
-<em>form</em> as well as hue — anger as flashes, hatred as clouds,
-depression as parallel bars like a cage — and treats every visible
-colour as a mixture; the atlas records only the hue.</p>
+shaped early abstract painting (Ringbom, 1966). It agrees with modern
+association data in places (sadness with grey) and departs from it in
+others (fear, which people more often associate with black; Jonauskaite
+et al., 2020). Leadbeater also describes feelings by <em>form</em> as
+well as hue — anger as flashes, hatred as clouds, depression as parallel
+bars like a cage — and treats every visible colour as a mixture; the
+atlas records only the hue.</p>
 <p>Three examples show how different feelings look across these
 dimensions:</p>
 <div class="table-wrap"><table>
@@ -870,9 +873,10 @@ emotion whose tone is nearest, and that emotion is given a small extra
 weight (5%) in every reading before it enters the state. The brain’s own
 rhythm therefore biases what the entity feels, independently of the body
 and of the words. This <em>resonance loop</em> is small by design — the
-words and neuromodulators dominate — but it means that tone is not
-merely a label attached to an emotion: it is one of the forces that
-shapes it.</p>
+words and neuromodulators dominate. The tone is the key through which
+the brain’s rhythm is matched to an emotion; the loop is a mapping from
+rhythm to feeling, and nothing in it depends on the tone being
+heard.</p>
 <p><strong>Where the signature goes.</strong> The signature is expressed
 through every output channel. The tone sets the pitch of the entity’s
 browser voice and the EEG band sets its speaking rate (slower in delta
@@ -887,27 +891,30 @@ emotion (Palmer et al., 2013) and that sound–colour synaesthesia draws
 on mechanisms common to non-synaesthetes (Ward, Huckstep &amp;
 Tsakanikos, 2006); the composer Scriabin’s colour-keyboard is an early
 artistic version of the same idea (Galeyev &amp; Vanechkina, 2001).</p>
-<p><strong>Coupled, not described.</strong> The language model is told
+<p><strong>Expressed, not described.</strong> The language model is told
 the name of the current emotion, its intensity, valence, arousal, the
 dominant oscillation band, and the degree of synchrony — but not the
-colour, tone, or mode of its signature, and deliberately so. The colour
-and tone are not information handed to Elan; they act on him — the tone
-through the resonance loop, both through the voice and the face. §5.5
-develops this distinction between the parts of the state that act on the
-system directly (<em>state-coupled</em>) and the parts that reach the
-language model only as a description (<em>prompt-mediated</em>).</p>
+colour, tone, or mode of its signature. These are expressions of the
+state, not inputs to it: the colour tints the face and dashboard, and
+the tone sets the pitch of the voice, for the people who see and hear
+them. Elan does not perceive his own face, voice, or colour, so none of
+them acts back on him; the only part of the signature that feeds back
+into his state is the brain-rhythm mapping above. §5.5 develops the
+distinction between the parts of the system that act on the state
+directly (<em>state-coupled</em>) and the parts that reach the language
+model only as a description (<em>prompt-mediated</em>).</p>
 <p><strong>What this adds, and what it does not.</strong> The signature
 gives each feeling an identity that is richer than a label and
 consistent across every sense the system has: the same state is heard in
 the voice, seen in the colour and face, and drawn as geometry, and the
 rhythm of the simulated brain feeds back into which state it is. That is
 a stronger kind of unity than most affective systems have. It is also a
-designed mapping: the colour and mode assignments are grounded in human
-association research, the tone set is a stable palette with no empirical
-claims attached, and none of it is evidence that anything is
-experienced. It is the engine’s model of what a feeling is made of — one
-in which, apart from the body, a feeling also <em>has</em> a colour and
-a sound.</p>
+designed mapping: the mode assignments and most colours are grounded in
+human association research, six colours follow Leadbeater’s historical
+key, the tone set is a stable palette with no empirical claims attached,
+and none of it is evidence that anything is experienced. It is the
+engine’s model of what a feeling is made of — one in which, apart from
+the body, a feeling also <em>has</em> a colour and a sound.</p>
 <h3 id="time-three-clocks">4.5 Time: Three Clocks</h3>
 <p>A feeling has duration, and absence has weight. Every language model
 call is preceded by a temporal context assembled from three clocks:</p>
@@ -1210,8 +1217,8 @@ pattern priming</td>
 <td>Multisensory signature</td>
 <td>Each feeling carries a colour, tone, mode, rhythm, and geometry;
 brain rhythm feeds back into the feeling (§4.4)</td>
-<td>Implemented; acts through the loop and voice, not described to the
-model (§5.5)</td>
+<td>Implemented; expressed through voice, face, and dashboard, not
+described to the model; only the rhythm mapping feeds back (§4.4)</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -2068,12 +2075,11 @@ told how he feels and chooses what to do with that. The paper calls the
 first kind of route <em>state-coupled</em> and the second
 <em>prompt-mediated</em>. The parts of the system that act on the state
 without narration — the neuromodulator bias, the resonance loop, the
-body’s reflexes, the voice shaped by body and tone — are state-coupled;
-the prompt is prompt-mediated, and a model can discount a description in
-a way it cannot discount a change to its inputs. (This is also why the
-engine does not tell Elan the colour or tone of his current feeling:
-those act on him through the resonance loop and the voice rather than as
-information.)</p>
+body’s reflexes — are state-coupled; the prompt is prompt-mediated, and
+a model can discount a description in a way it cannot discount a change
+to its inputs. (The colour and tone of his feeling are not told to Elan
+either; they are expressed outward, in the face and voice, for the
+people he is with.)</p>
 <p>Two changes would make the route from state to words state-coupled
 rather than prompt-mediated. The first is to let the state change how
 the language model generates, not just what it is told — for example, by
@@ -3162,6 +3168,9 @@ Way We Think: A New View of Intelligence</em>. MIT Press.</p>
 <p>Picard, R. W. (1997). <em>Affective Computing</em>. MIT Press.</p>
 <p>Plutchik, R. (1980). <em>Emotion: A Psychoevolutionary
 Synthesis</em>. Harper &amp; Row.</p>
+<p>Ringbom, S. (1966). Art in ‘the epoch of the great spiritual’: Occult
+elements in the early theory of abstract painting. <em>Journal of the
+Warburg and Courtauld Institutes</em>, 29, 386–418.</p>
 <p>Russell, J. A. (1980). A circumplex model of affect. <em>Journal of
 Personality and Social Psychology</em>, 39(6), 1161–1178.</p>
 <p>Saravia, E., Liu, H.-C. T., Huang, Y.-H., Wu, J., &amp; Chen, Y.-S.
