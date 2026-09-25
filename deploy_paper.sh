@@ -17,9 +17,9 @@ echo "→ Assembling deploy folder ..."
 mkdir -p "$DEP/docs/screenshots" "$DEP/.vercel"
 cp FEELING_ENGINE_PAPER.html "$DEP/index.html"
 cp architecture_diagram.png "$DEP/"
-cp docs/screenshots/fig2_full_dashboard.png docs/screenshots/fig3_body_system.png \
-   docs/screenshots/fig4_aya_eeg.png docs/screenshots/fig5_brain_state.png \
-   docs/screenshots/fig6_neural_network.png "$DEP/docs/screenshots/"
+# every image in docs/screenshots/ ships, so new figures just need a line in the markdown
+cp docs/screenshots/*.png docs/screenshots/*.jpg docs/screenshots/*.jpeg docs/screenshots/*.gif \
+   docs/screenshots/*.webp "$DEP/docs/screenshots/" 2>/dev/null || true
 # keep this folder linked to the existing Vercel project (no new project gets made)
 printf '{"projectId":"%s","orgId":"%s","projectName":"feeling-engine-paper"}\n' \
    "$PROJECT_ID" "$ORG_ID" > "$DEP/.vercel/project.json"
