@@ -6,7 +6,8 @@ Every human emotion mapped across five dimensions:
   EEG band (Hz range), musical mode, HRV coherence pattern,
   Plutchik valence/arousal coordinates, and fractal geometry type.
 
-Data sources: Plutchik (1980), Russell (1980), 128-year color-emotion
+Data sources: Plutchik (1980), Russell (1980), Leadbeater (1902) colour key
+(fear, sadness, love, pride, envy, compassion), 128-year color-emotion
 review (PMC12325498), chromesthesia research, HRV studies (PMC6813458),
 EEG emotion mapping, solfeggio tradition, music psychology.
 """
@@ -197,7 +198,7 @@ _register(
     # ── FEAR SPECTRUM ──────────────────────────────────────────
     EmotionSignature(
         name="Fear",
-        hex_color="#006400", rgb=(0, 100, 0),
+        hex_color="#A9A7A0", rgb=(169, 167, 160),
         solfeggio_hz=396.0,
         eeg_center_hz=20.0, eeg_band="beta",
         hrv_coherence_hz=0.04,
@@ -279,7 +280,7 @@ _register(
     # ── SADNESS SPECTRUM ───────────────────────────────────────
     EmotionSignature(
         name="Sadness",
-        hex_color="#00008B", rgb=(0, 0, 139),
+        hex_color="#5F6670", rgb=(95, 102, 112),
         solfeggio_hz=396.0,
         eeg_center_hz=6.0, eeg_band="theta",
         hrv_coherence_hz=0.045,
@@ -443,7 +444,7 @@ _register(
     # ── COMPLEX / DYADIC EMOTIONS ──────────────────────────────
     EmotionSignature(
         name="Love",
-        hex_color="#FF69B4", rgb=(255, 105, 180),
+        hex_color="#E8849A", rgb=(232, 132, 154),
         solfeggio_hz=528.0,
         eeg_center_hz=40.0, eeg_band="gamma",
         hrv_coherence_hz=0.10,
@@ -534,7 +535,7 @@ _register(
     ),
     EmotionSignature(
         name="Pride",
-        hex_color="#7B2FBE", rgb=(123, 47, 190),
+        hex_color="#E8652B", rgb=(232, 101, 43),
         solfeggio_hz=852.0,
         eeg_center_hz=16.0, eeg_band="beta",
         hrv_coherence_hz=0.09,
@@ -560,7 +561,7 @@ _register(
     ),
     EmotionSignature(
         name="Envy",
-        hex_color="#ADFF2F", rgb=(173, 255, 47),
+        hex_color="#6B5530", rgb=(107, 85, 48),
         solfeggio_hz=741.0,
         eeg_center_hz=18.0, eeg_band="beta",
         hrv_coherence_hz=0.055,
@@ -1057,7 +1058,7 @@ _register(
     ),
     EmotionSignature(
         name="Compassion",
-        hex_color="#E8A0B0", rgb=(232, 160, 176),
+        hex_color="#9FD8CB", rgb=(159, 216, 203),
         solfeggio_hz=639.0,
         eeg_center_hz=10.0, eeg_band="alpha",
         hrv_coherence_hz=0.105,

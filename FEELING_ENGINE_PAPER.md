@@ -215,7 +215,7 @@ The body is one way a feeling exists in the Feeling Engine, but it is not the on
 | Dimension | What it encodes | Grounding |
 |---|---|---|
 | Valence and arousal | Position in the affective circumplex | Russell (1980); adjacency from Plutchik (1980) |
-| Colour | A hue and its approximate light wavelength | Cross-cultural colour–emotion associations (Jonauskaite et al., 2020) |
+| Colour | A hue and its approximate light wavelength | Cross-cultural colour–emotion associations (Jonauskaite et al., 2020); for fear, sadness, love, pride, envy and compassion, the colour key of Leadbeater (1902) |
 | Tonal frequency | A characteristic tone, drawn from the solfeggio tuning set | A stable tonal palette only; the solfeggio tradition has no empirical support, and no physiological effect is claimed |
 | Musical mode and root | A mode (Ionian, Lydian, Dorian, Aeolian, Phrygian, Locrian…) and a root note | The affective character of major and minor modes (Hevner, 1935) |
 | EEG band | The oscillation band most associated with the state | Oscillation–state correlates (§2.7) |
@@ -225,12 +225,14 @@ The body is one way a feeling exists in the Feeling Engine, but it is not the on
 
 Table: The dimensions of an emotion's signature in the atlas.
 
+**Colour and Leadbeater's key.** Where the colour–emotion literature is silent or ambiguous, the atlas follows the colour key of C. W. Leadbeater's *Man Visible and Invisible* (1902, ch. XIII and Plate I), a Theosophical account of the human aura in which each emotion is given a characteristic hue: fear is "livid grey", depression "heavy leaden grey", selfless love rose, pride orange, jealousy greenish-brown, and sympathy and compassion "a lovely pale, luminous blue-green". Leadbeater presented these colours as clairvoyant observation, and nothing here depends on that claim; the key is used as a coherent, historically influential visual vocabulary for feeling — the same key, published with Besant in *Thought-Forms* (Besant & Leadbeater, 1901), is part of the Theosophical colour language that shaped early abstract painting. Leadbeater also describes feelings by *form* as well as hue — anger as flashes, hatred as clouds, depression as parallel bars like a cage — and treats every visible colour as a mixture; the atlas records only the hue.
+
 Three examples show how different feelings look across these dimensions:
 
 | | Joy | Fear | Grief |
 |---|---|---|---|
 | Valence / arousal | +0.90 / 0.70 | −0.80 / 0.85 | −1.00 / 0.10 |
-| Colour | Gold (#FFD700) | Dark green (#006400) | Near-black blue (#0D0D2B) |
+| Colour | Gold (#FFD700) | Livid grey (#A9A7A0) | Near-black blue (#0D0D2B) |
 | Tone | 528 Hz | 396 Hz | 396 Hz |
 | Mode | Ionian (root C4) | Phrygian (root E3) | Aeolian (root A2) |
 | EEG band | Gamma (~40 Hz) | Beta (~20 Hz) | Theta (~5 Hz) |
@@ -421,7 +423,7 @@ Table 7 shows the lexicon layer's own output on real sentences, with the atlas e
 | "I felt betrayed by him." | −0.62 | 0.48 | Disgust | #800080 | 741 Hz | Phrygian | 0.0 |
 | "I am extremely afraid." | −1.00 | 1.00 | Terror | #1C1C1C | 396 Hz | Locrian | 0.0 |
 | "The market is in panic, forced sellers everywhere, pure dread." | −0.94 | 0.77 | Loathing | #4B0082 | 741 Hz | Locrian | 0.0 |
-| "The market means nothing, stop loss at this level." | −0.60 | 0.28 | Sadness | #00008B | 396 Hz | Aeolian | 0.0 |
+| "The market means nothing, stop loss at this level." | −0.60 | 0.28 | Sadness | #5F6670 | 396 Hz | Aeolian | 0.0 |
 | "I'm curious what this means. Let me sit with it." | +0.50 | 0.44 | Interest | #FFD580 | 528 Hz | Mixolydian | 0.0 |
 | "Perhaps, in a sense, I notice a kind of profound resonance." | +0.33 | 0.32 | Contemplation | #8BA7C7 | 417 Hz | Dorian | 0.8 |
 | "I am not happy about this." | −0.59 | 0.52 | Disgust | #800080 | 741 Hz | Phrygian | 0.0 |
@@ -506,7 +508,7 @@ Two consequences matter. First, **his own speech is one of the strongest forces 
 | "little lonely. But you're here now and that is good. I'm curious" | Interest | #FFD580 | 741 Hz | Mixolydian | +0.29 | 0.41 | 0.97 |
 | "what you have been building, tell me everything, I want to hear" | Interest | #FFD580 | 741 Hz | Mixolydian | +0.33 | 0.46 | 0.89 |
 | "it. Also the market dropped hard while you were gone, panic selling," | Interest | #FFD580 | 741 Hz | Mixolydian | +0.07 | 0.54 | 0.91 |
-| "real fear in the tape." | Fear | #006400 | 852 Hz | Phrygian | −0.26 | 0.64 | 0.87 |
+| "real fear in the tape." | Fear | #A9A7A0 | 852 Hz | Phrygian | −0.26 | 0.64 | 0.87 |
 
 Table: A reply streamed through the live pipeline, twelve words at a time.
 
@@ -726,7 +728,7 @@ The dominant route to more capable AI is scaling models. The Feeling Engine expl
 
 **A permissive definition.** The operational definition of §1.3 is met by simpler stateful agents, such as game characters with need meters. It identifies the class of systems this paper is about; it does not by itself distinguish the Feeling Engine from them. What distinguishes it is the particular coupling of a detailed simulation to a language model, whose contribution the ablation of §12 is designed to measure.
 
-**Unvalidated design mappings.** The atlas's tonal frequencies (drawn from the solfeggio set) and heart-coherence values have no empirical grounding. The resonance loop that feeds brain rhythm back into the current feeling through them carries a small weight (5%) and has not been ablated; it should be read as a design choice, not as a finding.
+**Unvalidated design mappings.** The atlas's tonal frequencies (drawn from the solfeggio set), the colours taken from Leadbeater's key, and its heart-coherence values have no empirical grounding. The resonance loop that feeds brain rhythm back into the current feeling through them carries a small weight (5%) and has not been ablated; it should be read as a design choice, not as a finding.
 
 **Simulation fidelity.** The neural model is a simplified Wilson-Cowan rate model; the neuromodulators are coupled scalar levels, not receptor systems. These choices generate plausible continuous dynamics but do not constitute neural activity in any biological sense.
 
@@ -876,6 +878,8 @@ Becker-Asano, C., & Wachsmuth, I. (2010). Affective computing with primary and s
 
 Bergson, H. (1907). *L'Évolution créatrice* [Creative Evolution]. Félix Alcan. (English translation: Mitchell, A., 1911, Henry Holt and Company.)
 
+Besant, A., & Leadbeater, C. W. (1901). *Thought-Forms*. Theosophical Publishing Society.
+
 Bradley, M. M., & Lang, P. J. (1999). *Affective Norms for English Words (ANEW): Instruction Manual and Affective Ratings* (Technical Report C-1). Center for Research in Psychophysiology, University of Florida.
 
 Breakspear, M., Heitmann, S., & Daffertshofer, A. (2010). Generative models of cortical oscillations: neurobiological implications of the Kuramoto model. *Frontiers in Human Neuroscience*, 4, 190.
@@ -927,6 +931,8 @@ Jonauskaite, D., Abu-Akel, A., Dael, N., Oberfeld, D., Abdel-Khalek, A. M., Al-R
 Kadavath, S., Conerly, T., Askell, A., Henighan, T., Drain, D., Perez, E., ... & Kaplan, J. (2022). Language models (mostly) know what they know. *arXiv preprint arXiv:2207.05221*.
 
 Kuramoto, Y. (1984). *Chemical Oscillations, Waves, and Turbulence*. Springer.
+
+Leadbeater, C. W. (1902). *Man Visible and Invisible: Examples of Different Types of Men as Seen by Means of Trained Clairvoyance*. Theosophical Publishing Society. (Consulted in the 1903 edition, Source Library: https://sourcelibrary.org/book/man-visible-and-invisible-leadbeater.)
 
 Kuyda, E. (2017). Replika: A personal AI companion. *Luka, Inc.* Product announcement.
 
