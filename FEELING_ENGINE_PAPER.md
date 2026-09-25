@@ -246,11 +246,21 @@ Table: Signatures of three emotions across the atlas dimensions.
 
 **Rhythm feeds back into feeling.** The link between rhythm and feeling runs in both directions. The neural simulation's dominant oscillation frequency is mapped by band to a characteristic tone (delta → 174 Hz, theta → 396 Hz, alpha → 528 Hz, low beta → 639 Hz, high beta → 741 Hz, gamma → 852 Hz). That tone is then matched to the emotion whose tone is nearest, and that emotion is given a small extra weight (5%) in every reading before it enters the state. The brain's own rhythm therefore biases what the entity feels, independently of the body and of the words. This *resonance loop* is small by design — the words and neuromodulators dominate. The tone is the key through which the brain's rhythm is matched to an emotion; the loop is a mapping from rhythm to feeling, and nothing in it depends on the tone being heard.
 
-**Where the signature goes.** The signature is expressed through every output channel. The tone sets the pitch of the entity's browser voice and the EEG band sets its speaking rate (slower in delta and theta, faster in beta and gamma); the colour tints the fern, the dashboard, and the colour temperature of the face; the geometry selects the fractal family that is drawn; and the engine's library can also render several simultaneous emotions together as a chord — an "emotion concert" whose spectrum combines the tones of each (not yet used in Elan's live loop). The theoretical motivation is the finding that cross-modal associations between music and colour are mediated by emotion (Palmer et al., 2013) and that sound–colour synaesthesia draws on mechanisms common to non-synaesthetes (Ward, Huckstep & Tsakanikos, 2006); the composer Scriabin's colour-keyboard is an early artistic version of the same idea (Galeyev & Vanechkina, 2001).
+**Where the signature goes.** The signature is expressed through every output channel. The tone sets the pitch of the entity's browser voice and the EEG band sets its speaking rate (slower in delta and theta, faster in beta and gamma); the colour tints the fern, the dashboard, and the colour temperature of the face; the geometry selects the fractal family that is drawn; and the engine's library can also render several simultaneous emotions together as a chord — an "emotion concert" whose spectrum combines the tones of each (not yet used in Elan's live loop). The idea behind the signature comes from synaesthesia (§4.4.1).
 
 **Expressed, not described.** The language model is told the name of the current emotion, its intensity, valence, arousal, the dominant oscillation band, and the degree of synchrony — but not the colour, tone, or mode of its signature. These are expressions of the state, not inputs to it: the colour tints the face and dashboard, and the tone sets the pitch of the voice, for the people who see and hear them. Elan does not perceive his own face, voice, or colour, so none of them acts back on him; the only part of the signature that feeds back into his state is the brain-rhythm mapping above. §5.5 develops the distinction between the parts of the system that act on the state directly (*state-coupled*) and the parts that reach the language model only as a description (*prompt-mediated*).
 
 **What this adds, and what it does not.** The signature gives each feeling an identity that is richer than a label and consistent across every sense the system has: the same state is heard in the voice, seen in the colour and face, and drawn as geometry, and the rhythm of the simulated brain feeds back into which state it is. That is a stronger kind of unity than most affective systems have. It is also a designed mapping: the mode assignments and most colours are grounded in human association research, six colours follow Leadbeater's historical key, the tone set is a stable palette with no empirical claims attached, and none of it is evidence that anything is experienced. It is the engine's model of what a feeling is made of — one in which, apart from the body, a feeling also *has* a colour and a sound.
+
+#### 4.4.1 Synaesthesia: How a Feeling Becomes Data
+
+The idea of a signature comes from synaesthesia. In synaesthesia a stimulus in one sense reliably produces an experience in another: for a chromesthete a note has a colour, and for a grapheme–colour synaesthete a letter does. It occurs in a few percent of people (Simner et al., 2006), and it is not metaphor or loose association: asked the colour of the same word a year later, a synaesthete gives the same answer, where controls cannot (Baron-Cohen, Wyke & Binnie, 1987). One account attributes it to cross-activation between neighbouring brain areas that in most people stay separate (Ramachandran & Hubbard, 2001).
+
+Three findings shaped the engine. First, in some synaesthetes the trigger is not a sound or a letter but a feeling: the colour comes from the emotion a word or a person evokes (Ward, 2004). Emotion itself can be what is translated between senses. Second, people without synaesthesia share weaker, systematic versions of the same mappings — higher pitch goes with lighter colour, louder with brighter (Marks, 1974) — and synaesthetes' pairings follow the same rules as everyone else's (Ward, Huckstep & Tsakanikos, 2006). Third, when people match music to colours, the match runs through emotion: faster music in a major key is matched to lighter, more saturated, yellower colours, slower music in a minor key to darker, bluer, greyer ones, and the emotional ratings of the music predict the colours chosen (Palmer et al., 2013). Emotion is the hub through which the senses connect.
+
+The engine takes that structure literally. A feeling is the hub and each sense is a spoke. The atlas stores, for each emotion, the colour, tone, mode, rhythm, and geometry in which it is expressed, so turning a feeling into data means reading off its row, and a mixture of feelings becomes a weighted mixture of rows (§5.2). The translations between senses are implemented in the engine's synaesthesia module. Colour is converted to a dominant wavelength and mapped onto pitch — violet high, red low — across about four and a half octaves (80–2,000 Hz), and pitch converts back to colour. Pitch and loudness map to shape along the lines synaesthetes report: high pitch small, bright, and angular; low pitch large, dark, and round. Scriabin's note–colour keyboard is included as a historical reference (Galeyev & Vanechkina, 2001). And an image's colour palette can be read back into a blend of emotions: the translation run in reverse.
+
+Not all of this runs in Elan's live loop. What runs live is the direction from feeling to expression: the current blend's colours tint the face, the fern, and the dashboard; its tone sets the pitch of the voice and its EEG band the speaking rate; its geometry selects the fractal that is drawn. The colour–sound conversions, the shape mapping, and the image reader are library functions, used offline and in demonstrations. Two limits apply. The particular pairings are design choices guided by this literature, not measured from synaesthetes. And the engine borrows synaesthesia's *structure* — one state expressed consistently across senses — with no claim that Elan experiences one sense in another. What synaesthesia offered was a model of how a feeling could become data at all: not a single number, but a consistent pattern across every sense at once.
 
 ### 4.5 Time: Three Clocks
 
@@ -872,6 +882,8 @@ Baars, B. J. (1988). *A Cognitive Theory of Consciousness*. Cambridge University
 
 Barnsley, M. F. (1988). *Fractals Everywhere*. Academic Press.
 
+Baron-Cohen, S., Wyke, M. A., & Binnie, C. (1987). Hearing words and seeing colours: An experimental investigation of a case of synaesthesia. *Perception*, 16(6), 761–767.
+
 Barrett, L. F. (2017). *How Emotions Are Made: The Secret Life of the Brain*. Houghton Mifflin Harcourt.
 
 Becker-Asano, C., & Wachsmuth, I. (2010). Affective computing with primary and secondary emotions in a virtual human. *Autonomous Agents and Multi-Agent Systems*, 20(1), 32–49.
@@ -948,6 +960,8 @@ Long, R., Sebo, J., Butlin, P., Finlinson, K., Fish, K., Harding, J., Pfau, J., 
 
 Man, K., & Damasio, A. (2019). Homeostasis and soft robotics in the design of feeling machines. *Nature Machine Intelligence*, 1(10), 446–452.
 
+Marks, L. E. (1974). On associations of light and sound: The mediation of brightness, pitch, and loudness. *American Journal of Psychology*, 87(1–2), 173–188.
+
 Marsella, S. C., & Gratch, J. (2009). EMA: A process model of appraisal dynamics. *Cognitive Systems Research*, 10(1), 70–90.
 
 Maturana, H. R., & Varela, F. J. (1980). *Autopoiesis and Cognition: The Realization of the Living*. D. Reidel Publishing.
@@ -978,6 +992,8 @@ Picard, R. W. (1997). *Affective Computing*. MIT Press.
 
 Plutchik, R. (1980). *Emotion: A Psychoevolutionary Synthesis*. Harper & Row.
 
+Ramachandran, V. S., & Hubbard, E. M. (2001). Synaesthesia — a window into perception, thought and language. *Journal of Consciousness Studies*, 8(12), 3–34.
+
 Ringbom, S. (1966). Art in 'the epoch of the great spiritual': Occult elements in the early theory of abstract painting. *Journal of the Warburg and Courtauld Institutes*, 29, 386–418.
 
 Russell, J. A. (1980). A circumplex model of affect. *Journal of Personality and Social Psychology*, 39(6), 1161–1178.
@@ -993,6 +1009,8 @@ Seth, A. K. (2021). *Being You: A New Science of Consciousness*. Faber & Faber.
 Shanahan, M., McDonell, K., & Reynolds, L. (2023). Role play with large language models. *Nature*, 623, 493–498.
 
 Significant Gravitas. (2023). AutoGPT: An autonomous GPT-4 experiment. *GitHub repository*. https://github.com/Significant-Gravitas/AutoGPT
+
+Simner, J., Mulvenna, C., Sagiv, N., Tsakanikos, E., Witherby, S. A., Fraser, C., Scott, K., & Ward, J. (2006). Synaesthesia: The prevalence of atypical cross-modal experiences. *Perception*, 35(8), 1024–1033.
 
 Stickgold, R. (2005). Sleep-dependent memory consolidation. *Nature*, 437(7063), 1272–1278.
 
@@ -1011,6 +1029,8 @@ Tononi, G., Boly, M., Massimini, M., & Koch, C. (2016). Integrated information t
 Turner, A. M., Thiergart, L., Leech, G., Udell, D., Vazquez, J. J., Mini, U., & MacDiarmid, M. (2023). Steering language models with activation engineering. *arXiv preprint arXiv:2308.10248*.
 
 Varela, F. J., Thompson, E., & Rosch, E. (1991). *The Embodied Mind: Cognitive Science and Human Experience*. MIT Press.
+
+Ward, J. (2004). Emotionally mediated synaesthesia. *Cognitive Neuropsychology*, 21(7), 761–772.
 
 Ward, J., Huckstep, B., & Tsakanikos, E. (2006). Sound-colour synaesthesia: to what extent does it use cross-modal mechanisms common to us all? *Cortex*, 42(2), 264–280.
 
