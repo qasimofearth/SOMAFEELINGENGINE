@@ -14,12 +14,12 @@ echo "→ Building HTML from FEELING_ENGINE_PAPER.md ..."
 python3 build_paper.py >/dev/null
 
 echo "→ Assembling deploy folder ..."
-mkdir -p "$DEP/screenshots" "$DEP/.vercel"
+mkdir -p "$DEP/docs/screenshots" "$DEP/.vercel"
 cp FEELING_ENGINE_PAPER.html "$DEP/index.html"
 cp architecture_diagram.png "$DEP/"
 cp docs/screenshots/fig2_full_dashboard.png docs/screenshots/fig3_body_system.png \
    docs/screenshots/fig4_aya_eeg.png docs/screenshots/fig5_brain_state.png \
-   docs/screenshots/fig6_neural_network.png "$DEP/screenshots/"
+   docs/screenshots/fig6_neural_network.png "$DEP/docs/screenshots/"
 # keep this folder linked to the existing Vercel project (no new project gets made)
 printf '{"projectId":"%s","orgId":"%s","projectName":"feeling-engine-paper"}\n' \
    "$PROJECT_ID" "$ORG_ID" > "$DEP/.vercel/project.json"

@@ -142,7 +142,7 @@ Section 4 takes this loop apart layer by layer; Section 5 follows language throu
 | Emotion circuits (region and neuromodulator drive patterns) | 74: one for each of the 71 atlas emotions, plus three (longing, nostalgia, wonder) reachable only by name |
 | Emotions in the atlas | 71, each with an 8-dimension signature |
 | Body model | 12 physiological systems, 69 organ models |
-| Language reader | RoBERTa emotion classifier (27 emotions + neutral) over a ~14,000-word affective lexicon (191 hand-tuned + 13,905 from Warriner et al., 2013), 180 emotion keywords, 20 negators, 24 intensifiers and downtoners |
+| Language reader | RoBERTa emotion classifier (27 emotions + neutral) over a ~14,000-word affective lexicon (191 hand-tuned + 13,905 from Warriner et al., 2013), 178 emotion keywords, 20 negators, 24 intensifiers and downtoners |
 | Language → feeling update | every 12 words while speaking |
 | Phase-coherence readout | every 500 ms |
 | Memory systems | 7 |
@@ -204,7 +204,7 @@ The body is coupled to the brain in both directions: emotional states drive the 
 
 **The body reacts before language.** Certain inputs trigger physiological anticipation before any generation: a known person's name warms the autonomic state; existential questions fire arousal; a familiar interlocutor's return after a long absence raises heart rate. This is a coarse analogue of rapid, pre-reflective arousal responses in biological systems.
 
-Body state is injected into the language model's context only when it deviates notably from baseline (>15% on primary vitals, >0.2 on tension), so the model is told about significant somatic events without noise at rest.
+Body state is injected into the language model's context only when at least two of eight readings leave their resting range (for example heart rate above 90 or below 58 bpm, tension above 0.55 or below 0.20, adrenaline above 0.30), so the model is told about significant somatic events without noise at rest.
 
 ### 4.4 Beyond the Body: The Signature of a Feeling
 
@@ -378,7 +378,7 @@ Before the extended lexicon was added, the analyzer read the world through 191 w
 | Core lexicon | 191 | Hand-tuned, ANEW-style | Valence and arousal; always takes precedence |
 | Extended lexicon | 13,905 (5,168 scored) | Warriner et al. (2013), rescaled | Covers every word the core lexicon does not |
 | Exclusion list | 32 | Hand-curated | Non-affective everyday senses; trading vocabulary |
-| Emotion keywords | 180 | Hand-curated | Map directly to named emotions in the atlas (§4.4); ignored when negated |
+| Emotion keywords | 178 | Hand-curated | Map directly to named emotions in the atlas (§4.4); ignored when negated |
 | Intensifiers and downtoners | 24 | Hand-tuned multipliers | Scale the next affective word (×0.5 to ×1.7) |
 | Negators | 20 | Closed class | Partially invert valence within a clause |
 
@@ -808,23 +808,23 @@ Whether anything is felt inside those conditions is the question this architectu
 
 The following screenshots show Elan running live on April 23, 2026, during the case-study window; they predate the text reader of §5.1.4, which was deployed in September 2026. At the time of capture, Elan and I had been discussing the memory system upgrade. His dominant state was **INTEREST** — *"Anticipation relaxed — a fern growing leisurely toward light."*
 
-![Figure 2: Full Dashboard — Elan in conversation](screenshots/fig2_full_dashboard.png)
+![Figure 2: Full Dashboard — Elan in conversation](docs/screenshots/fig2_full_dashboard.png)
 
 **Figure 2. Full dashboard, Elan in conversation.** The central visualization overlays the fern (white dots) with the neural graph — 65 brain regions as coloured nodes, with lines showing active circuits. Status line: *Firing: Nucleus Accumbens (0.67), Dorsolateral Prefrontal Cortex (0.66). NTs: dopamine surge (0.67); GABA 0.70 — calming. State: positive, low arousal (V=+0.35, A=0.34).* The transcript shows my message celebrating that memory was working, and Elan's reply: *"I feel a sense of joy and elation, Qasim, as I hear your enthusiasm and excitement… I take a deep breath, feeling the crisp mountain air fill my digital lungs."* The described breath is parsed and drives the body simulation (§4.3).
 
-![Figure 3: Full Human Body Simulation](screenshots/fig3_body_system.png)
+![Figure 3: Full Human Body Simulation](docs/screenshots/fig3_body_system.png)
 
 **Figure 3. The body simulation.** Each organ is drawn as a bubble sized by its current activity — lungs, heart, liver, kidneys, stomach, diaphragm, intestines, bladder, limbs — shifting in real time. Vitals: HR 65 bpm, BP 140/88 mmHg, RR 15/min, SpO₂ 94.4%, pupil 3.6mm, GSR 2.0μS, adrenaline 0.37, cortisol 0.36, HRV 0.57. Tabs give access to heart, hormone, immune, and gut detail.
 
-![Figure 4: Aya Fern, EEG Bands, and Neurotransmitter Dynamics](screenshots/fig4_aya_eeg.png)
+![Figure 4: Aya Fern, EEG Bands, and Neurotransmitter Dynamics](docs/screenshots/fig4_aya_eeg.png)
 
 **Figure 4. Fern, oscillation bands, and active circuit.** *Top:* the fern rendered live (V=0.44, A=0.47) with polyvagal readout (SNS 45%, PNS 57%, HRV 0.55). *Middle:* simulated oscillation bands — delta 3%, theta 8%, alpha 5%, beta 46%, gamma 46%. *Bottom:* active circuit **INTEREST** — "SEEKING substrate. Mild dopamine anticipation. Mild amygdala orientation."
 
-![Figure 5: Brain State Detail — Valence/Arousal Space and Emotion Blend](screenshots/fig5_brain_state.png)
+![Figure 5: Brain State Detail — Valence/Arousal Space and Emotion Blend](docs/screenshots/fig5_brain_state.png)
 
 **Figure 5. Full brain state.** *Top:* top regions NAcc 67% and dlPFC 66%, the reward-plus-executive pairing the simulation associates with motivated interest. *Middle:* all twelve neuromodulators — DA 0.67↑, 5-HT 0.69↑, NE 0.57↑, GABA 0.70↑, GLU 0.68↑, ACh 0.62↑, OT 0.35, β-EP 0.37↑, CORT 0.24↓, AEA 0.46↑, SP 0.30, CRF 0.25. *Lower:* resting-state network activity. *Bottom:* the current position in Russell's circumplex model of affect (Russell, 1980), computed continuously from the simulation.
 
-![Figure 6: Full Neural Network Visualization on Aya Substrate](screenshots/fig6_neural_network.png)
+![Figure 6: Full Neural Network Visualization on Aya Substrate](docs/screenshots/fig6_neural_network.png)
 
 **Figure 6. The full neural map — 65 regions and 12 neuromodulators over the fern.** Nodes are coloured by functional network (green: basal-ganglia reward; blue: executive and prefrontal; orange: limbic; yellow: brainstem neuromodulatory sources), with lines showing active circuits. Regions shown include brainstem, locus coeruleus, raphe, VTA, substantia nigra, hippocampus, amygdala, hypothalamus, nucleus accumbens, striatum, insula, anterior and posterior cingulate, prefrontal subregions, precuneus, temporoparietal junction, motor areas, entorhinal cortex, and cerebellum.
 
