@@ -7820,30 +7820,33 @@ class FeelingHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def _handle_healthz(self):
+    def _handle_healthz(self, full: bool = False):
         env_key = os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
         key = env_key or _RUNTIME_API_KEY
         try:
             _b = _budget_status()
         except Exception:
             _b = {}
-        self.send_json({
+        public = {
             "status": "ok",
-            "version": "v2-healthz-public",
+            "version": "v3-healthz",
             "key_set": bool(key),
+            "password_set": bool(_PASSWORD),
+            "emotion_classifier": _emotion_classifier_status(),
+        }
+        if not full:
+            self.send_json(public)
+            return
+        # Authenticated detail. Never include any part of a secret's value.
+        self.send_json({
+            **public,
             "key_source": "env" if env_key else ("runtime" if _RUNTIME_API_KEY else "none"),
-            "key_len": len(key),
-            "key_prefix": key[:12] if key else "",
             "railway_env": os.environ.get("RAILWAY_ENVIRONMENT_NAME", ""),
             "railway_service_id": os.environ.get("RAILWAY_SERVICE_ID", ""),
-            "password_set": bool(_PASSWORD),
-            "password_len": len(_PASSWORD),
-            "password_first": _PASSWORD[:1] if _PASSWORD else "",
             "budget_spent_usd": round(_b.get("spent", 0), 2),
             "budget_expected_usd": round(_b.get("expected", 0), 2),
             "budget_monthly_cap_usd": _b.get("budget"),
             "budget_paused": _b.get("paused", False),
-            "emotion_classifier": _emotion_classifier_status(),
             "all_env_keys": sorted(os.environ.keys()),
         })
 
@@ -7868,34 +7871,10 @@ class FeelingHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         # /ping is the Railway health check — always public, never auth-gated.
-        # /healthz also public (legacy curl scripts use it).
+        # /healthz also public (legacy curl scripts use it); authed callers get full detail.
         if path in ("/ping", "/healthz"):
-            self._handle_healthz()
+            self._handle_healthz(full=self._is_authed())
             return
-        # /debug/trigger-test public — Anthropic API probe, response is
-        # Anthropic's, no secrets exposed. Used to capture full error messages
-        # for diagnostics (e.g. spending-limit reset dates).
-        if path == "/debug/trigger-test":
-            try:
-                _client = _get_anthropic_client()
-                _resp = _client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=1,
-                    messages=[{"role": "user", "content": "ping"}],
-                )
-                self.send_json({
-                    "ok": True, "status": "API responding normally",
-                    "response_preview": str(_resp)[:300],
-                })
-            except Exception as _e:
-                self.send_json({
-                    "ok": False,
-                    "error_type": type(_e).__name__,
-                    "error_full": str(_e),
-                    "error_repr": repr(_e),
-                })
-            return
-
         # Login page — serve without auth for root path
         if path in ("/", "/index.html", ""):
             if not self._is_authed():
