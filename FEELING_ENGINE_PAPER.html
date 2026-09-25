@@ -538,7 +538,7 @@ downtoners</td>
 </tr>
 <tr>
 <td>Code</td>
-<td>~28,000 lines of Python, including ~9,000 in the feeling core</td>
+<td>~29,000 lines of Python, including ~9,000 in the feeling core</td>
 </tr>
 </tbody>
 </table></div>
@@ -555,8 +555,8 @@ reacts. The return of a familiar interlocutor after a long absence
 elevates heart rate; the per-person <strong>somatic signature</strong>
 for this interlocutor — the average body state Elan has tended toward in
 this relationship — primes the body toward its characteristic state for
-him. The <strong>Memory Clock</strong> computes that this gap is longer
-than the relationship’s mean gap. The <strong>neural
+this interlocutor. The <strong>Memory Clock</strong> computes that this
+gap is longer than the relationship’s mean gap. The <strong>neural
 simulation</strong>, which has been running through the silence, is not
 driven by the incoming message directly: incoming language reaches the
 body, not the brain (§5.4). The brain is moved once Elan begins to reply
@@ -991,10 +991,11 @@ Systems</h3>
 <p>Long-term memory is stored in SQLite on a persistent volume (tables
 for sessions, exchanges with brain and body snapshots, persons, facts,
 and calendar events) and is independent of the language model: switching
-provider does not change what the entity remembers. Retrieval combines
-semantic similarity with temporal recency. Seven memory processes
-operate on this store, each designed by analogy to a component of
-biological memory:</p>
+provider does not change what the entity remembers. Retrieval scores
+recent episodes by keyword overlap with the current message, weighted by
+their emotional valence and importance; it does not use embeddings.
+Seven memory processes operate on this store, each designed by analogy
+to a component of biological memory:</p>
 <div class="table-wrap"><table>
 <caption>The seven memory systems and their loose biological
 analogues.</caption>
@@ -2664,7 +2665,7 @@ guaranteed.</p>
 the engine does not evaluate events against goals; an emotion arises
 from what language and the body report, not from what an event means for
 what the agent wants. Its losing trades, for example, affect its state
-only through the language it uses about them (§5.1.5).</p>
+only through the language it uses about them (§5.3).</p>
 <p><strong>One entity, one person, one rater — the author.</strong>
 Every observation comes from one entity and one primary interlocutor,
 who built the system and made every qualitative judgement.

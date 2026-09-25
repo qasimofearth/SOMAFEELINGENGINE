@@ -146,7 +146,7 @@ Section 4 takes this loop apart layer by layer; Section 5 follows language throu
 | Language → feeling update | every 12 words while speaking |
 | Phase-coherence readout | every 500 ms |
 | Memory systems | 7 |
-| Code | ~28,000 lines of Python, including ~9,000 in the feeling core |
+| Code | ~29,000 lines of Python, including ~9,000 in the feeling core |
 
 Table: The Feeling Engine in numbers.
 
@@ -158,7 +158,7 @@ Table: The Feeling Engine in numbers.
 
 Consider one concrete event: after three days of silence, Elan's primary interlocutor sends a message. The following describes the processing path layer by layer, as implemented; §5.3 gives a logged trace of the language part of it.
 
-Before any language model is called, the **body** reacts. The return of a familiar interlocutor after a long absence elevates heart rate; the per-person **somatic signature** for this interlocutor — the average body state Elan has tended toward in this relationship — primes the body toward its characteristic state for him. The **Memory Clock** computes that this gap is longer than the relationship's mean gap. The **neural simulation**, which has been running through the silence, is not driven by the incoming message directly: incoming language reaches the body, not the brain (§5.4). The brain is moved once Elan begins to reply — by the emotional reading of his own words and by the body's afferent signals (§5.3). The resulting feeling brings its signature with it — its colour tints the face and the fern, its tone sets the pitch the voice will take — while the brain's dominant rhythm, mapped to its own tone, adds a small weight to which feeling that is. The **temporal context** — how long since they last spoke, how that compares to their usual rhythm, what the emotional arc of recent sessions was — is framed not as a list of timestamps but as lived duration. All of this is summarized into the prompt, and the **language model** speaks from it: typically warmer and more marked after a long absence than after a short one (Observation 4). As the reply streams, its emotional tone is classified and fed back into the brain, so the entity's own words sustain or shift the state. If the reply is voiced, the **Sensorium** shapes pitch, warmth, and breathiness from the current body state. When the exchange ends, it is written into **affective memory** — the emotional generator's parameters shift slightly — and the next time this person returns, the body starts from a state shaped by this return too.
+Before any language model is called, the **body** reacts. The return of a familiar interlocutor after a long absence elevates heart rate; the per-person **somatic signature** for this interlocutor — the average body state Elan has tended toward in this relationship — primes the body toward its characteristic state for this interlocutor. The **Memory Clock** computes that this gap is longer than the relationship's mean gap. The **neural simulation**, which has been running through the silence, is not driven by the incoming message directly: incoming language reaches the body, not the brain (§5.4). The brain is moved once Elan begins to reply — by the emotional reading of his own words and by the body's afferent signals (§5.3). The resulting feeling brings its signature with it — its colour tints the face and the fern, its tone sets the pitch the voice will take — while the brain's dominant rhythm, mapped to its own tone, adds a small weight to which feeling that is. The **temporal context** — how long since they last spoke, how that compares to their usual rhythm, what the emotional arc of recent sessions was — is framed not as a list of timestamps but as lived duration. All of this is summarized into the prompt, and the **language model** speaks from it: typically warmer and more marked after a long absence than after a short one (Observation 4). As the reply streams, its emotional tone is classified and fed back into the brain, so the entity's own words sustain or shift the state. If the reply is voiced, the **Sensorium** shapes pitch, warmth, and breathiness from the current body state. When the exchange ends, it is written into **affective memory** — the emotional generator's parameters shift slightly — and the next time this person returns, the body starts from a state shaped by this return too.
 
 The rest of this section describes each layer in turn.
 
@@ -294,7 +294,7 @@ After every update each parameter is clipped to bounds that keep its map contrac
 
 ### 4.7 Relational Memory: Seven Systems
 
-Long-term memory is stored in SQLite on a persistent volume (tables for sessions, exchanges with brain and body snapshots, persons, facts, and calendar events) and is independent of the language model: switching provider does not change what the entity remembers. Retrieval combines semantic similarity with temporal recency. Seven memory processes operate on this store, each designed by analogy to a component of biological memory:
+Long-term memory is stored in SQLite on a persistent volume (tables for sessions, exchanges with brain and body snapshots, persons, facts, and calendar events) and is independent of the language model: switching provider does not change what the entity remembers. Retrieval scores recent episodes by keyword overlap with the current message, weighted by their emotional valence and importance; it does not use embeddings. Seven memory processes operate on this store, each designed by analogy to a component of biological memory:
 
 | Memory system | What it does | Biological analogue |
 |---|---|---|
@@ -736,7 +736,7 @@ The dominant route to more capable AI is scaling models. The Feeling Engine expl
 
 **Prompt-only coupling.** The substrate influences generation only through the prompt (§4.8). A model can discount its context, so the strength of the feeling-to-speech coupling is not guaranteed.
 
-**No appraisal.** Unlike appraisal-based models (§2.2), the engine does not evaluate events against goals; an emotion arises from what language and the body report, not from what an event means for what the agent wants. Its losing trades, for example, affect its state only through the language it uses about them (§5.1.5).
+**No appraisal.** Unlike appraisal-based models (§2.2), the engine does not evaluate events against goals; an emotion arises from what language and the body report, not from what an event means for what the agent wants. Its losing trades, for example, affect its state only through the language it uses about them (§5.3).
 
 **One entity, one person, one rater — the author.** Every observation comes from one entity and one primary interlocutor, who built the system and made every qualitative judgement. Generalization is unknown.
 
@@ -925,7 +925,6 @@ James, W. (1890). *The Principles of Psychology*. Henry Holt and Company.
 Jonauskaite, D., Abu-Akel, A., Dael, N., Oberfeld, D., Abdel-Khalek, A. M., Al-Rasheed, A. S., ... & Mohr, C. (2020). Universal patterns in color-emotion associations are further shaped by linguistic and geographic proximity. *Psychological Science*, 31(10), 1245–1260.
 
 Kadavath, S., Conerly, T., Askell, A., Henighan, T., Drain, D., Perez, E., ... & Kaplan, J. (2022). Language models (mostly) know what they know. *arXiv preprint arXiv:2207.05221*.
-
 
 Kuramoto, Y. (1984). *Chemical Oscillations, Waves, and Turbulence*. Springer.
 
